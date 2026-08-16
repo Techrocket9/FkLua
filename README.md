@@ -357,6 +357,13 @@ round trip is verified inside Factorio: a headless server honours `game.auto_sav
 it back, including mid-mark and mid-sweep with the collector on and a rebuilt guest that
 exports `fk_migrate`.
 
+A change to the mod set around your guest, rather than to your guest, is a different
+signal: export `fk_on_configuration_changed()` (no arguments) and it is dispatched whenever
+Factorio raises `on_configuration_changed`, after `fk_migrate` on a load that is both. It is
+replicated, so it may write guest state, and it also runs on the load that adds your mod
+to an existing save, right after `fk_on_init`. A guest wanting to know what moved reads
+`script.active_mods` against what it saved.
+
 ---
 
 ## Correctness

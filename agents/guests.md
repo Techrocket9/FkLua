@@ -187,7 +187,7 @@ nothing more.
 | `fk_on_deferred()` | one shot on the tick after `fk.defer()`, then unregistered |
 | `fk_after_load()` | one shot on the first tick after a save is LOADED, then unregistered. **PEER-LOCAL: it fires on a joining multiplayer client and on no other peer, so it must not write guest state** — see below |
 | `fk_migrate(old_version)` | `script.on_configuration_changed`, only when the build id changed |
-| `fk_on_configuration_changed()` | `script.on_configuration_changed`, **every** time Factorio raises it — the mod SET changed, a startup setting moved, the game version moved. Dispatched after `fk_migrate`. **REPLICATED, like `fk_migrate`: it may write guest state** — see below |
+| `fk_on_configuration_changed()` | `script.on_configuration_changed`, **every** time Factorio raises it — the mod SET changed, a startup setting moved, the game version moved. Dispatched after `fk_migrate`, and after `fk_on_init` on the load that adds the mod to an existing save. **REPLICATED, like `fk_migrate`: it may write guest state** — see below |
 | `fk_state_version() -> i32` | not an event: read at save time, handed back to `fk_migrate` |
 
 Registration is conditional on the export existing, because `on_tick` is not
@@ -388,8 +388,10 @@ func onConfigurationChanged() { adoptWhateverTheUninstalledModLeftBehind() }
 
 Factorio raises `script.on_configuration_changed` when **the mod set changes** —
 a neighbour added, **removed**, or moved to another version — when a startup
-setting moves, and when the game version moves. It is replicated, it runs on the
-peer that loaded, before the first tick, with `game` available.
+setting moves, when prototypes were added or removed, when a prototype migration
+was applied, and when the game version moves (the pinned 2.0.77 description
+lists all five). It is replicated, it runs on the peer that loaded, before the
+first tick, with `game` available.
 
 **Until 2026-08-16 a guest could not observe any of that.** `fk_mod.lua`
 registered exactly one thing on that hook, `finish_rebuild`, which returns
@@ -404,13 +406,24 @@ Without it the best available trigger is "the first event of the session", which
 converts late and on a tick nobody chose.
 
 **It takes no arguments.** What the engine hands the Lua handler is
-`old_version`, `new_version`, `mod_startup_settings_changed`, `migration_applied`
-and `mod_changes` — a **dictionary of tables**, which is tier-2 marshalling on a
-path whose whole job is to say *something moved, go and look*. A guest that wants
-detail reads `script.active_mods` — bound already, as `LuaBootstrap.ActiveMods`,
-an ordered name/version slice — and compares it against what it saved last
-session, which is what it has to do anyway: `mod_changes` describes the delta
-since the last load and not since the last time your guest cared.
+`old_version`, `new_version`, `mod_startup_settings_changed`, `migration_applied`,
+`migrations` (a dictionary of dictionaries) and `mod_changes` — a **dictionary of
+tables**, which is tier-2 marshalling on a path whose whole job is to say
+*something moved, go and look*. A guest that wants detail reads
+`script.active_mods` — bound already, as `LuaBootstrap.ActiveMods`, an ordered
+name/version slice — and compares it against what it saved last session, which
+is what it has to do anyway: `mod_changes` describes the delta since the last
+load and not since the last time your guest cared.
+
+**What a guest cannot recover after the fact, said rather than implied.** A
+neighbour that was REMOVED is no longer in `script.active_mods`, so "which mod
+left" is answerable only against a list you saved yourself — the downstream
+shape above does not need it, because it asks the world (a marker prototype)
+whether the incumbent's name is still owned. `migration_applied`, `migrations`
+and the map's own `old_version`/`new_version` are gone once the handler returns.
+If a guest ever needs one of those, the shape to add is a struct written into
+the event scratch with a generated reader, the way every `fk_on_event` payload
+crosses — not an ad hoc scalar or two on this export.
 
 **It is REPLICATED, and it may write guest state.** Same argument as `fk_migrate`
 and not an analogy to it: the event fires on the peer that *loaded the save*,
@@ -419,18 +432,46 @@ client downloads. A joiner never runs it and never needs to. That is what puts i
 on the opposite side of the rule from `fk_after_load`, which is armed from
 `script.on_load` — the thing a joiner *does* run, and nobody else.
 
-Three more properties, each a leg of
-`TestAModSetChangeReachesTheGuestWithoutARebuild`:
+Five more properties, each a leg of
+`TestAModSetChangeReachesTheGuestWithoutARebuild` (run in both persisting modes)
+or of `TestAPersistNoneGuestStillGetsTheConfigurationHook`:
 
 - **It fires after `fk_migrate`.** A load can be both a rebuild and a
   configuration change, and the heap has to be settled and republished before a
   guest is told the world around it moved. Both hooks are worth exporting; they
-  answer different questions.
+  answer different questions. The order is guaranteed twice — `enter_outermost`
+  finishes a pending rebuild before it opens any dispatch, and the handler calls
+  `finish_rebuild` before it dispatches — so the test pins the observable
+  property and cannot tell the two mechanisms apart.
+- **A write made from it is in `storage` before any tick runs**, in both
+  persisting modes: it goes through `dispatch`, so `dispatch_done` syncs the
+  globals and, under `--persist=packed`, flushes the dirty pages. The packed arm
+  is the one that can go red — bypass `dispatch` and the table arm still passes
+  on the alias while packed reads `told=0` straight after the hook.
 - **It does not fire on a new map, or on a load whose configuration did not
   move.** Factorio raises the event for neither. `fk_on_init` is the first case.
+- **It DOES fire on the load that ADDS your mod to an existing save, right
+  after `fk_on_init`.** A mod arriving is a mod-set change, and Factorio runs
+  the handler for every mod or for none — the newcomer included, listed in
+  `mod_changes` with no `old_version`. So on that load a guest gets `fk_on_init`
+  and then `fk_on_configuration_changed`, with no `on_load` and no `fk_migrate`
+  between them, and whatever it does in the second has to be idempotent over
+  what it did in the first. Measured in a real Factorio 2.0.77 by the downstream
+  mod's own suite: its add-to-existing-save leg logs the `fk_on_init` line and
+  then the hook's rebuild-from-world line, both before the benchmark's first
+  `Running update 0`; its plain-reload leg logs neither.
 - **It is wired on the export**, so a `--persist=none` guest gets it — which is
   the guest with the strongest reason to want it, having nothing but the world to
-  rebuild from.
+  rebuild from. That test asserts the guest was ENTERED (it logs from the hook),
+  not only that a handler was registered, because a handler that ran
+  `finish_rebuild` and skipped the dispatch would register and raise cleanly.
+
+One more ordering fact: it runs **before** `fk_after_load` on a load that has
+both, because that one is a one-shot on the first tick and this runs at load,
+before any tick. Whether a world write made from it raises script events the way
+one made during play does is asserted for `on_init` in "Six things a guest
+author gets wrong" below (measured by a port); the sentence there extends the
+claim to `on_configuration_changed`, and that half has not been measured here.
 
 **What it does NOT fire for is the mirror image of `fk_migrate`'s trap**: a dev
 rebuild that keeps the mod's version raises no `on_configuration_changed` at all.
