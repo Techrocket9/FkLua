@@ -139,7 +139,7 @@ that is [`guest/go/examples/api/`](guest/go/examples/api/main.go) (Rust twin:
 `guest/go/examples/` holds nineteen more, each aimed at one thing: `array` and `dict` for
 marshalling, `callback` for commands and remote interfaces, `retain` for a handle that
 outlives its event, `gcsave` for the collector across a save, `migrate` for a rebuilt guest,
-and [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](#fkipc-talking-to-a-process-outside-the-game).
+and [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](guest/go/fkipc/README.md).
 `guest/rust/examples/` mirrors eight of them line for line.
 
 ---
@@ -218,7 +218,7 @@ the installed engine's version and package for it. Two capabilities need more: *
 API surface is one line away (`api = "2.1.14"` in `fklua.toml`, or `--api=2.1.14`, then
 `fklua gen-bindings && fklua lock`; every supported description is committed, and at 2.1.14
 the bindings cover 4,840 of 4,842 members with 224 events), and **FkIPC** requires a 2.1.14
-or newer engine and is inert below it (see [FkIPC](#fkipc-talking-to-a-process-outside-the-game)).
+or newer engine and is inert below it (see [FkIPC](guest/go/fkipc/README.md)).
 On Steam, 2.1.x is the `2.1.14` entry under the game's Betas tab; the scripts pick it up
 through `FACTORIO_BIN` or the default Steam path. The two migrations this project has done
 between pins are written up in [`agents/versioning.md`](agents/versioning.md).
@@ -254,71 +254,13 @@ Full detail, including what is not built: [`agents/abi.md`](agents/abi.md).
 
 ## FkIPC: talking to a process outside the game
 
-FkIPC ("Factorio, kommunikativ (per IPC)") is a message-oriented link between a FkLua guest
-and a companion process on the same machine, over Factorio's UDP surface: sessions, channels,
-correlated request/response, gap detection, fragmentation, and bulk transfer by file plus
-digest. Both guest languages have it (`guest/go/fkipc`, `guest/rust/fkipc`); the other end
-is a Go SDK (`sdk/go/fkipc`). Three lines in the guest:
-
-```go
-func init() { fkipc.Open(fkipc.Config{Port: 29434, Name: "my-mod/1", ExpectPeer: "my-mod/1"}) }
-
-//go:wasmexport fk_on_tick
-func onTick(tick uint32) { fkipc.Pump(tick) }
-
-//go:wasmexport fk_on_event
-func onEvent(id, ptr uint32) { if fkipc.OnEvent(id, ptr) { return } /* your own events */ }
-```
-
-Your program owns those exports and routes in; `Open` goes in an initialiser because that
-runs during `_initialize`, on every load, the only place a subscription may go. The other
-end, from any Go program:
-
-```go
-s, _ := fkipc.Dial(fkipc.Options{GamePort: 29433, ListenPort: 29434})
-s.Subscribe(1, func(m fkipc.Message) { fmt.Println("state:", string(m.Payload)) })
-out, err := s.Request(context.Background(), 2, []byte("ping"))
-```
-
-**Give the pairing an identity.** Set `Config.ExpectPeer` in the guest and
-`Options.ExpectedName` in the companion to one build-time token (convention:
-`"<mod-name>/<schema-tag>"`, the tag being your claim about channel compatibility). Each end
-then refuses a handshake with anything else, so a swapped port or a stale companion is a
-session that never comes up rather than two ends silently disagreeing about what channel 1
-means. It is a correctness check, not an authentication boundary.
-
-Start the game with **`--enable-lua-udp 29433`** (a Steam launch option is the same flag).
-That binds one socket, which is both the game's receive socket and the source port of
-everything it sends, so the companion must listen on a different port; `Dial` refuses a
-matching pair. What it costs, and the four numbers to design around:
-
-| | |
-|---|---|
-| **frame cap 3,900 B** | the protocol maximum, negotiated down to 2,048 by default. An oversized `send_udp` fails silently, so the library enforces the cap. Above one frame, send a file |
-| **inbound is about 6 kB/s** once one player is connected, and 1.5 kB/s at twenty | every inbound byte becomes an InputAction: replicated to every client, written into the replay, quantized to a tick. Talk a lot, listen a little, and make the listening idempotent |
-| **outbound is free** | a local side effect that never enters game state |
-| **pause is silent loss** | no ticks, no pump, and the OS buffer is 256 KB with no notification when it overflows. The guest drains on resume; the peer must go quiet on the guest's silence, which the SDK does by default |
-
-**FkIPC requires Factorio 2.1.14 or newer, and below that it is inert.** On older engines a
-headless `recv_udp` with a packet queued aborts the server (a C++ abort no `pcall` can catch;
-measured on 2.0.77, delivered on 2.1.14). Below the floor `Open` returns `StatusDisabled` and
-logs one line (`fkipc: disabled -- requires Factorio >= 2.1.14; this engine is X`), nothing
-goes on the wire, and every `Send`, `Request`, `WriteBulk` and `NotifyFile` answers
-`StatusDisabled`, counted in `Stats().Refusals`. The floor is about the **engine**, not the
-API pin: every member FkIPC calls exists in the 2.0.77 description, so a mod built at the
-default pin gets the whole library on a 2.1.14 engine with no rebuild, and the gate is
-re-read once a second while shut.
-
-**Before you write a handler, read the join-safety contract**: what a guest may branch on
-(message payloads, session events, the tick, `Stats`, its own state, the world) and what it
-must never store (whether an outbound host call succeeded; anything computed in
-`fk_after_load`). Outbound is free and its outcome is per-peer, so attempt the call, drop the
-answer, and log "did that work?" with `fk.Log`, which is not CRC'd. The contract is in the
-package documentation of both libraries (`guest/go/fkipc/doc.go`,
-`guest/rust/fkipc/src/lib.rs`) and in [`agents/ipc.md`](agents/ipc.md), with the protocol and
-its cost model. [`scripts/run-ipc.sh`](scripts/run-ipc.sh) runs the whole thing end to end
-against a real headless game in either language; its companion
-[`sdk/go/cmd/ipcgate`](sdk/go/cmd/ipcgate/main.go) is the worked example of an SDK consumer.
+FkIPC is a message-oriented link between a FkLua guest and a companion process on the same
+machine, over Factorio's UDP surface: sessions, channels, correlated request/response, gap
+detection, fragmentation, and bulk transfer by file plus digest. Both guest languages have
+it, the other end is a Go SDK, and it needs a Factorio 2.1.14 or newer engine (below that it
+is inert). Three lines in the guest and three in the companion get a session; the wiring,
+the cost model, the pairing identity and the join-safety contract every handler must follow
+are in **[`guest/go/fkipc/README.md`](guest/go/fkipc/README.md)**.
 
 ---
 
