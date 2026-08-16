@@ -429,6 +429,19 @@ var Hooks = []Hook{
 	// only a guest with a layout stable across builds can survive.
 	{"fk_migrate_adopt", "script.on_configuration_changed, and adopt the old heap", true},
 	{"fk_state_version", "the guest's own state-format version, handed to fk_migrate", false},
+	// The OTHER thing on_configuration_changed reports, and until 2026-08-16 no
+	// guest could hear it. fk_migrate fires only when THIS mod's build stamp
+	// moved; the event also fires when the mod SET changes -- a neighbour added,
+	// REMOVED, or moved to another version -- when a startup setting moves, and
+	// when the game version does. A mod that adopts an uninstalled incumbent's
+	// entities has a once-per-save conversion hanging off exactly that, and had
+	// nothing better than "the first event of the session" to hang it on.
+	//
+	// An Event: it is a hook a guest author writes. Dispatched unconditionally
+	// whenever Factorio raises the event, AFTER finish_rebuild, and it takes no
+	// arguments -- what the engine passes is a dictionary of tables, and a guest
+	// wanting detail reads script.active_mods against what it saved.
+	{"fk_on_configuration_changed", "script.on_configuration_changed, whenever Factorio raises it", true},
 }
 
 // collectorPrefix marks the hooks that make up the collector's pacing surface.

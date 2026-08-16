@@ -1879,8 +1879,52 @@ end
 -- It is the same function as the deferred path deliberately: two copies drifted
 -- once already, which is how the row above spent two milestones saying
 -- fk_migrate adopts.
-if persisting then
-  script.on_configuration_changed(finish_rebuild)
+--
+-- AND THE HOOK ITSELF IS A GUEST-VISIBLE EVENT SINCE 2026-08-16, because a
+-- rebuild is not the only thing this event reports and it was the only thing a
+-- guest could hear about. Factorio raises on_configuration_changed when THE MOD
+-- SET changes -- another mod added, REMOVED, moved to another version -- when a
+-- startup setting moves, and when the game version does. None of those touches
+-- this mod's build stamp, so finish_rebuild returns on the flag and the guest is
+-- told nothing at all.
+--
+-- The downstream shape that asked for it: a mod that adopts an incumbent's
+-- entities when the incumbent is UNINSTALLED has a once-per-save conversion to
+-- run, and the only signal that the neighbour is gone is this event. Without it
+-- the best available trigger is "the first event of the session", which converts
+-- late and on a tick nobody chose.
+--
+-- IT IS DISPATCHED UNCONDITIONALLY, and it takes no arguments. What the engine
+-- passes -- old_version, new_version, a mod_changes DICTIONARY OF TABLES -- is
+-- tier-2 marshalling for a notification, and a guest that wants detail can read
+-- script.active_mods and compare against what it saved. The minimum is being
+-- TOLD, and being told is the whole of the gap.
+--
+-- SAFETY: THIS IS REPLICATED, EXACTLY AS fk_migrate IS, and for the same reason
+-- rather than by analogy. It runs on the peer that LOADED the save, before the
+-- first tick, so its effects are already in the state a joining client
+-- downloads -- a joiner never runs it and never has to. So a guest MAY write
+-- guest state here, which is what separates it from fk_after_load: that one is
+-- armed from script.on_load, which the JOINER runs and nobody else, and a write
+-- from there is CLAUDE.md's named desync.
+--
+-- AFTER finish_rebuild, so a guest that was rebuilt AND had its neighbours
+-- change gets fk_migrate first, on a heap that has been settled and republished,
+-- and then this. The two answer different questions -- "your bytes are not
+-- yours" against "the world around you moved" -- and a guest can want both.
+--
+-- The dispatch is guarded on the export rather than handed a nil callee, so a
+-- guest that does not export it takes exactly the path it took before: no
+-- outermost dispatch, no arena bracket, no scratch reset, no sync_memory. The
+-- registration is guarded the other way for the same reason -- `persisting` on
+-- its own would leave a --persist=none guest that exports the hook unwired.
+if persisting or E.fk_on_configuration_changed then
+  script.on_configuration_changed(function()
+    finish_rebuild()
+    if E.fk_on_configuration_changed then
+      dispatch(E.fk_on_configuration_changed)
+    end
+  end)
 end
 
 -- ---------------------------------------------------------------------------
