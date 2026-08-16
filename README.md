@@ -49,7 +49,7 @@ downstream projects build on it:
 | **TinyGo 0.41.1** | a Go guest. TinyGo's `wasm-unknown` target, not standard Go (see [Guest languages](#guest-languages)) |
 | **binaryen** (`wasm-opt`) | required by TinyGo, which shells out to it for every wasm target |
 | **Rust 1.97+** with `wasm32-unknown-unknown` | a Rust guest (`rustup target add wasm32-unknown-unknown`) |
-| **Factorio** | only to run what you built, and for this repo's in-game test scripts. Building needs neither the game nor the network: the API descriptions are committed under `api/<version>/`. The in-game scripts run against Factorio 2.1.14; a mod at the default API pin runs on 2.0.x, and FkIPC needs 2.1.14 or newer |
+| **Factorio 2.0.x** | only to run what you built, and for this repo's in-game test scripts. Building needs neither the game nor the network: the API descriptions are committed under `api/<version>/`. The stable 2.0 release is the default target; 2.1.x is supported too (see [Factorio versions](#factorio-versions)), and FkIPC needs a 2.1.14 or newer engine |
 
 `brew install tinygo binaryen` covers the middle two on macOS. You need one guest toolchain,
 not both. `fklua doctor` reports each row as found or missing with the version it found, and
@@ -201,13 +201,27 @@ members are deferred, both a name that collides with another member of the same 
 counts are committed data in `api/<version>/census.json`, regenerated with the bindings and
 gated by `gen-bindings --check`; read them from there rather than from this page.
 
-The **API pin** is the `runtime-api.json` version the bindings and the packaged member table
-come from. The default is the general-availability release, 2.0.77, because a default is what
-a mod author who has pinned nothing ships to players. 2.1.x is one line away: `api = "2.1.14"`
-in `fklua.toml`, or `--api=2.1.14`; every supported description is committed, and at 2.1.14
-the bindings cover 4,840 of 4,842 members with 224 events. The **engine** (the Factorio
-version actually running) is a separate axis; a guest that needs to know asks
-`helpers.game_version` at run time.
+### Factorio versions
+
+There are two version axes and they are worth keeping apart. The **API pin** is the
+`runtime-api.json` version the bindings and the packaged member table come from; the
+**engine** is the Factorio actually running, which a guest can ask about with
+`helpers.game_version`. They meet in exactly one place: the packaged `info.json`'s
+`factorio_version`, which defaults to the pin's `major.minor` (a 2.0 engine does not load a
+mod declaring 2.1, and a 2.1 engine does not load one declaring 2.0) and can be overridden
+with `[mod] factorio_version` in `fklua.toml` or `--factorio-version`.
+
+The default pin is the general-availability release, **2.0.77**, because a default is what a
+mod author who has pinned nothing ships to players, and players are on stable. Everything in
+this repository builds and runs against a stock 2.0.x install; the in-game test scripts read
+the installed engine's version and package for it. Two capabilities need more: **2.1.x**
+API surface is one line away (`api = "2.1.14"` in `fklua.toml`, or `--api=2.1.14`, then
+`fklua gen-bindings && fklua lock`; every supported description is committed, and at 2.1.14
+the bindings cover 4,840 of 4,842 members with 224 events), and **FkIPC** requires a 2.1.14
+or newer engine and is inert below it (see [FkIPC](#fkipc-talking-to-a-process-outside-the-game)).
+On Steam, 2.1.x is the `2.1.14` entry under the game's Betas tab; the scripts pick it up
+through `FACTORIO_BIN` or the default Steam path. The two migrations this project has done
+between pins are written up in [`agents/versioning.md`](agents/versioning.md).
 
 - **One generic `fk.call(handle, member, argp, retp)` import**, not one per method. A method
   Factorio removes in a point release would otherwise be an unresolved import, which fails
@@ -417,8 +431,9 @@ has no `lua@5.2` and its `lua` is 5.5, which has an integer subtype, so `%`, ove
 `string.pack` all behave differently from Factorio's doubles-only 5.2.1 and it silently
 passes code that breaks in game. Everything above the interpreter is verified in a real
 Factorio too: `run-guest.sh`, `run-roundtrip.sh`, `run-gcbench.sh`, `run-growbench.sh` and
-`run-ipc.sh` under `scripts/` build, package and run a guest in Factorio 2.1.14 and read
-per-tick counters back out of it.
+`run-ipc.sh` under `scripts/` build, package and run a guest in whichever Factorio is
+installed (2.0.x by default; the FkIPC gates need 2.1.14 and say so rather than start) and
+read per-tick counters back out of it.
 
 **One platform limit you may hit.** A Lua number cannot carry a NaN's sign bit or payload,
 and `fklua compile` prints a warning naming each instruction and function that depends on

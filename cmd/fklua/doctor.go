@@ -29,7 +29,7 @@ const (
 	docTinyGoVersion  = "TinyGo 0.41.1"
 	docBinaryen       = "binaryen"
 	docRustVersion    = "Rust 1.97+"
-	docFactorioVerion = "Factorio 2.1.14"
+	docFactorioVerion = "Factorio 2.0.x"
 )
 
 // runDoctor reports which of the toolchains the docs name are installed here.

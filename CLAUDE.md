@@ -2417,19 +2417,27 @@ CI, but the real gate is spec-suite pass rate (see Critical rules).
   dies at startup and reads as a broken gate. Set `FACTORIO_USERDIR` and both scripts
   write a `config.ini` with that `write-data` and pass it with `-c` — the environment
   variable alone only tells the script where to read logs.
-- Factorio **2.1.14** (build 87180, Steam) at
+- Factorio, Steam, at
   `~/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents/`
-  — `doc-html/runtime-api.json` (156 classes), and `MacOS/factorio` supporting
-  `--benchmark`, `--benchmark-ticks/-runs/-verbose`, `--run-replay`, `--until-tick`,
+  — `doc-html/runtime-api.json` and `MacOS/factorio` supporting `--benchmark`,
+  `--benchmark-ticks/-runs/-verbose`, `--run-replay`, `--until-tick`,
   `--mod-directory`, `--instrument-mod`, `--enable-lua-udp`. Saves in
   `~/Library/Application Support/factorio/saves/`. `--benchmark` **never saves**; the
   roundtrip script runs a headless server instead, which does.
-  **THIS IS THE ENGINE AXIS AND IT IS NOT THE API PIN**, which defaults to the GA
-  release 2.0.77 (148 classes) — the 156 above is what this INSTALL ships and is not
-  what the committed bindings are generated from. The two disagreeing is normal and is
-  the reason `scripts/lib-engine.sh` exists: every in-game gate packages with
-  `--factorio-version "$(factorio_series)"`, i.e. `2.1`, because a 2.1 engine refuses a
-  mod declaring `2.0` at game start. `factorio_series` and `factorio_version_triple`
+  **WHICH VERSION IS INSTALLED IS A STEAM BETAS SETTING, and it moved on 2026-08-15.**
+  From 2026-08-06 to 2026-08-15 the app was on the `2.1.14` beta branch (build 87180,
+  156 classes in its doc-html); on 2026-08-15 22:37 it was switched back to `public`,
+  which is **2.0.77 (build 84539, 148 classes)**, the GA release and the default API
+  pin. Everything here builds and its non-IPC gates run on 2.0.77 (verified the same
+  night: run-guest.sh in both languages, run-roundtrip.sh); the fkipc gates
+  (`run-ipc.sh`, `run-ipcdemo.sh`) need the 2.1.14 engine and refuse to start below
+  it, so switching Betas back to `2.1.14` is the one step that re-enables them.
+  `fklua doctor` reads the installed doc-html's `application_version`, so it reports
+  whichever branch is current. **THE ENGINE AXIS IS NOT THE API PIN**: the pin
+  defaults to 2.0.77 whatever is installed, and `scripts/lib-engine.sh` exists because
+  the two may disagree: every in-game gate packages with
+  `--factorio-version "$(factorio_series)"`, because a 2.1 engine refuses a mod
+  declaring `2.0` at game start (and a 2.0 engine one declaring `2.1`). `factorio_series` and `factorio_version_triple`
   read the binary; `fkipc_min_engine` and `require_fkipc_floor` are the fkipc floor's
   half of it, and the floor constant is READ OUT OF `guest/go/fkipc/version.go` rather
   than spelled a second time in shell.

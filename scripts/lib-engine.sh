@@ -16,11 +16,12 @@
 #   factorio_version is a claim about, and it is what fkipc's version floor
 #   gates on (helpers.game_version, read in game).
 #
-# They agree on a developer machine that happens to have GA installed, and they
-# do not agree here: the pin is 2.0.x and the install is 2.1.14. A 2.1 engine
-# REFUSES a mod whose info.json declares 2.0 -- "Incompatible Factorio version
-# (current: 2.1, required: 2.0)", at game start, before a line of the mod runs
-# -- so every in-game gate would report a broken gate for a mod that is fine.
+# They agree on a machine that has GA (2.0.x) installed, which is the Steam
+# default, and they do not agree when the 2.1.14 beta branch is installed: the pin
+# is 2.0.x either way. A 2.1 engine REFUSES a mod whose info.json declares 2.0 --
+# "Incompatible Factorio version (current: 2.1, required: 2.0)", at game start,
+# before a line of the mod runs -- and a 2.0 engine refuses one declaring 2.1, so
+# a gate that assumed either would report a broken gate for a mod that is fine.
 # Hence factorio_series below, and hence every `fklua mod` in scripts/ passing
 # --factorio-version "$(factorio_series)".
 #
