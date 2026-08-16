@@ -1,0 +1,224 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# The Factorio-facing gates (in-game integration, determinism, benchmarks) cannot
+# run here — they need a licensed Factorio install. Those run locally via `make
+# probe` and `make bench`, and their outputs are committed under bench/baselines/.
+# Everything below is hermetic: no network, no WABT, no Factorio.
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    # This job carries no guest toolchain on purpose (the reasons are on the
+    # Rust step below), and this is what makes that a DECLARATION rather than
+    # the silent gap the availability guards exist to expose. Without it those
+    # guards fail here on every push -- and a red `go` job takes `spectest`
+    # with it as a SKIP rather than a failure, because spectest declares
+    # `needs: [go, lua52f]`. That is the shape this repo has now been bitten by
+    # twice: eight commits between M8 and 2026-07-31, and both pushes of
+    # 2026-08-03, which is what this declaration exists to end.
+    #
+    # Scoped to TinyGo only. The Rust guard still runs, because this job does
+    # install the Rust target. See internal/guest.NoToolchainEnv.
+    env:
+      FKLUA_NO_GUEST_TOOLCHAIN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # M8's guest tests build real Rust guests, and the runner image ships
+      # rustc WITHOUT this target -- so `go test ./...` reached a cargo build
+      # that failed on a missing `core` and took the job down on every push
+      # from M8 until 2026-07-31. Provisioning a toolchain, the same category
+      # as setup-go above: the guest workspace declares no dependencies, so the
+      # cargo build itself still fetches nothing.
+      #
+      # TinyGo is deliberately NOT installed here, and the job declares that in
+      # its `env:` above so the availability guards skip instead of failing.
+      # The cost is real and is the reason: with a toolchain present
+      # internal/guest takes 113 s locally, nearly all of it TinyGo builds, and
+      # that lands on top of a job already running about four minutes. Rust is
+      # worth provisioning because it is what gates the generated bindings
+      # compiling.
+      #
+      # What that leaves uncovered, stated rather than implied: the TinyGo
+      # differential corpus, the collector suite, the end-to-end mod runs and
+      # the init-scaffold build. Those need no Factorio -- only a toolchain --
+      # so they are candidates for a job of their own, not permanently out of
+      # reach.
+      - name: Rust wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # THE ORACLE IS A TEST INPUT FOR THIS JOB, not just for spectest, and this
+      # job did not have one until 2026-08-02.
+      #
+      # `make test` builds lua52f before `go test` precisely so the suite cannot
+      # silently skip. This job ran bare `go test`, which bypasses that -- so
+      # about thirty tests across internal/luagen, internal/spectest,
+      # internal/factorio, internal/guest and internal/luahost responded to the
+      # missing oracle by SKIPPING, and `go test` prints nothing for a skip
+      # without -v. The emitter, ABI, persistence and collector tests that
+      # measure against lua52f have therefore never run in CI at all; the job
+      # reported `ok` for a run that did not measure them.
+      #
+      # It is ~15 s (the lua52f job below is 16 s end to end), and it is the
+      # same SHA-pinned fetch that job already performs.
+      - name: Build lua52f (the host-side oracle)
+        run: make lua52f
+
+      - name: go test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      # Enforced from M1, once these packages exist and carry the correctness-
+      # critical logic. Raw coverage is a weak metric for a compiler — the real
+      # gate is spec-suite pass rate below — but these three packages are where
+      # silent wrongness hides.
+      - name: coverage gate (internal/{ir,analysis,luagen})
+        run: ./scripts/coverage-gate.sh 80 internal/ir internal/analysis internal/luagen
+
+      # The guest bindings are committed as golden files so a regeneration is a
+      # reviewable diff. A stale checkout must be a build failure here, not a
+      # missing method a mod author finds later.
+      - name: generated bindings are up to date
+        run: go run ./cmd/fklua gen-bindings --check
+
+      # THE RUST HALF OF fkipc, WHICH RAN IN NOBODY'S GATE UNTIL 2026-08-07.
+      # 68 host-side tests over the wire codec, the link state machine and the
+      # committed golden testdata/ipc/wire-vectors.txt -- and that golden is
+      # the only cross-language pin needing neither a toolchain nor a Factorio,
+      # so with this step absent a push checked one of its two readers. It is
+      # the "a gate nobody added" half of this repo's pair: visibly missing
+      # rather than reported green, which is the cheaper half to fix. `make
+      # test` runs the same leg; this step is what makes a push carry it.
+      #
+      # -p IS MANDATORY AND IS NOT A NARROWING FOR SPEED. A bare `cargo test`
+      # at this workspace root cannot compile: fk and fkgc reach into
+      # core::arch::wasm32 and this runner is not wasm. Anything that widens
+      # this line owes the crate name.
+      #
+      # It is seconds and it is hermetic -- fkipc declares its only dependency
+      # under `cfg(target_family = "wasm")`, so on the host it has nothing to
+      # fetch and does not even need the wasm target installed above. cargo
+      # itself is on every ubuntu-latest runner; the step above is what adds
+      # the target the GO tests need.
+      #
+      # This command feeds no pipe, so the default `bash -e {0}` gates the job
+      # on cargo's own exit code. An edit that pipes it owes `shell: bash` for
+      # the pipefail that default does not bring -- see the spectest job below,
+      # where exactly that was missing and two loops could not go red.
+      - name: Rust fkipc tests (codec, link state machine, wire golden)
+        working-directory: guest/rust
+        run: cargo test -p fkipc
+
+      # sdk/go is its OWN MODULE, so `go test ./...` above never reaches it --
+      # the same boundary that keeps its wire-vector golden test (the Go-side
+      # reader AND the -update generator of testdata/ipc/wire-vectors.txt) out
+      # of every module-scoped command. Between this step and the cargo one,
+      # CI now checks BOTH readers of that golden; before them it checked
+      # neither. Pure Go, no toolchain beyond the setup-go above.
+      - name: SDK tests (external fkipc half + the wire-vector golden)
+        working-directory: sdk/go
+        run: go test ./...
+
+      # guest/go is ALSO its own module (//go:wasmimport needs GOARCH=wasm), so
+      # the same boundary hid its host-buildable tests: the guest fkipc state
+      # machine, the wire codec, and the Go half of the outbound-seam text
+      # property. The scope is LOAD-BEARING -- a bare ./... cannot compile,
+      # because fk and fkapi are import declarations with no bodies off-target.
+      # No toolchain, no oracle, no network.
+      - name: Guest fkipc tests (host-buildable slice of guest/go)
+        working-directory: guest/go
+        run: go test ./fkipc/...
+
+  lua52f:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build lua52f
+        run: make lua52f
+
+      # Proves the interpreter really is sandbox-shaped: coroutine/io/os absent,
+      # load() rejects binary chunks, string.pack present AND doubles-only
+      # (truncating a fractional argument the way the game does, not raising the
+      # way upstream 5.4 does), 200-local cap enforced. If this drifts from
+      # Factorio, every host-side test result is a lie.
+      - name: Sandbox conformance
+        run: make check-lua52f
+
+  spectest:
+    runs-on: ubuntu-latest
+    needs: [go, lua52f]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build lua52f
+        run: make lua52f
+
+      # testdata/spec is committed wast2json output, so this needs no WABT.
+      # Pass rate is printed and compared against testdata/spec/PASSRATE — it may
+      # rise, never fall.
+      - name: WebAssembly spec suite
+        run: make spectest
+
+      # Every optimization level, not just the default. -opt=0 and -opt=3 share
+      # the lowerings but not the code that decides where a value lives or
+      # whether a step is emitted at all, so a green default says nothing about
+      # the rest. This is the only thing that would catch an optimization that
+      # traded correctness for speed.
+      #
+      # `shell: bash` is load-bearing and is NOT the default. A run: step with no
+      # shell key is `bash -e {0}` -- fail-fast WITHOUT pipefail -- so `spectest |
+      # tail -1` reported tail's 0 and a red level exited green. Naming the shell
+      # explicitly gets `bash --noprofile --norc -eo pipefail {0}`, which is more
+      # strictness, not less. Found by the 2026-08-04 audit; third instance of
+      # this repo's "a skipped gate reads exactly like a pass" shape. Any step
+      # here whose command feeds a pipe owes the same line.
+      - name: Spec suite at every -opt level
+        shell: bash
+        run: |
+          for L in 0 1 2 3; do
+            echo "::group::-opt=$L"
+            go run ./cmd/fklua spectest --opt=$L | tail -1
+            echo "::endgroup::"
+          done
+
+      # The boxing mode, at EVERY level too.
+      #
+      # This said "the level users get by default" over --opt=0 and --opt=2, and
+      # stopped being true at M7 when the default moved to 3 -- so the mode that
+      # exists for exact NaN bit patterns was never tested with upvalue promotion
+      # or the inlined i32 load. Exact mode has its own lowering for every float
+      # operation, so a level being green in canonical mode says nothing here.
+      #
+      # `shell: bash` for the pipefail reason above -- this loop pipes too.
+      - name: Spec suite with exact NaN at every -opt level
+        shell: bash
+        run: |
+          for L in 0 1 2 3; do
+            echo "::group::--nan=exact -opt=$L"
+            go run ./cmd/fklua spectest --nan=exact --opt=$L | tail -1
+            echo "::endgroup::"
+          done

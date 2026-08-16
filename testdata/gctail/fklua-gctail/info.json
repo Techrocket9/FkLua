@@ -1,0 +1,8 @@
+{
+  "name": "fklua-gctail",
+  "version": "0.0.1",
+  "title": "FkLua Lua-GC tail probe",
+  "author": "FkLua",
+  "factorio_version": "2.1",
+  "description": "Holds a configurable vector of live Lua array tables and lets Factorio's own --benchmark-verbose luaGarbageIncremental characterise the collector's tail against heap size, table count and collectgarbage pacing independently. Not a real mod; used only to calibrate agents/guests.md's cost table."
+}

@@ -1,0 +1,95 @@
+{
+  "source": "in-game probe, Factorio 2.0.77",
+  "lua_version": "Lua 5.2",
+  "loop_baseline_ns": 3.555,
+  "add_baseline_ns": 3.483,
+  "note": "ns_per_op values are marginal: the empty-loop cost is subtracted. Measured on one machine in one run; use for RELATIVE comparison between lowerings, not as absolute performance targets.",
+  "codegen_forks": {
+    "i32.add wrap": {
+      "% (overflowing)": 2.805,
+      "% (non-overflowing)": 2.887,
+      "conditional fixup (branch taken)": 5.341,
+      "conditional fixup (branch not taken)": 3.66,
+      "bit32.band": 19.151
+    },
+    "i32.shr_u": {
+      "(a - a%2^n)/2^n": 5.04,
+      "math.floor(a/2^n)": 12.995,
+      "bit32.rshift": 17.462
+    },
+    "i32.mul": {
+      "by small constant": 2.88,
+      "16-bit split, magic floor": 53.995,
+      "16-bit split, math.floor": 62.184,
+      "16-bit split, bit32": 111.906
+    },
+    "linear memory read": {
+      "array part, 1-based": 18.202,
+      "array part, 0-based": 17.813,
+      "hash part": 14.745
+    },
+    "f64 bit-punning": {
+      "math.frexp (exponent only)": 15.427,
+      "string.pack": 85.879
+    },
+    "call dispatch": {
+      "upvalue": 16.815,
+      "F[idx] table": 21.321
+    }
+  },
+  "load_parse": {
+    "load_parse_256k": {
+      "bytes": 262219,
+      "ms": 5.117666,
+      "mb_per_s": 51.24
+    },
+    "load_parse_1024k": {
+      "bytes": 1048651,
+      "ms": 25.508917,
+      "mb_per_s": 41.11
+    },
+    "load_parse_4096k": {
+      "bytes": 4194376,
+      "ms": 106.129209,
+      "mb_per_s": 39.52
+    }
+  },
+  "storage": {
+    "storage_build_table": {
+      "entries": 262144,
+      "ms": 22.005917
+    },
+    "storage_pack_pages": {
+      "entries": 262144,
+      "ms": 21.037333
+    }
+  },
+  "raw": {
+    "add_nowrap": 3.4834,
+    "add_wrap_bit32": 22.6349,
+    "add_wrap_cond_nottaken": 7.1434,
+    "add_wrap_cond_taken": 8.8241,
+    "add_wrap_mod_nottaken": 6.3706,
+    "add_wrap_mod_taken": 6.288,
+    "baseline_loop": 3.5551,
+    "call_table": 24.8762,
+    "call_upvalue": 20.3705,
+    "load_parse_1024k": 24.3255,
+    "load_parse_256k": 19.5168,
+    "load_parse_4096k": 25.3027,
+    "mem_array_0based": 17.8132,
+    "mem_array_1based": 18.2022,
+    "mem_hash_part": 14.7447,
+    "mul_const_small": 6.4353,
+    "mul_split_bit32": 115.4609,
+    "mul_split_floor": 65.739,
+    "mul_split_magic": 57.5499,
+    "pun_frexp": 18.982,
+    "pun_stringpack": 89.4337,
+    "shr_bit32": 21.0175,
+    "shr_floor": 16.55,
+    "shr_modsub": 8.5948,
+    "storage_build_table": 83.9459,
+    "storage_pack_pages": 80.2511
+  }
+}

@@ -1,0 +1,1535 @@
+package factorio
+
+import (
+	"fmt"
+	"sort"
+)
+
+// Mapping the Factorio API's type system onto the wire.
+//
+// This is where 3774 members meet twelve wire kinds, and the interesting part
+// is not the types that map -- it is being HONEST about the ones that do not. A
+// member whose signature cannot be expressed is SKIPPED with a reason, never
+// emitted as something that looks callable and is not. A guest author finding
+// that a binding exists but returns nonsense is far worse served than one who
+// finds it absent and can see why in the report.
+//
+// MEMBER IDS ARE DENSE INDICES over the generated set, and they do NOT need to
+// be stable across Factorio versions. The member table is generated from the
+// same API version the guest was compiled against and SHIPS IN THE SAME MOD, so
+// the pair always matches. What has to degrade gracefully is a member missing
+// from the RUNNING game, and that is the ERR_NO_MEMBER path in fk_abi.lua.
+
+// Member is one entry in the generated table.
+type Member struct {
+	// ID is the index the guest passes to fk.call.
+	ID int
+	// Class and Name identify it; Class is empty for a global function.
+	Class string
+	Name  string
+	// Kind is CALL, GET or SET, matching fk_abi.lua's constants.
+	Kind int
+	// HasValid reports that this member's class carries a `valid` attribute.
+	//
+	// It travels per member because the host cannot discover it: reading a key
+	// a LuaObject does not have RAISES rather than returning nil, so probing
+	// blind crashes on the 15 classes that lack it -- six of the nine globals
+	// among them.
+	HasValid bool
+	// Optional reports that the DESCRIPTION declares this member's value may be
+	// nil -- `optional_readable_attributes` in census.json is how many readable
+	// attributes carry `optional: true`, LuaEntity.temperature among them,
+	// present on a reactor and absent on a chest.
+	//
+	// It travels per member and it is a statement about the API rather than about
+	// the running game, which is exactly what makes ERR_NO_MEMBER keep its
+	// meaning: without it, reading an absent optional produced "no such member on
+	// this Factorio version" -- the same status a member REMOVED in a point
+	// release produces, so a guest could not tell the two apart. Now nil means
+	// absent here and keeps meaning removed everywhere else. See fk_abi.lua's
+	// M.invoke, and fklua-ports-samples finding Q4.
+	//
+	// READ SIDE ONLY. An optional WRITE would be the guest asking to clear the
+	// attribute by sending nothing, which is a legitimate thing to want and is a
+	// separate change: it needs an absent argument to mean "assign nil" rather
+	// than "leave the argument out", and M.call's trailing-argument trim already
+	// means the second thing.
+	Optional bool
+	Args     []FieldSpec
+	Rets     []FieldSpec
+}
+
+// The member kinds, mirroring runtime/lua/fk_abi.lua.
+const (
+	MemberCall = 0
+	MemberGet  = 1
+	MemberSet  = 2
+	// MemberGetEq reads a string attribute and compares it HOST-SIDE, returning
+	// a bool: `entity.name == "transport-belt"` with the string never existing
+	// in guest memory.
+	//
+	// A third KIND rather than a flag on GET, because that is what this table
+	// already is -- one entry per (class, member, kind), with the layout its
+	// signature implies computed once at generate time. As a kind it inherits
+	// the handle resolution, the `valid` check, the pcall around the member read
+	// and the ERR_NO_MEMBER path without a line of its own, and the member-id
+	// scan that prunes the shipped table keeps working because the id is still
+	// an ordinary i32 constant at the call site.
+	//
+	// WHY IT EXISTS, and it is measured downstream rather than assumed: a guest
+	// subscribed with a CATEGORY filter is entered for every entity anyone
+	// builds anywhere on the map, and `Name()` returns `string(b)` -- a copy,
+	// necessarily, because the arena underneath is released when the call
+	// returns. That is 32 B of permanent guest heap per build event under
+	// -gc=leaking which no downstream discipline can remove, because the guest
+	// must read the name to discover it does not want it. A predicate removes
+	// the read rather than the copy.
+	MemberGetEq = 3
+
+	// MemberIndex, MemberLen and MemberSelf are Lua's three CLASS OPERATORS --
+	// `obj[k]`, `#obj` and `obj(...)`. Eleven of them across the API on seven
+	// classes, and until this landed no generator read Class.Operators at all:
+	// they were not bound, not deferred and not counted, so `LuaChunkIterator`
+	// bound three members none of which was the iterator, and `LuaInventory` had
+	// no way to reach a slot. Reported by fklua-ports' resource-marker (RM1),
+	// which is also where qol-research's Q2 (reading one entry of
+	// force.technologies materialised all 319) and fluid-memory-storage's F-IDX
+	// (inventory[1] unreachable) turned out to live: ONE gap, filed three times
+	// from three sides.
+	//
+	// KINDS RATHER THAN A FLAG, for the reason MemberGetEq gives: this table is
+	// already one entry per (class, member, kind) with the layout its signature
+	// implies computed once, so a kind inherits handle resolution, the `valid`
+	// check and the ERR_NO_MEMBER path without a line of its own, and the
+	// member-id scan that prunes the shipped table keeps working because the id
+	// is still an i32 constant at the call site.
+	//
+	// AND THREE KINDS RATHER THAN ONE, which is where the report needed
+	// correcting. RM1 predicted a fifth kind for `call` and NO ABI change for the
+	// other nine -- it read `obj[key]` as something the GET kind could already
+	// carry. It cannot: every existing kind begins by resolving `obj[m.name]`,
+	// and an index operator's key is an ARGUMENT rather than the member's name.
+	// `#obj` is not a member read either. The correction is two more branches in
+	// M.invoke, each two lines long.
+	MemberIndex = 4 // obj[k]
+	MemberLen   = 5 // #obj
+	MemberSelf  = 6 // obj(...)
+
+	// MemberGetHandle reads an attribute and returns the OBJECT rather than a
+	// copy of what is in it. It exists for exactly one shape and closes exactly
+	// one gap.
+	//
+	// The three operators above bound LuaCustomTable's `index` and `length` --
+	// and NOTHING IN THE API RETURNS A LuaCustomTable, so neither was reachable
+	// from anywhere. The description models the type structurally
+	// (`{complex_type: "LuaCustomTable", key, value}`) rather than as a named
+	// class, so mapType collapses it onto `dictionary` and every attribute
+	// carrying one -- force.technologies, game.surfaces, nearly all of
+	// LuaPrototypes; counted as custom_table_handle_members in census.json --
+	// generates as a materialising dictionary read. Reading one
+	// entry of force.technologies therefore copies all 319 across the boundary:
+	// 14,544 bytes of guest heap for one lookup, measured by fklua-ports'
+	// qol-research (Q2).
+	//
+	// A SECOND MEMBER OVER THE SAME ATTRIBUTE, rather than changing the first.
+	// The materialising read is the right answer for iterating the whole table
+	// and is what every existing guest calls; this is the right answer for a
+	// point lookup, and which one a guest wants is a question about the guest.
+	// The precedent is the `<Name>Into` variant one level up, with one
+	// difference that decides the implementation: `Into` shares its member id
+	// because the HOST does identical work and only the guest's use of the
+	// returned (ptr, count) differs. This does not -- the host has to write a
+	// handle where it used to write a (ptr, count) -- so it is a real member
+	// with its own id, and a kind is how the ABI is told which.
+	//
+	// It needs no new branch in M.invoke: like MemberGet it resolves
+	// `obj[m.name]`, and everything that differs is in the declared return kind,
+	// which write_value has always dispatched on.
+	MemberGetHandle = 7
+)
+
+// IsOperator reports the three kinds that are Lua metamethods rather than named
+// members. They are the kinds whose `name` is documentation: nothing resolves
+// `obj["index"]`, and the ABI dispatches on the kind alone.
+func (m Member) IsOperator() bool {
+	return m.Kind == MemberIndex || m.Kind == MemberLen || m.Kind == MemberSelf
+}
+
+// isCustomTable reports whether a type IS a LuaCustomTable at its top level.
+//
+// Not "contains one" and not "maps to KindDict": a plain `dictionary` maps to
+// the same kind and is a Lua table with nothing behind it, so the only place
+// this distinction survives is the description's own complex_type tag. mapType
+// deliberately erases it -- the two marshal identically -- which is why this
+// asks the description again rather than looking at the FieldSpec.
+func isCustomTable(t Type) bool { return t.Complex == "LuaCustomTable" }
+
+// Skip records a member that could not be expressed, and why.
+type Skip struct {
+	Class, Name string
+	Reason      string
+}
+
+// OmittedField records a FIELD the generator left out of a struct, and why.
+//
+// This is not a Skip and the difference is the whole point. A Skip is a member
+// that could not be expressed: the guest does not get it, and the census row
+// says which piece of the marshalling layer would buy it back. An omission is a
+// field the description says carries NOTHING -- the member is bound, every
+// other field of it crosses, and what is missing is a value that was never
+// going to arrive.
+//
+// It is recorded because AD4's lesson runs both ways. Answering a field-level
+// problem at concept level is what took CollisionMask, MapGenSettings and 17
+// members down; answering it at field level is right, and doing it SILENTLY is
+// how a description that grows a hundred of these would look exactly like a
+// description that grew none. A 0 nobody writes down is how eleven class
+// operators stayed invisible for five milestones.
+type OmittedField struct {
+	// Owner is the concept or event whose struct the field was declared in,
+	// or "" for a method's inline argument table.
+	Owner string
+	Field string
+	// Type is the type name as the description spells it -- the ALIAS, not what
+	// it resolves to. `frozen_color_lookup` is declared `ColorLookupTable` and
+	// reads `nil` only after one hop, which is exactly the indirection that
+	// made this defect hard to see in the JSON.
+	Type   string
+	Reason string
+}
+
+// Report is what a generation run produced, including everything it refused.
+type Report struct {
+	Members []Member
+	Skipped []Skip
+	// Defines is the defines table to render alongside the members, which the
+	// CALLER supplies rather than GenerateMembers, because pruning it needs a
+	// scan over a different import. Zero renders an empty table, which is what
+	// a guest that reads no define wants.
+	Defines DefineReport
+	// Reasons counts skips by cause, which is the number worth watching: it
+	// says which piece of the marshalling layer would buy the most coverage.
+	Reasons map[string]int
+	// Omitted is every field left out of a struct, deduplicated by
+	// owner::field: a concept reached from forty members is one omission in the
+	// description, not forty. OmittedBy counts them by reason, which is the row
+	// the census carries and the version diff watches.
+	Omitted   []OmittedField
+	OmittedBy map[string]int
+}
+
+// Coverage is the fraction of attempted members that were expressible.
+func (r Report) Coverage() float64 {
+	total := len(r.Members) + len(r.Skipped)
+	if total == 0 {
+		return 0
+	}
+	return float64(len(r.Members)) / float64(total)
+}
+
+// typeMapper resolves named types and turns them into FieldSpecs.
+type typeMapper struct {
+	concepts map[string]*Concept
+	classes  map[string]bool
+	// visiting breaks reference cycles. The API has them -- LocalisedString is
+	// defined in terms of itself -- and a cycle is not an error, it is a shape
+	// this tier cannot express. Without this the generator recurses forever.
+	visiting map[string]bool
+	// owner is the stack of named concepts being resolved, so an omitted field
+	// can say which struct it was declared in. A concept reached from many
+	// members is resolved many times; the top of this stack is what makes the
+	// dedup key stable across those.
+	owner []string
+	// omitted is keyed by owner::field for that dedup. Insertion order is kept
+	// separately so the report is deterministic -- a map walk is not, and this
+	// number lands in a committed census.
+	omitted     map[string]OmittedField
+	omittedKeys []string
+}
+
+func newTypeMapper(a *API) *typeMapper {
+	m := &typeMapper{
+		concepts: map[string]*Concept{},
+		classes:  map[string]bool{},
+		visiting: map[string]bool{},
+		omitted:  map[string]OmittedField{},
+	}
+	for i := range a.Concepts {
+		m.concepts[a.Concepts[i].Name] = &a.Concepts[i]
+	}
+	for _, c := range a.Classes {
+		m.classes[c.Name] = true
+	}
+	return m
+}
+
+// builtinKind maps the API's primitive names onto wire kinds.
+//
+// `float` becomes f32, not f64. Lua has one number type, so it is tempting to
+// widen everything -- but a field the API DECLARES as float holds a float, and
+// f32 represents it exactly. Widening would double the field, mislead the guest
+// struct about the type, and buy nothing. `number` is Lua's own generic number
+// and stays f64, as does `double`.
+//
+// There is no int64 in the API, which is why none appears here.
+var builtinKind = map[string]Kind{
+	"boolean": KindBool,
+	"string":  KindString,
+	"double":  KindF64,
+	"float":   KindF32,
+	"number":  KindF64,
+	"int8":    KindI8,
+	"uint8":   KindU8,
+	"int16":   KindI16,
+	"uint16":  KindU16,
+	"int32":   KindI32,
+	"uint32":  KindU32,
+	"uint64":  KindU64,
+}
+
+// mapType turns an API type into a wire field, or explains why it cannot.
+func (m *typeMapper) mapType(t Type, depth int) (FieldSpec, error) {
+	// A guest struct nested this deeply is not something the API has; hitting
+	// the limit means a cycle slipped past the visiting set.
+	if depth > 12 {
+		return FieldSpec{}, fmt.Errorf("type nests deeper than 12")
+	}
+
+	if t.IsNamed() {
+		return m.mapNamed(t.Name, depth)
+	}
+
+	switch t.Complex {
+	case "type":
+		return m.mapType(*t.Value, depth)
+
+	case "array":
+		e, err := m.mapType(*t.Value, depth+1)
+		if err != nil {
+			return FieldSpec{}, err
+		}
+		return FieldSpec{Kind: KindArray, Elem: &e}, nil
+
+	case "dictionary", "LuaCustomTable":
+		k, err := m.mapType(*t.Key, depth+1)
+		if err != nil {
+			return FieldSpec{}, err
+		}
+		v, err := m.mapType(*t.Value, depth+1)
+		if err != nil {
+			return FieldSpec{}, err
+		}
+		return FieldSpec{Kind: KindDict, Key: &k, Elem: &v}, nil
+
+	case "table", "LuaStruct":
+		// A table with VARIANT PARAMETER GROUPS is a discriminated union: a
+		// base set of fields plus a group selected by a discriminant. That is
+		// exactly what tier 2 carries, so it becomes a dynamic value rather
+		// than a refusal.
+		//
+		// It used to be refused, on the plan's assumption that there were four
+		// of these and they would be hand-written. There are four METHODS, and
+		// 55 CONCEPTS -- 31 of them the Lua*EventFilter family -- which
+		// together blocked 68 member entries. Hand-writing was never going to
+		// reach those, and generating a Go type per variant is the same trap
+		// tier 2 exists to avoid.
+		//
+		// The cost is real and worth stating: a caller gets a Value rather than
+		// a named struct, so `create_entity` takes a tagged table instead of a
+		// typed one. Available-but-untyped beats unavailable, and a hand-written
+		// typed wrapper over the handful of high-traffic methods can still land
+		// on top later.
+		if len(t.VariantGroups) > 0 {
+			return FieldSpec{Kind: KindDyn}, nil
+		}
+		fields, err := m.mapFields(t.Parameters, t.Attributes, depth+1)
+		if err != nil {
+			return FieldSpec{}, err
+		}
+		if len(fields) == 0 {
+			return FieldSpec{}, fmt.Errorf("table has no expressible fields")
+		}
+		return FieldSpec{Kind: KindStruct, Struct: fields}, nil
+
+	case "literal":
+		// A bare literal outside a union is a constant, and there is nothing to
+		// carry. Its Lua type decides the slot.
+		switch t.Literal.(type) {
+		case string:
+			return FieldSpec{Kind: KindString}, nil
+		case bool:
+			return FieldSpec{Kind: KindBool}, nil
+		default:
+			return FieldSpec{Kind: KindF64}, nil
+		}
+
+	case "union":
+		// A union of nothing but string literals is a string enum --
+		// pure_string_enum_concepts in census.json, which is where the count
+		// lives -- and crosses as its string. Compact i32 enums are tier 3 and
+		// would need a value table both sides agree on; a string is correct
+		// today and costs only bytes.
+		allLiteral, allString := true, true
+		for _, o := range t.Options {
+			if o.Complex != "literal" {
+				allLiteral = false
+				break
+			}
+			if _, ok := o.Literal.(string); !ok {
+				allString = false
+			}
+		}
+		if allLiteral && allString {
+			return FieldSpec{Kind: KindString}, nil
+		}
+		if f, ok := m.canonicalUnion(t, depth); ok {
+			return f, nil
+		}
+		// Tier 2. A structural union has no fixed layout, so it crosses as a
+		// self-describing tagged value.
+		return FieldSpec{Kind: KindDyn}, nil
+
+	case "tuple":
+		return FieldSpec{}, fmt.Errorf("tuple")
+	case "function":
+		return FieldSpec{}, fmt.Errorf("callback")
+
+	case "LuaLazyLoadedValue":
+		// A HANDLE, and the laziness is preserved BY CONSTRUCTION rather than
+		// by machinery.
+		//
+		// This was the last deliberately-refused runtime type, and it cost
+		// exactly one event: mapFields fails a whole struct when one field
+		// fails, so `on_player_setup_blueprint` -- whose `mapping` field is the
+		// type's ONLY occurrence, in 2.0.77 and in 2.1.12 alike -- was skipped
+		// entirely. Not bound on the host, no Go struct, no Rust struct.
+		//
+		// The refusal read as principled. `LuaLazyLoadedValue<T>` is a wrapper
+		// the engine returns "for performance reasons", where T is constructed
+		// only when `get` is called, and there is no fixed layout for a value
+		// that does not exist yet. Marshalling T eagerly would have been
+		// strictly WORSE than refusing, because it defeats the only reason the
+		// type exists: for `mapping`, T is a dictionary of handles to every
+		// entity in the blueprint, which would then be built on every blueprint
+		// setup whether or not any mod ever looked at it.
+		//
+		// But there was never anything to marshal. The description declares
+		// LuaLazyLoadedValue as an ordinary CLASS -- one method, `get`; two
+		// attributes, `valid` and `object_name` -- so the type USAGE is an
+		// object-handle field exactly like the other 261 class-typed event
+		// fields in this pin, and it crosses the same K_HANDLE path: one
+		// M.transient(v), a table store and an integer increment, with the
+		// userdata itself untouched. `get` generates as an ordinary bound member
+		// returning tier-2 dyn. The value is constructed if and only if the
+		// guest calls Get(), which is the engine's own contract, honoured.
+		//
+		// t.Value -- the parameterised payload -- is deliberately NOT expanded
+		// into the layout. It is DOCUMENTATION: the generators render it into
+		// the field's doc comment so a reader knows what Get() yields, without
+		// inventing per-site generic typing for a type that occurs once.
+		//
+		// LIFETIME needs no new rule, which is the other half of why this fits.
+		// The API says an instance is valid only during the event it arrived in
+		// and cannot be saved -- and that is already what the transient handle
+		// space does to every event payload handle: released wholesale when the
+		// dispatch returns. A guest that promotes one with fk_retain holds a
+		// live handle over a dead LuaObject, and resolve()'s `.valid` check
+		// turns that into ERR_INVALID, a status rather than a crash. Identical
+		// to a retained LuaEntity, which is the precedent -- no more machinery,
+		// and no less.
+		//
+		// `Any` used to block the other half of this: canonicalUnion mistyped it
+		// as a handle, which would have generated `get` as returning an OBJECT
+		// and silently mistyped every string and number it really returns. See
+		// section C of canonicalUnion's comment below.
+		f := FieldSpec{Kind: KindHandle, TypeName: "LuaLazyLoadedValue"}
+		if t.Value != nil {
+			f.LazyPayload = t.Value.String()
+		}
+		return f, nil
+	}
+	return FieldSpec{}, fmt.Errorf("complex type %q", t.Complex)
+}
+
+// canonicalUnion picks the one option a fixed layout can carry, for the two
+// union families where such an option exists. Everything else is tier 2.
+//
+// These two families are not a guess -- they are what the API measurably
+// contains. 52 concepts are structural unions and the most-referenced are all
+// one of these two shapes:
+//
+//	MapPosition  = table{x,y}          | tuple[double, double]
+//	Color        = table{r,g,b,a}      | tuple[float x4]
+//	ForceID      = string | uint8      | LuaForce
+//
+//	A. ONE TABLE PLUS ARRAY SHORTHANDS. The table is the canonical form: it is
+//	   what a read returns, and a write accepts either. Carrying only the table
+//	   costs a guest nothing.
+//
+//	B. ONE CLASS PLUS SCALAR IDENTIFIERS. "A force, or its name, or its index."
+//	   A read returns the object, so the handle is the form that must work.
+//
+// WHAT THIS COSTS, and it is a real cost rather than a free win: under B a
+// guest can pass a force only as a handle, never as a name -- so reaching one
+// by name means finding the LuaForce first. That is an ergonomic loss the
+// generated bindings will have to paper over, not a correctness one, and tier 2
+// removes it.
+//
+//	C. NEITHER, WHEN AN OPTION IS ITSELF OPEN-ENDED. `Any` is
+//	   `string | boolean | number | table | LuaObject`, which matches shape B on
+//	   a count -- one class, three scalars -- and is not shape B at all: the
+//	   `table` arm makes it a genuine any-value union, so choosing the handle
+//	   would type `remote.call` and `LuaLazyLoadedValue::get` as returning an
+//	   OBJECT and silently mistype every string and number they really return.
+//	   An option that maps to tier 2 therefore disqualifies the union, which is
+//	   what nDyn below is for. `AnyBasic` was already tier 2 (it has no class
+//	   arm) and `ForceID`, the shape B was written for, has no tier-2 arm.
+//	   Found while binding LuaCustomTable's index operator, whose read type is
+//	   `Any`: the operator would have been generated returning a handle.
+func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
+	var chosenStruct, chosenHandle *FieldSpec
+	nStruct, nHandle, nScalar, nShorthand, nDyn := 0, 0, 0, 0, 0
+
+	for i := range t.Options {
+		o := t.Options[i]
+		// Unwrap the description-only wrapper before looking at the shape.
+		for o.Complex == "type" && o.Value != nil {
+			o = *o.Value
+		}
+		if o.Complex == "tuple" || o.Complex == "array" {
+			nShorthand++
+			continue
+		}
+		f, err := m.mapType(o, depth+1)
+		if err != nil {
+			return FieldSpec{}, false // anything unmappable disqualifies the union
+		}
+		switch f.Kind {
+		case KindStruct:
+			nStruct++
+			c := f
+			chosenStruct = &c
+		case KindHandle:
+			nHandle++
+			c := f
+			chosenHandle = &c
+		case KindDyn:
+			nDyn++
+		default:
+			nScalar++
+		}
+	}
+
+	if nStruct == 1 && nShorthand > 0 && nHandle == 0 && nScalar == 0 && nDyn == 0 {
+		return *chosenStruct, true
+	}
+	if nHandle == 1 && nScalar > 0 && nStruct == 0 && nShorthand == 0 && nDyn == 0 {
+		return *chosenHandle, true
+	}
+	return FieldSpec{}, false
+}
+
+// nilTyped reports whether t is the description saying "there is never a value
+// here": the literal type `nil`, directly or through a chain of named aliases
+// for it.
+//
+// THE ALIAS HOP IS THE WHOLE DIFFICULTY. 2.1 declares the concept
+// `ColorLookupTable` as `nil`, with the description "Does not return the value
+// at runtime.", and the field that carries it -- UtilityConstants's
+// `frozen_color_lookup` -- is declared `ColorLookupTable`. So a grep for a
+// nil-typed FIELD finds nothing in any published version, and the one nil in
+// the file is a concept definition three hundred entries away from the field it
+// governs.
+//
+// It is deliberately NOT "the type mapper failed with the nil error somewhere
+// underneath". An `array of nil` or a union with a nil arm would satisfy that
+// and neither means what a bare nil field means -- an array of nothing is a
+// count the guest can still read, and a nil union arm is Lua's way of spelling
+// optionality, which this ABI carries in a presence byte instead. Neither shape
+// occurs in 2.0.77, 2.1.12 or 2.1.14; if one appears it will arrive as a SKIP,
+// loudly, in the census diff, which is the right way for a shape nobody has
+// reasoned about to show up.
+func (m *typeMapper) nilTyped(t Type) bool {
+	// Bounded rather than cycle-tracked: this walks an alias chain, and a
+	// cyclic one cannot terminate at a literal name anyway.
+	for i := 0; i < 12; i++ {
+		if t.Complex == "type" && t.Value != nil {
+			t = *t.Value // the description-only wrapper
+			continue
+		}
+		if !t.IsNamed() {
+			return false // any complex type is a shape, not an absence
+		}
+		if t.Name == "nil" {
+			return true
+		}
+		c, ok := m.concepts[t.Name]
+		if !ok {
+			return false
+		}
+		t = c.Type
+	}
+	return false
+}
+
+// omit records a field left out of the struct being mapped.
+//
+// Deduplicated by owner::field, because a concept is resolved once per member
+// that mentions it and the census is counting the DESCRIPTION's fields, not the
+// mapper's visits to them.
+func (m *typeMapper) omit(field, typeName, reason string) {
+	var owner string
+	if n := len(m.owner); n > 0 {
+		owner = m.owner[n-1]
+	}
+	key := owner + "::" + field
+	if _, seen := m.omitted[key]; seen {
+		return
+	}
+	m.omitted[key] = OmittedField{Owner: owner, Field: field, Type: typeName, Reason: reason}
+	m.omittedKeys = append(m.omittedKeys, key)
+}
+
+// omissions returns what was omitted, in a deterministic order, plus the counts
+// by reason.
+func (m *typeMapper) omissions() ([]OmittedField, map[string]int) {
+	out := make([]OmittedField, 0, len(m.omittedKeys))
+	by := map[string]int{}
+	for _, k := range m.omittedKeys {
+		o := m.omitted[k]
+		out = append(out, o)
+		by[o.Reason]++
+	}
+	return out, by
+}
+
+func (m *typeMapper) mapNamed(name string, depth int) (FieldSpec, error) {
+	if k, ok := builtinKind[name]; ok {
+		return FieldSpec{Kind: k}, nil
+	}
+	if name == "nil" {
+		return FieldSpec{}, fmt.Errorf("nil has no representation")
+	}
+	// `table` and `LuaObject` unqualified are "any table" and "any object" --
+	// no shape to generate against.
+	if name == "table" {
+		// "any table" has no shape to generate against, which is the same
+		// problem tier 2 solves.
+		return FieldSpec{Kind: KindDyn}, nil
+	}
+	if name == "LuaObject" {
+		return FieldSpec{Kind: KindHandle}, nil
+	}
+	if m.classes[name] {
+		return FieldSpec{Kind: KindHandle}, nil
+	}
+	// defines.* are named integer constants. They cross as u32; their VALUES
+	// are Factorio's and get resolved through a table at load rather than baked
+	// in, because they are not stable across versions.
+	if len(name) > 8 && name[:8] == "defines." {
+		return FieldSpec{Kind: KindU32}, nil
+	}
+	c, ok := m.concepts[name]
+	if !ok {
+		return FieldSpec{}, fmt.Errorf("unknown type %q", name)
+	}
+	if m.visiting[name] {
+		// LocalisedString really is defined in terms of itself. A fixed layout
+		// cannot hold that, which is exactly what tier 2 is for: the tag says
+		// what each level actually contains.
+		return FieldSpec{Kind: KindDyn}, nil
+	}
+	m.visiting[name] = true
+	defer delete(m.visiting, name)
+	// Name the struct whose fields are about to be mapped, so an omission can
+	// say where it came from.
+	m.owner = append(m.owner, name)
+	defer func() { m.owner = m.owner[:len(m.owner)-1] }()
+	f, err := m.mapType(c.Type, depth)
+	if err != nil {
+		return f, err
+	}
+	// Remember where an aggregate came from. A scalar keeps no name: `MapTick`
+	// is a uint64 and a guest wants uint64, not a one-field wrapper.
+	if f.Kind == KindStruct {
+		f.TypeName = name
+	}
+	return f, nil
+}
+
+// mapFields maps a table's parameters, or a LuaStruct's attributes.
+//
+// A field that cannot be expressed fails the WHOLE struct rather than being
+// dropped. A struct silently missing a field is a wrong value the guest cannot
+// detect; a struct that does not exist is a missing binding it can see.
+//
+// A `nil`-TYPED FIELD IS THE ONE EXCEPTION, and it is an exception because it
+// is not the same statement. The rule above is about a field this layer cannot
+// EXPRESS -- a value exists and the guest would silently not get it. A nil type
+// is the description saying there is no value: `ColorLookupTable` is declared
+// `nil` and described "Does not return the value at runtime.", so nothing is
+// lost by leaving it out and nothing could be gained by keeping it. Carrying it
+// as an always-absent optional would spend a presence byte, forever, saying no.
+//
+// This is AD4 read the right way round. There, one unmarshalable field was
+// answered at CONCEPT level and took CollisionMask, MapGenSettings and 17
+// members with it; here a field-level fact is answered at field level, and the
+// concept, the attribute that returns it and every other field of it survive.
+// The omission is recorded rather than silent -- see OmittedField.
+func (m *typeMapper) mapFields(ps []Parameter, attrs []Attribute, depth int) ([]FieldSpec, error) {
+	// `order` is the canonical field order, not the order the JSON array
+	// happens to be in. Sorting by it means a regeneration from a reordered
+	// dump produces the same offsets -- and offsets are what the guest struct
+	// was compiled against.
+	ps = append([]Parameter(nil), ps...)
+	sort.SliceStable(ps, func(i, j int) bool { return ps[i].Order < ps[j].Order })
+	attrs = append([]Attribute(nil), attrs...)
+	sort.SliceStable(attrs, func(i, j int) bool { return attrs[i].Order < attrs[j].Order })
+
+	var out []FieldSpec
+	for _, p := range ps {
+		if m.nilTyped(p.Type) {
+			m.omit(p.Name, p.Type.Name, "nil")
+			continue
+		}
+		f, err := m.mapType(p.Type, depth)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", p.Name, err)
+		}
+		f.Name, f.Optional = p.Name, p.Optional
+		out = append(out, f)
+	}
+	for _, a := range attrs {
+		if a.ReadType == nil {
+			continue
+		}
+		if m.nilTyped(*a.ReadType) {
+			m.omit(a.Name, a.ReadType.Name, "nil")
+			continue
+		}
+		f, err := m.mapType(*a.ReadType, depth)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", a.Name, err)
+		}
+		f.Name, f.Optional = a.Name, a.Optional
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+// GenerateMembers walks the whole API and produces the member table.
+func GenerateMembers(a *API) Report {
+	m := newTypeMapper(a)
+	r := Report{Reasons: map[string]int{}}
+
+	skip := func(class, name string, err error) {
+		r.Skipped = append(r.Skipped, Skip{Class: class, Name: name, Reason: err.Error()})
+		r.Reasons[classify(err)]++
+	}
+
+	classes := append([]Class(nil), a.Classes...)
+	sort.Slice(classes, func(i, j int) bool { return classes[i].Name < classes[j].Name })
+
+	for _, c := range classes {
+		hasValid := false
+		for _, at := range c.Attributes {
+			if at.Name == "valid" {
+				hasValid = true
+				break
+			}
+		}
+
+		methods := append([]Method(nil), c.Methods...)
+		sort.Slice(methods, func(i, j int) bool { return methods[i].Name < methods[j].Name })
+		for _, meth := range methods {
+			mem, err := buildMethod(m, c.Name, meth)
+			if err != nil {
+				skip(c.Name, meth.Name, err)
+				continue
+			}
+			mem.HasValid = hasValid
+			r.Members = append(r.Members, mem)
+		}
+
+		attrs := append([]Attribute(nil), c.Attributes...)
+		sort.Slice(attrs, func(i, j int) bool { return attrs[i].Name < attrs[j].Name })
+		for _, at := range attrs {
+			if at.ReadType != nil {
+				f, err := m.mapType(*at.ReadType, 0)
+				if err != nil {
+					skip(c.Name, at.Name, err)
+				} else {
+					// OPTIONALITY IS THE ATTRIBUTE'S, and it was dropped
+					// here for as long as this generator has existed.
+					// buildMethod has always carried rv.Optional onto a
+					// method's return; the attribute path set only the name,
+					// so every optional readable attribute
+					// (`optional_readable_attributes` in census.json) was typed
+					// as always-present on both sides and an absent one came
+					// back as ERR_NO_MEMBER.
+					f.Name, f.Optional = "value", at.Optional
+					r.Members = append(r.Members, Member{
+						Class: c.Name, Name: at.Name, Kind: MemberGet,
+						Rets: []FieldSpec{f}, HasValid: hasValid,
+						Optional: at.Optional,
+					})
+					// AND THE HANDLE VARIANT, for an attribute whose type
+					// IS a LuaCustomTable. See MemberGetHandle: without it the
+					// index and length operators bound on that class are
+					// unreachable from anywhere in the API, because nothing
+					// returns one.
+					//
+					// Gated on the TOP-LEVEL type rather than on f.Kind, because
+					// KindDict is also what a plain `dictionary` maps to and a
+					// plain dictionary is a Lua table with no handle behind it.
+					// The distinction exists only in the description.
+					if isCustomTable(*at.ReadType) {
+						r.Members = append(r.Members, Member{
+							Class: c.Name, Name: at.Name, Kind: MemberGetHandle,
+							Rets: []FieldSpec{{Name: "value", Kind: KindHandle,
+								Optional: at.Optional}},
+							HasValid: hasValid, Optional: at.Optional,
+						})
+					}
+					// AND THE PREDICATE, for a plain string attribute. See
+					// MemberGetEq: the point is that the guest never receives
+					// the string, so `entity.name == "x"` costs no guest heap.
+					//
+					// OPTIONAL STRINGS GET ONE TOO, and this guard used to
+					// say `&& !f.Optional` on the reasoning that an absent
+					// optional compares false, which the caller cannot
+					// distinguish from "present and different".
+					//
+					// That reasoning stands and does not lead where it was
+					// taken. The condition was DEAD -- f.Optional was never set
+					// on this path, which is the defect above -- so honouring
+					// it would have deleted the 30 optional string attributes'
+					// predicates as a side effect of fixing something else,
+					// and they work: nil is not the string, which is the honest
+					// answer and the one call_eq already produces. A caller who
+					// needs to tell absent from different asks the GET, which
+					// now says so.
+					if f.Kind == KindString {
+						r.Members = append(r.Members, Member{
+							Class: c.Name, Name: at.Name, Kind: MemberGetEq,
+							Args:     []FieldSpec{{Name: "want", Kind: KindString}},
+							Rets:     []FieldSpec{{Name: "value", Kind: KindBool}},
+							HasValid: hasValid,
+							// The BOOL is never absent; what may be absent is
+							// the attribute behind it, and that is what lets
+							// M.invoke fall through to call_eq instead of
+							// reporting a missing member.
+							Optional: at.Optional,
+						})
+					}
+				}
+			}
+			if at.WriteType != nil {
+				f, err := m.mapType(*at.WriteType, 0)
+				if err != nil {
+					// Only report once for an attribute whose read side already
+					// failed for the same reason.
+					if at.ReadType == nil {
+						skip(c.Name, at.Name, err)
+					}
+				} else {
+					f.Name = "value"
+					r.Members = append(r.Members, Member{
+						Class: c.Name, Name: at.Name, Kind: MemberSet,
+						Args: []FieldSpec{f}, HasValid: hasValid,
+					})
+				}
+			}
+		}
+
+		// THE OPERATORS, LAST, and last is deliberate: `seen` in both binding
+		// generators is first-come, so putting them here means an operator can
+		// only ever lose a name to a member the class really declares rather
+		// than the other way round. TestOperatorsBindOnEveryClassThatHasOne
+		// fails if one ever does lose, so the outcome is loud instead of a
+		// three-member LuaChunkIterator.
+		ops := append([]Operator(nil), c.Operators...)
+		sort.Slice(ops, func(i, j int) bool { return ops[i].Name < ops[j].Name })
+		hasLength := false
+		for _, op := range ops {
+			if op.Name == "length" {
+				hasLength = true
+			}
+		}
+		for _, op := range ops {
+			mem, err := buildOperator(m, c.Name, op, hasLength)
+			if err != nil {
+				skip(c.Name, "operator "+op.Name, err)
+				continue
+			}
+			mem.HasValid = hasValid
+			r.Members = append(r.Members, mem)
+		}
+	}
+
+	for i := range r.Members {
+		r.Members[i].ID = i + 1 // 1-based, matching the Lua table
+	}
+	r.Omitted, r.OmittedBy = m.omissions()
+	return r
+}
+
+// ---------------------------------------------------------------------------
+// String-literal unions
+//
+// Some named concepts are a union of nothing but string literals --
+// pure_string_enum_concepts in census.json counts them, and WaitConditionType
+// and LinkedGameControl are the two large ones -- and mapType flattens every
+// one of them
+// to KindString, which is the right WIRE answer and throws the names away. What
+// reaches a guest author is a bare `String` on the one field a schedule record
+// cannot be written without, so `"inactivty"` compiles, packages, loads, and
+// produces a schedule the engine silently rejects: a mod that never refuels
+// anything. fklua-ports' fuel-train-stop reported it as FTS2 and stood a TEST in
+// for the type; resource-marker confirmed it on SignalID.Type.
+//
+// CONSTANTS RATHER THAN AN ENUM, in both languages, and the reason is the same
+// one in each: the value has to stay a string. It crosses the wire as a string,
+// every generated field holding one is typed as a string, and a guest that
+// already passes string literals must keep compiling. An enum would be a better
+// type and a breaking change to every call site, for a union the API can extend
+// in a point release -- which is what `#[non_exhaustive]` exists to admit and
+// what a plain constant does not have to.
+// ---------------------------------------------------------------------------
+
+// LiteralUnion is one named concept that is a union of string literals.
+type LiteralUnion struct {
+	Name     string
+	Literals []string
+}
+
+// StringLiteralUnions finds them, in the order the description declares, which
+// is the order both backends emit so a regeneration is a no-op.
+func StringLiteralUnions(a *API) []LiteralUnion {
+	var out []LiteralUnion
+	for _, c := range a.Concepts {
+		t := c.Type
+		if t.Complex != "union" || len(t.Options) == 0 {
+			continue
+		}
+		lits := make([]string, 0, len(t.Options))
+		for _, o := range t.Options {
+			s, ok := o.Literal.(string)
+			if o.Complex != "literal" || !ok {
+				lits = nil
+				break
+			}
+			lits = append(lits, s)
+		}
+		if len(lits) == 0 {
+			continue
+		}
+		out = append(out, LiteralUnion{Name: c.Name, Literals: lits})
+	}
+	return out
+}
+
+// punctName transliterates ASCII punctuation into an identifier fragment.
+//
+// Eleven of ArithmeticCombinatorParameterOperation's options are `*`, `/`, `%`,
+// `>>` and the like, and ComparatorString is `=`, `>`, `<=`, so the obvious
+// name-from-the-literal rule produces the empty string for all of them at once.
+// This is a TRANSLITERATION and not a naming scheme -- each symbol gets the name
+// it has in every programming language's lexer -- so that the constants for the
+// operators a typo actually hurts exist at all. Anything left without a name is
+// skipped and counted rather than given a positional one, which would be a
+// constant whose identifier says nothing.
+var punctName = map[rune]string{
+	'*': "Star", '/': "Slash", '+': "Plus", '-': "Minus", '%': "Percent",
+	'^': "Caret", '<': "Lt", '>': "Gt", '=': "Eq", '!': "Bang", '&': "Amp",
+	'|': "Pipe", '~': "Tilde", '≥': "Ge", '≤': "Le", '≠': "Ne", '#': "Hash",
+	'@': "At", '?': "Question", '.': "Dot", ',': "Comma", ':': "Colon",
+	';': "Semi", '$': "Dollar",
+}
+
+// LiteralIdent turns one literal into an identifier fragment, or reports that
+// it has no name. Shared by both backends so the two agree by construction.
+func LiteralIdent(lit string) (string, bool) {
+	var b []rune
+	for _, r := range lit {
+		if n, ok := punctName[r]; ok {
+			b = append(b, []rune(n)...)
+			continue
+		}
+		b = append(b, r)
+	}
+	name := exportName(string(b))
+	if name == "" || name == "X" {
+		return "", false
+	}
+	return name, true
+}
+
+// OperatorProse describes a class operator in words, one line per element, for
+// the generated doc comment. Shared by both backends: the prose is a fact about
+// the API and about this ABI, and writing it twice is how the two drift.
+//
+// It says which LUA EXPRESSION the binding is, because that is the one thing a
+// mod author cannot look up -- the API documentation lists these under a class's
+// "operators" heading and every real mod writes them as `inv[1]`, so a reader
+// who greps the generated file for `index` finds nothing and concludes the
+// class is a three-member stub. That conclusion is exactly what fklua-ports'
+// resource-marker (RM1) spent a morning on.
+func OperatorProse(class string, m Member, name string) []string {
+	switch m.Kind {
+	case MemberIndex:
+		key := "the key"
+		if len(m.Args) > 0 && m.Args[0].Kind == KindU32 {
+			key = "a 1-BASED position"
+		}
+		return []string{
+			name + " is this class's INDEX operator: the Lua expression " +
+				lowerFirstWord(class) + "[k], with " + key + " as the argument.",
+			"It is a member here because an operator has no name to resolve --",
+			"the ABI dispatches on the kind. Reading one entry costs one host",
+			"call, where the whole-dictionary attribute costs the whole table.",
+		}
+	case MemberLen:
+		return []string{
+			name + " is this class's LENGTH operator: the Lua expression #" +
+				lowerFirstWord(class) + ".",
+		}
+	case MemberSelf:
+		return []string{
+			name + " is this class's CALL operator: the Lua expression " +
+				lowerFirstWord(class) + "(...), calling the object itself.",
+		}
+	}
+	return nil
+}
+
+// lowerFirstWord turns LuaChunkIterator into `it`-ish prose: the class name
+// with its Lua prefix dropped and its first letter lowered, which is what a mod
+// author's variable is usually called.
+func lowerFirstWord(class string) string {
+	s := class
+	if len(s) > 3 && s[:3] == "Lua" {
+		s = s[3:]
+	}
+	if s == "" {
+		return "obj"
+	}
+	if s[0] >= 'A' && s[0] <= 'Z' {
+		s = string(rune(s[0])+32) + s[1:]
+	}
+	return s
+}
+
+// buildOperator turns one class operator into a member entry.
+//
+// Two shapes, and the JSON tells them apart by which fields it carries:
+// __index and __len are ATTRIBUTE-shaped (a read_type and nothing else, nine of
+// the eleven) and __call is METHOD-shaped (parameters and return values).
+//
+// WHERE THE INDEX KEY'S TYPE COMES FROM, since the description does not carry
+// one. An operator declares only what indexing YIELDS, so the key has to be
+// derived, and the rule is two clauses over facts the description does state:
+//
+//   - A class that also declares `length` answers Lua's `#`, which is the
+//     SEQUENCE-length operator, so it is indexed by position: uint32.
+//     LuaFluidBox's own index description says so out loud -- "the index must
+//     always be in bounds (see length_operator)" -- and LuaInventory's example
+//     is `get_main_inventory()[1]`.
+//   - ...unless what it yields is itself tier 2, which is the description
+//     saying the class is heterogeneous. LuaCustomTable yields `Any`, and it
+//     really is keyed by `uint32 | string` at half its use sites
+//     (game.players) and by string at the other half (force.technologies). A
+//     union key is exactly what a dyn-keyed dictionary return already crosses
+//     as, so this is the answer the generator gives one line away in goDictKV
+//     rather than a new one.
+//
+// That leaves LuaGuiElement, which declares no `length` and whose index is by
+// child NAME, on the tier-2 arm as well -- correct for the same reason.
+// TestOperatorKeyKinds enumerates all five so a pin that adds a sixth fails
+// rather than being classified by a rule nobody re-read.
+//
+// THERE IS NO WRITE HALF and that is the description's doing, not an omission:
+// an operator carries a read_type and never a write_type, so `fluidbox[1] = f`
+// -- which the prose says is legal -- is not a shape the API description
+// models. LuaFluidBox::set_filter and the ordinary members cover what it does.
+func buildOperator(m *typeMapper, class string, op Operator, hasLength bool) (Member, error) {
+	if !op.IsAttribute() {
+		// __call. Positional parameters and return values, exactly like a
+		// method -- so it is built like one and only the kind differs.
+		mem, err := buildMethod(m, class, Method{
+			Name: op.Name, Order: op.Order,
+			Parameters: op.Parameters, ReturnValues: op.ReturnValues,
+			Format: op.Format,
+		})
+		if err != nil {
+			return Member{}, err
+		}
+		mem.Kind = MemberSelf
+		return mem, nil
+	}
+
+	val, err := m.mapType(*op.ReadType, 1)
+	if err != nil {
+		return Member{}, err
+	}
+	val.Name, val.Optional = "value", op.Optional
+
+	switch op.Name {
+	case "length":
+		return Member{Class: class, Name: op.Name, Kind: MemberLen,
+			Rets: []FieldSpec{val}, Optional: op.Optional}, nil
+	case "index":
+		key := FieldSpec{Name: "key", Kind: KindDyn}
+		if hasLength && val.Kind != KindDyn {
+			key.Kind = KindU32
+		}
+		return Member{Class: class, Name: op.Name, Kind: MemberIndex,
+			Args: []FieldSpec{key}, Rets: []FieldSpec{val},
+			Optional: op.Optional}, nil
+	}
+	// A fourth attribute-shaped operator would be a Lua metamethod this ABI has
+	// no expression for, and guessing which one is how a wrong binding ships.
+	return Member{}, fmt.Errorf("attribute-shaped class operator %q, which is "+
+		"neither __index nor __len", op.Name)
+}
+
+func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {
+	if meth.VariadicParameter != nil {
+		return Member{}, fmt.Errorf("variadic parameter")
+	}
+	out := Member{Class: class, Name: meth.Name, Kind: MemberCall}
+
+	if len(meth.VariantGroups) > 0 {
+		// The method's own parameter table is a discriminated union -- the four
+		// of these are set_gui_arrow, LuaGuiElement::add, create_entity and
+		// create_segmented_unit. Same answer as a variant-group concept: one
+		// tier-2 argument, which the guest fills as a tagged table.
+		out.Args = []FieldSpec{{Name: "args", Kind: KindDyn}}
+	} else if meth.TakesTable() {
+		// One struct argument rather than positional ones, which is exactly the
+		// tier-1 shape.
+		fields, err := m.mapFields(meth.Parameters, nil, 1)
+		if err != nil {
+			return Member{}, err
+		}
+		if len(fields) > 0 {
+			out.Args = []FieldSpec{{Name: "args", Kind: KindStruct, Struct: fields}}
+		}
+	} else {
+		params := append([]Parameter(nil), meth.Parameters...)
+		sort.SliceStable(params, func(i, j int) bool { return params[i].Order < params[j].Order })
+		for _, p := range params {
+			f, err := m.mapType(p.Type, 1)
+			if err != nil {
+				return Member{}, fmt.Errorf("parameter %q: %w", p.Name, err)
+			}
+			f.Name, f.Optional = p.Name, p.Optional
+			out.Args = append(out.Args, f)
+		}
+	}
+
+	rets := append([]ReturnValue(nil), meth.ReturnValues...)
+	sort.SliceStable(rets, func(i, j int) bool { return rets[i].Order < rets[j].Order })
+	for i, rv := range rets {
+		f, err := m.mapType(rv.Type, 1)
+		if err != nil {
+			return Member{}, fmt.Errorf("return %d: %w", i, err)
+		}
+		f.Name, f.Optional = fmt.Sprintf("r%d", i), rv.Optional
+		out.Rets = append(out.Rets, f)
+	}
+	return out, nil
+}
+
+// classify buckets a skip reason so the report counts causes rather than
+// messages. What it says is which missing piece would buy the most coverage.
+func classify(err error) string {
+	s := err.Error()
+	for _, probe := range []struct{ needle, bucket string }{
+		{"tier-2 codec", "union or recursive type (tier 2)"},
+		{"variant parameter groups", "variant parameter groups (hand-written)"},
+		{"untyped table", "untyped table"},
+		{"callback", "callback parameter"},
+		{"tuple", "tuple"},
+		{"LuaLazyLoadedValue", "LuaLazyLoadedValue"},
+		{"variadic", "variadic parameter"},
+		{"nil has no representation", "nil"},
+		{"no expressible fields", "empty table"},
+	} {
+		if contains(s, probe.needle) {
+			return probe.bucket
+		}
+	}
+	return "other"
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Emitting the member table
+//
+// The generated Lua ships inside the mod, alongside the guest it was generated
+// with. That pairing is what makes dense per-build member ids safe: the table
+// and the wasm always come from the same API version, so they cannot disagree.
+// ---------------------------------------------------------------------------
+
+// blocks lays out a member's argument and return signatures.
+//
+// A field with no name gets a positional one. Parameter names come from the
+// JSON and are almost always present, but the layout is keyed by name and a
+// blank would collide with the next blank.
+func (m Member) blocks() (StructBlock, StructBlock, error) {
+	name := func(fs []FieldSpec, prefix string) []FieldSpec {
+		out := append([]FieldSpec(nil), fs...)
+		for i := range out {
+			if out[i].Name == "" {
+				out[i].Name = fmt.Sprintf("%s%d", prefix, i)
+			}
+		}
+		return out
+	}
+	args, err := LayoutStruct(name(m.Args, "a"))
+	if err != nil {
+		return StructBlock{}, StructBlock{}, fmt.Errorf("%s::%s args: %w", m.Class, m.Name, err)
+	}
+	rets, err := LayoutStruct(name(m.Rets, "r"))
+	if err != nil {
+		return StructBlock{}, StructBlock{}, fmt.Errorf("%s::%s rets: %w", m.Class, m.Name, err)
+	}
+	return args, rets, nil
+}
+
+// luaQuote renders a Lua string literal.
+//
+// \ddd escapes rather than Go's %q, for the same reason luagen has its own:
+// Go emits \u for a non-ASCII rune and Lua 5.2 cannot parse that. Member names
+// are ASCII identifiers today, but the API is not ours and a name that breaks
+// the whole chunk is a bad way to find that out.
+func luaQuote(s string) string {
+	out := make([]byte, 0, len(s)+2)
+	out = append(out, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"' || c == '\\':
+			out = append(out, '\\', c)
+		case c < 0x20 || c >= 0x7f:
+			out = append(out, []byte(fmt.Sprintf("\\%03d", c))...)
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(append(out, '"'))
+}
+
+// LuaSource renders the member table as the module a packaged mod requires.
+//
+// ArgSize and RetSize travel with each entry because the GUEST needs them: it
+// has to reserve a block of the right size before it can call, and computing
+// that from the field list at runtime would be work it already did at compile
+// time.
+func (r Report) LuaSource(a *API) (string, error) {
+	return r.LuaSourceWith(a, EventReport{Reasons: map[string]int{}})
+}
+
+// LuaSourceWith renders the members and the events together. They share a file
+// because they share a lifetime: both are generated from one API version and
+// ship beside the guest compiled against them.
+func (r Report) LuaSourceWith(a *API, ev EventReport) (string, error) {
+	var b []byte
+	add := func(format string, args ...any) {
+		b = append(b, []byte(fmt.Sprintf(format, args...))...)
+	}
+
+	add("-- Generated by fklua from runtime-api.json. Do not edit.\n")
+	add("--\n")
+	add("-- Factorio %s, API schema version %d.\n", a.ApplicationVersion, a.APIVersion)
+	add("-- %d members; %d were not expressible and are absent rather than broken.\n",
+		len(r.Members), len(r.Skipped))
+	add("--\n")
+	add("-- Member ids are indices into this table and are paired with the guest\n")
+	add("-- that shipped beside it. They are NOT stable across API versions and do\n")
+	add("-- not need to be: both halves are regenerated together.\n")
+	add("return {\n")
+	add("  api_version = %d,\n", a.APIVersion)
+	add("  application_version = %s,\n", luaQuote(a.ApplicationVersion))
+	evSrc, err := ev.luaEvents()
+	if err != nil {
+		return "", err
+	}
+	add("%s", evSrc)
+	defSrc, err := r.Defines.luaDefines()
+	if err != nil {
+		return "", err
+	}
+	add("%s", defSrc)
+	add("  members = {\n")
+
+	for _, m := range r.Members {
+		args, rets, err := m.blocks()
+		if err != nil {
+			return "", err
+		}
+		valid := ""
+		if m.HasValid {
+			valid = "valid=true,"
+		}
+		// opt= is emitted only when true, so every member the description does
+		// not call optional keeps the bytes and the meaning it always had.
+		opt := ""
+		if m.Optional && m.Kind != MemberSet {
+			opt = "opt=true,"
+		}
+		add("    [%d]={kind=%d,name=%s,class=%s,%s%sargsize=%d,retsize=%d,"+
+			"sig={args=%s,rets=%s}},\n",
+			m.ID, m.Kind, luaQuote(m.Name), luaQuote(m.Class), valid, opt,
+			args.Size, rets.Size, args.LuaTable(), rets.LuaTable())
+	}
+
+	add("  },\n")
+	add("}\n")
+	return string(b), nil
+}
+
+// MemberIndex maps "Class::name" plus kind onto an id, which is what a binding
+// generator needs to emit constants and what a diff needs to compare versions.
+func (r Report) MemberIndex() map[string]int {
+	out := make(map[string]int, len(r.Members))
+	for _, m := range r.Members {
+		out[fmt.Sprintf("%s::%s/%d", m.Class, m.Name, m.Kind)] = m.ID
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Pruning: shipping only the members a guest actually calls
+//
+// The full table is about a megabyte of Lua for the whole member set
+// (host_members_bound in census.json; the exact byte count moves with every
+// pin and is not worth a literal here). Putting that in every mod would make a
+// guest that calls five API members carry thousands it never touches -- in
+// every save, in every download, and in Factorio's parse time at load.
+//
+// IDS ARE PRESERVED, NEVER RENUMBERED. The guest baked them in when its
+// bindings were generated, so the pruned table is SPARSE: `members[1729]`
+// stays 1729. Renumbering to close the gaps would silently point every call at
+// the wrong member, which is the worst possible way to save a few kilobytes.
+// ---------------------------------------------------------------------------
+
+// Only returns a report holding just the given member ids, with their ids and
+// signatures unchanged. Skips are carried through untouched: what a build could
+// not express is still worth reporting even when the guest never asked for it.
+func (r Report) Only(ids map[int]bool) Report {
+	// Defines rides along: it was pruned by its OWN scan, and dropping it here
+	// would silently un-generate every define the caller had already resolved.
+	out := Report{Skipped: r.Skipped, Reasons: r.Reasons, Defines: r.Defines}
+	for _, m := range r.Members {
+		if ids[m.ID] {
+			out.Members = append(out.Members, m)
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Events
+//
+// `events` in census.json counts them; they average around five fields and
+// nearly all are expressible with tier 1 alone --
+// events are flat, which is exactly why the plan encodes them EAGERLY. The
+// alternative, a host call per field, would cost more than writing the whole
+// struct for anything but a handler that reads one field and returns.
+// ---------------------------------------------------------------------------
+
+// EventDef is one generated event.
+type EventDef struct {
+	// ID is the index the guest subscribes with and receives.
+	ID int
+	// Name is the defines.events key. The NAME travels, not the number:
+	// Factorio's define values are not stable across versions, so control.lua
+	// resolves defines.events[name] at load rather than baking one in.
+	Name   string
+	Fields []FieldSpec
+}
+
+// EventReport is the generated event table plus what it could not express.
+type EventReport struct {
+	Events  []EventDef
+	Skipped []Skip
+	Reasons map[string]int
+	// Omitted mirrors Report.Omitted for event payload fields. No event carries
+	// one today; the row exists so that a payload that grows one is a number in
+	// the census rather than a field that quietly stops arriving.
+	Omitted   []OmittedField
+	OmittedBy map[string]int
+	// MaxSize is the largest encoded event. control.lua allocates ONE scratch
+	// buffer of this size and reuses it, so an event dispatch allocates nothing.
+	MaxSize int
+}
+
+// GenerateEvents builds the event table.
+func GenerateEvents(a *API) EventReport {
+	m := newTypeMapper(a)
+	r := EventReport{Reasons: map[string]int{}}
+
+	evs := append([]Event(nil), a.Events...)
+	sort.Slice(evs, func(i, j int) bool { return evs[i].Name < evs[j].Name })
+
+	for _, e := range evs {
+		// Name the payload, so an omitted field says which event it was in.
+		m.owner = append(m.owner, "event "+e.Name)
+		fields, err := m.mapFields(e.Data, nil, 1)
+		m.owner = m.owner[:len(m.owner)-1]
+		if err != nil {
+			r.Skipped = append(r.Skipped, Skip{Class: "event", Name: e.Name, Reason: err.Error()})
+			r.Reasons[classify(err)]++
+			continue
+		}
+		blk, err := LayoutStruct(fields)
+		if err != nil {
+			r.Skipped = append(r.Skipped, Skip{Class: "event", Name: e.Name, Reason: err.Error()})
+			r.Reasons["layout"]++
+			continue
+		}
+		if blk.Size > r.MaxSize {
+			r.MaxSize = blk.Size
+		}
+		r.Events = append(r.Events, EventDef{Name: e.Name, Fields: fields})
+	}
+	for i := range r.Events {
+		r.Events[i].ID = i + 1
+	}
+	r.Omitted, r.OmittedBy = m.omissions()
+	return r
+}
+
+// Only keeps just the given event ids, ids unchanged. Same rule as members: the
+// guest baked them in, so renumbering would subscribe it to the wrong events.
+func (r EventReport) Only(ids map[int]bool) EventReport {
+	out := EventReport{Skipped: r.Skipped, Reasons: r.Reasons, MaxSize: r.MaxSize,
+		Omitted: r.Omitted, OmittedBy: r.OmittedBy}
+	for _, e := range r.Events {
+		if ids[e.ID] {
+			out.Events = append(out.Events, e)
+		}
+	}
+	return out
+}
+
+// luaEvents renders the event table.
+func (r EventReport) luaEvents() (string, error) {
+	var b []byte
+	add := func(f string, a ...any) { b = append(b, []byte(fmt.Sprintf(f, a...))...) }
+	add("  event_scratch = %d,\n", r.MaxSize)
+	add("  events = {\n")
+	for _, e := range r.Events {
+		blk, err := LayoutStruct(e.Fields)
+		if err != nil {
+			return "", fmt.Errorf("event %s: %w", e.Name, err)
+		}
+		add("    [%d]={name=%s,size=%d,fields=%s},\n",
+			e.ID, luaQuote(e.Name), blk.Size, blk.LuaTable())
+	}
+	add("  },\n")
+	return string(b), nil
+}
+
+// ---------------------------------------------------------------------------
+// Defines
+//
+// Counted by `defines` and `define_values` in census.json, which is the only
+// place those numbers are written down. They are
+// tier 3 -- plain i32 -- and the ONLY hard thing about them is that
+// runtime-api.json carries their NAMES and an order and NOT their values.
+//
+// That is not an oversight to work around: a define's number is Factorio's own
+// and is not stable across versions, which is why this ABI has always resolved
+// defines.events by name at load rather than baking one in. Generating a
+// constant from the pin is therefore not merely fragile, it is impossible --
+// there is nothing in the description to generate FROM. The downstream report
+// that asked for baked constants had the premise wrong, and the correct shape
+// is the one defines.events already uses, generalised: the table carries the
+// dotted PATH, control.lua resolves it against the running game, and the guest
+// holds a per-build id that indexes the result.
+// ---------------------------------------------------------------------------
+
+// DefineDef is one generated define value.
+type DefineDef struct {
+	// ID is the per-build index the guest asks for through fk.define. Dense
+	// and 1-based: 0 is reserved so an unresolved read is distinguishable.
+	ID int
+	// Path is the dotted path under `defines`, e.g. "direction.east". The NAME
+	// travels, never the number.
+	Path string
+}
+
+// DefineReport is the generated defines table.
+type DefineReport struct {
+	Defines []DefineDef
+}
+
+// GenerateDefines walks the define groups and assigns per-build ids.
+//
+// EVERY GROUP EXCEPT defines.events. That one already has a resolved table of
+// its own, and its numbers are not what fk.subscribe takes -- offering a guest
+// both spellings of "on_tick" would be a trap dressed as a convenience.
+func GenerateDefines(a *API) DefineReport {
+	var paths []string
+	var walk func(prefix string, d Define)
+	walk = func(prefix string, d Define) {
+		path := prefix + d.Name
+		for _, v := range d.Values {
+			paths = append(paths, path+"."+v.Name)
+		}
+		for _, s := range d.Subkeys {
+			walk(path+".", s)
+		}
+	}
+	for _, d := range a.Defines {
+		if d.Name == "events" {
+			continue
+		}
+		walk("", d)
+	}
+	// Sorted, so the ids a build assigns depend on the API description and
+	// nothing else. Determinism is a correctness property here for the same
+	// reason it is everywhere else in this package: two machines building the
+	// same mod must produce the same table.
+	sort.Strings(paths)
+	r := DefineReport{}
+	for i, p := range paths {
+		r.Defines = append(r.Defines, DefineDef{ID: i + 1, Path: p})
+	}
+	return r
+}
+
+// Only keeps just the given define ids, ids unchanged -- the same rule as
+// members and events, and for the same reason: the guest baked them in.
+func (r DefineReport) Only(ids map[int]bool) DefineReport {
+	out := DefineReport{}
+	for _, d := range r.Defines {
+		if ids[d.ID] {
+			out.Defines = append(out.Defines, d)
+		}
+	}
+	return out
+}
+
+// luaDefines renders the defines table: id -> dotted path, resolved at load.
+func (r DefineReport) luaDefines() (string, error) {
+	var b []byte
+	add := func(f string, a ...any) { b = append(b, []byte(fmt.Sprintf(f, a...))...) }
+	add("  defines = {\n")
+	for _, d := range r.Defines {
+		add("    [%d]=%s,\n", d.ID, luaQuote(d.Path))
+	}
+	add("  },\n")
+	return string(b), nil
+}

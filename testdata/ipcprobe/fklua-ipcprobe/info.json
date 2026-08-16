@@ -1,0 +1,8 @@
+{
+  "name": "fklua-ipcprobe",
+  "version": "0.0.1",
+  "title": "FkLua UDP IPC probe",
+  "author": "FkLua",
+  "factorio_version": "2.1",
+  "description": "Measures what helpers.send_udp / helpers.recv_udp / on_udp_packet_received actually do on the installed Factorio, driven over the wire by scripts/ipc-probe-driver.py. Not a real mod; used only to calibrate the FkLua IPC protocol constants."
+}

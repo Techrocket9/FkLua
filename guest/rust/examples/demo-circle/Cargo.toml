@@ -1,0 +1,13 @@
+[package]
+name = "demo-circle"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "demo_circle"
+crate-type = ["cdylib"]
+
+[dependencies]
+fk = { path = "../../fk" }
+fkapi = { path = "../../fkapi" }
+fkipc = { path = "../../fkipc" }

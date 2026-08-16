@@ -1,0 +1,27 @@
+   0.581 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	load_parse_256k	262219	Duration: 5.357042ms
+   0.633 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	load_parse_1024k	1048651	Duration: 23.246542ms
+   0.858 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	load_parse_4096k	4194376	Duration: 100.468166ms
+   0.902 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	baseline_loop	2000000	Duration: 6.885958ms
+   0.919 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_wrap_cond_taken	2000000	Duration: 17.270208ms
+   0.934 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_wrap_cond_nottaken	2000000	Duration: 14.130042ms
+   0.946 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_wrap_mod_taken	2000000	Duration: 12.464959ms
+   0.959 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_wrap_mod_nottaken	2000000	Duration: 12.546167ms
+   0.966 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_nowrap	2000000	Duration: 6.882291ms
+   1.012 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	add_wrap_bit32	2000000	Duration: 46.611542ms
+   1.046 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	shr_floor	2000000	Duration: 33.852500ms
+   1.063 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	shr_modsub	2000000	Duration: 16.949833ms
+   1.106 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	shr_bit32	2000000	Duration: 43.104459ms
+   1.119 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mul_const_small	2000000	Duration: 12.438083ms
+   1.253 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mul_split_floor	2000000	Duration: 134.244625ms
+   1.487 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mul_split_bit32	2000000	Duration: 234.115667ms
+   1.609 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mul_split_magic	2000000	Duration: 122.010458ms
+   1.657 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mem_array_1based	1966080	Duration: 36.719000ms
+   1.693 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mem_array_0based	1966080	Duration: 36.051042ms
+   1.724 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	mem_hash_part	1966080	Duration: 30.955459ms
+   1.766 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	pun_frexp	2000000	Duration: 40.796375ms
+   1.956 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	pun_stringpack	2000000	Duration: 190.871667ms
+   2.010 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	call_table	2000000	Duration: 53.293125ms
+   2.056 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	call_upvalue	2000000	Duration: 46.644125ms
+   2.075 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	storage_build_table	262144	Duration: 18.968583ms
+   2.092 Script @__fklua-probe__/control.lua:48: FKPROBE_TIME	storage_pack_pages	262144	Duration: 16.232209ms
+   2.092 Script @__fklua-probe__/control.lua:625: FKPROBE_DONE	checks=94	false=1	errors=1

@@ -1,0 +1,35 @@
+[package]
+name = "fkipc"
+version = "0.1.0"
+edition = "2021"
+description = "Message-oriented IPC between a FkLua Rust guest and a companion process"
+
+[lib]
+crate-type = ["rlib"]
+
+# THE fkapi DEPENDENCY IS TARGET-GATED, AND THAT IS WHAT MAKES `cargo test`
+# WORK AT ALL.
+#
+# `fkapi` is #![no_std] over `#[link(wasm_import_module = ...)]` externs and
+# `fk` reaches straight into `core::arch::wasm32`, so neither builds for a host
+# target -- which is why nothing in this workspace has ever had a native test.
+# The state machine is the part two implementations get wrong and it depends on
+# neither, so the seam that lets the Go half be tested on the host (its
+# `//go:build tinygo.wasm` transport split) is reproduced here by Cargo:
+#
+#	cargo test -p fkipc                                  # the state machine
+#	cargo build -p fkipc --target wasm32-unknown-unknown  # the real transport
+#
+# -p is load-bearing on the first line. A bare `cargo test` at the workspace
+# root still tries to build `fk` for the host and still fails, exactly as it did
+# before this crate existed.
+#
+# `fk` JOINS `fkapi` HERE FOR ONE CALL: the engine gate's refusal line goes to
+# the game log, and `fk::log` is the binding for it. Declaring the `fk_log`
+# extern locally would have avoided a dependency and would have been a second
+# declaration of one ABI import, which is the shape this repo keeps finding
+# broken. Both crates are wasm-only, so the host test build still pulls in
+# neither.
+[target.'cfg(target_family = "wasm")'.dependencies]
+fkapi = { path = "../fkapi" }
+fk = { path = "../fk" }

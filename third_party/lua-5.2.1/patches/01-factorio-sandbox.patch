@@ -1,0 +1,106 @@
+diff -ruN a/src/lbaselib.c b/src/lbaselib.c
+--- a/src/lbaselib.c	2026-07-28 16:31:44
++++ b/src/lbaselib.c	2026-07-28 16:31:44
+@@ -253,19 +253,7 @@
+ }
+ 
+ 
+-static int luaB_loadfile (lua_State *L) {
+-  const char *fname = luaL_optstring(L, 1, NULL);
+-  const char *mode = luaL_optstring(L, 2, NULL);
+-  int env = !lua_isnone(L, 3);  /* 'env' parameter? */
+-  int status = luaL_loadfilex(L, fname, mode);
+-  if (status == LUA_OK && env) {  /* 'env' parameter? */
+-    lua_pushvalue(L, 3);
+-    lua_setupvalue(L, -2, 1);  /* set it as 1st upvalue of loaded chunk */
+-  }
+-  return load_aux(L, status);
+-}
+ 
+-
+ /*
+ ** {======================================================
+ ** Generic Read function
+@@ -309,7 +297,9 @@
+   size_t l;
+   int top = lua_gettop(L);
+   const char *s = lua_tolstring(L, 1, &l);
+-  const char *mode = luaL_optstring(L, 3, "bt");
++  /* FkLua: Factorio's load() will not load binary chunks and the 'mode'
++     argument has no effect. Text only, always. */
++  const char *mode = "t";
+   if (s != NULL) {  /* loading a string? */
+     const char *chunkname = luaL_optstring(L, 2, s);
+     status = luaL_loadbufferx(L, s, l, chunkname, mode);
+@@ -335,15 +325,7 @@
+ }
+ 
+ 
+-static int luaB_dofile (lua_State *L) {
+-  const char *fname = luaL_optstring(L, 1, NULL);
+-  lua_settop(L, 1);
+-  if (luaL_loadfile(L, fname) != LUA_OK) lua_error(L);
+-  lua_callk(L, 0, LUA_MULTRET, 0, dofilecont);
+-  return dofilecont(L);
+-}
+ 
+-
+ static int luaB_assert (lua_State *L) {
+   if (!lua_toboolean(L, 1))
+     return luaL_error(L, "%s", luaL_optstring(L, 2, "assertion failed!"));
+@@ -418,11 +400,9 @@
+ static const luaL_Reg base_funcs[] = {
+   {"assert", luaB_assert},
+   {"collectgarbage", luaB_collectgarbage},
+-  {"dofile", luaB_dofile},
+   {"error", luaB_error},
+   {"getmetatable", luaB_getmetatable},
+   {"ipairs", luaB_ipairs},
+-  {"loadfile", luaB_loadfile},
+   {"load", luaB_load},
+ #if defined(LUA_COMPAT_LOADSTRING)
+   {"loadstring", luaB_load},
+diff -ruN a/src/ldblib.c b/src/ldblib.c
+--- a/src/ldblib.c	2026-07-28 16:31:44
++++ b/src/ldblib.c	2026-07-28 16:31:44
+@@ -371,21 +371,10 @@
+ 
+ 
+ static const luaL_Reg dblib[] = {
+-  {"debug", db_debug},
+-  {"getuservalue", db_getuservalue},
+-  {"gethook", db_gethook},
++  /* FkLua: Factorio exposes only getinfo and traceback by default.
++     The rest are available only behind a command-line flag, so a mod may
++     not rely on them. */
+   {"getinfo", db_getinfo},
+-  {"getlocal", db_getlocal},
+-  {"getregistry", db_getregistry},
+-  {"getmetatable", db_getmetatable},
+-  {"getupvalue", db_getupvalue},
+-  {"upvaluejoin", db_upvaluejoin},
+-  {"upvalueid", db_upvalueid},
+-  {"setuservalue", db_setuservalue},
+-  {"sethook", db_sethook},
+-  {"setlocal", db_setlocal},
+-  {"setmetatable", db_setmetatable},
+-  {"setupvalue", db_setupvalue},
+   {"traceback", db_traceback},
+   {NULL, NULL}
+ };
+diff -ruN a/src/linit.c b/src/linit.c
+--- a/src/linit.c	2026-07-28 16:31:44
++++ b/src/linit.c	2026-07-28 16:31:44
+@@ -29,10 +29,9 @@
+ static const luaL_Reg loadedlibs[] = {
+   {"_G", luaopen_base},
+   {LUA_LOADLIBNAME, luaopen_package},
+-  {LUA_COLIBNAME, luaopen_coroutine},
++  /* FkLua: coroutine, io and os are not present in Factorio's sandbox.
++     https://lua-api.factorio.com/latest/auxiliary/libraries.html */
+   {LUA_TABLIBNAME, luaopen_table},
+-  {LUA_IOLIBNAME, luaopen_io},
+-  {LUA_OSLIBNAME, luaopen_os},
+   {LUA_STRLIBNAME, luaopen_string},
+   {LUA_BITLIBNAME, luaopen_bit32},
+   {LUA_MATHLIBNAME, luaopen_math},

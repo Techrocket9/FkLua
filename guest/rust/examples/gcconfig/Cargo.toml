@@ -1,0 +1,16 @@
+[package]
+name = "gcconfig"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "gcconfig"
+crate-type = ["cdylib"]
+
+# NO `features` TABLE, and that is a rule rather than an omission: the collector
+# arm is selected on the command line with `--features fk/fkgc`, because a
+# feature declared here would be unified across the whole workspace by Cargo's
+# v2 resolver and would turn the collector on for every other example too. See
+# internal/guest.RustCollectorFeature.
+[dependencies]
+fk = { path = "../../fk" }

@@ -1,0 +1,6 @@
+# rustc 1.97 enables bulk-memory, multivalue and reference-types by default for
+# wasm32-unknown-unknown, none of which FkLua compiles. See agents/guests.md:
+# the flag governs only the guest's OWN codegen, so wasm-opt still has to lower
+# what compiler_builtins ships precompiled.
+[build]
+rustflags = ["-C", "target-feature=-bulk-memory,-multivalue,-reference-types,-sign-ext,-nontrapping-fptoint"]

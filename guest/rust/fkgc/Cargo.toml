@@ -1,0 +1,14 @@
+[package]
+name = "fkgc"
+version = "0.1.0"
+edition = "2021"
+description = "Guest-side garbage collector for a FkLua Rust guest"
+
+[lib]
+crate-type = ["rlib"]
+
+# `--cfg fkgcnozero` is a MEASUREMENT ARM and not a feature: it produces a guest
+# that is wrong on purpose, so it must not be reachable by `--features`. It is
+# declared here only so the compiler stops guessing it was a typo.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fkgcnozero)'] }

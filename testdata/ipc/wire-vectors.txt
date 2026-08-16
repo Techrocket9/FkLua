@@ -1,0 +1,301 @@
+# fkipc wire vectors -- ONE FORMAT, TWO CODECS, PINNED BY DATA.
+#
+# guest/go/fkipc/wire produced every frame below. Both codecs read this file --
+# sdk/go/fkipc/vectors_test.go on the Go side, guest/rust/fkipc/tests/vectors.rs
+# on the Rust one -- and each must decode every field out of it and re-encode
+# the identical bytes. internal/guest's parity gate additionally injects a
+# selection of these frames into BOTH compiled example guests and requires the
+# same reaction.
+#
+# It exists because two implementations of one wire format is the AD5 shape --
+# the same defect in the same function, fixed on one backend and left standing
+# on the other for two milestones because the test was written against one --
+# and the only cure that does not depend on somebody remembering is to make the
+# BYTES the shared artifact rather than the parallel authorship.
+#
+# A record is a run of "key value" lines ended by a blank line. Lines beginning
+# with '#' are comments. Hex is lower-case and unspaced; an empty payload is an
+# empty value. "control" names a protocol-defined payload and the "field" lines
+# after it are what a decoder must read back out of it.
+#
+# REGENERATING: this is a golden file, and its generator is the Go reader --
+# `go test ./fkipc -run TestTheCommittedWireVectors -update`, from sdk/go.
+# It rewrites every record from its DECLARED lines, recomputing the two derived
+# ones: `frame` always, and a control record's `payload`. A codec change
+# that moves these bytes is a wire-format change and the diff is the review
+# artifact, exactly as it is for the emitter's own goldens.
+
+name hello
+type 1
+flags 0
+channel 0
+epoch 7
+seq 0
+corr 1
+frag 0
+nfrag 1
+payload 010100081000070000000100000000000600666b2d697063
+control hello
+field proto_min 1
+field proto_max 1
+field max_frame 2048
+field max_fragments 16
+field boot 7
+field tick 1
+field profile 0
+field name fk-ipc
+frame 464b01010000000007000000000000000100000018000001010100081000070000000100000000000600666b2d697063
+
+name hello_ack
+type 2
+flags 0
+channel 0
+epoch 1371602926
+seq 0
+corr 1
+frag 0
+nfrag 1
+payload 01013c0f100000000000393000000100040070656572
+control hello
+field proto_min 1
+field proto_max 1
+field max_frame 3900
+field max_fragments 16
+field boot 0
+field tick 12345
+field profile 1
+field name peer
+frame 464b010200000000eeffc05100000000010000001600000101013c0f100000000000393000000100040070656572
+
+name hello_empty_name
+type 1
+flags 0
+channel 0
+epoch 0
+seq 0
+corr 2
+frag 0
+nfrag 1
+payload 010158000100000000000000000000000000
+control hello
+field proto_min 1
+field proto_max 1
+field max_frame 88
+field max_fragments 1
+field boot 0
+field tick 0
+field profile 0
+field name 
+frame 464b01010000000000000000000000000200000012000001010158000100000000000000000000000000
+
+name heartbeat
+type 3
+flags 0
+channel 0
+epoch 1371602926
+seq 0
+corr 0
+frag 0
+nfrag 1
+payload ffffffff010000000200000003000000
+control heartbeat
+field tick 4294967295
+field rx 1
+field drops 2
+field gaps 3
+frame 464b010300000000eeffc051000000000000000010000001ffffffff010000000200000003000000
+
+name msg_all_bytes
+type 4
+flags 0
+channel 1
+epoch 1371602926
+seq 1
+corr 0
+frag 0
+nfrag 1
+payload 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+frame 464b010400000100eeffc051010000000000000000010001000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+
+name msg_snapshot
+type 4
+flags 4
+channel 1
+epoch 1371602926
+seq 4294967295
+corr 0
+frag 0
+nfrag 1
+payload 77686f6c6520776f726c64
+frame 464b010404000100eeffc051ffffffff000000000b00000177686f6c6520776f726c64
+
+name msg_empty
+type 4
+flags 0
+channel 48879
+epoch 1
+seq 2
+corr 0
+frag 0
+nfrag 1
+payload 
+frame 464b01040000efbe01000000020000000000000000000001
+
+name msg_fragment_0_of_3
+type 4
+flags 0
+channel 2
+epoch 1371602926
+seq 10
+corr 99
+frag 0
+nfrag 3
+payload 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60616263
+frame 464b010400000200eeffc0510a0000006300000064000003000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60616263
+
+name msg_fragment_2_of_3
+type 4
+flags 0
+channel 2
+epoch 1371602926
+seq 12
+corr 99
+frag 2
+nfrag 3
+payload c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+frame 464b010400000200eeffc0510c0000006300000038000203c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff
+
+name req
+type 5
+flags 0
+channel 2
+epoch 1371602926
+seq 3
+corr 77
+frag 0
+nfrag 1
+payload 70696e67
+frame 464b010500000200eeffc051030000004d0000000400000170696e67
+
+name req_retry
+type 5
+flags 1
+channel 2
+epoch 1371602926
+seq 4
+corr 77
+frag 0
+nfrag 1
+payload 70696e67
+frame 464b010501000200eeffc051040000004d0000000400000170696e67
+
+name resp
+type 6
+flags 0
+channel 2
+epoch 1371602926
+seq 5
+corr 77
+frag 0
+nfrag 1
+payload 706f6e67
+frame 464b010600000200eeffc051050000004d00000004000001706f6e67
+
+name resp_error_duplicate
+type 6
+flags 3
+channel 2
+epoch 1371602926
+seq 6
+corr 77
+frag 0
+nfrag 1
+payload 0300726573756c7420776173206e6f7420636163686564
+control error
+field code 3
+field message result was not cached
+frame 464b010603000200eeffc051060000004d000000170000010300726573756c7420776173206e6f7420636163686564
+
+name resp_error_empty_message
+type 6
+flags 2
+channel 3
+epoch 1371602926
+seq 1
+corr 5
+frag 0
+nfrag 1
+payload 0100
+control error
+field code 1
+field message 
+frame 464b010602000300eeffc0510100000005000000020000010100
+
+name file_notify_digest
+type 7
+flags 8
+channel 1
+epoch 1371602926
+seq 7
+corr 0
+frag 0
+nfrag 1
+payload 00100000efbeadde0e00666b6970632f64756d702e62696e
+control filenotify
+field bytes 4096
+field fnv1a32 3735928559
+field name fkipc/dump.bin
+frame 464b010708000100eeffc05107000000000000001800000100100000efbeadde0e00666b6970632f64756d702e62696e
+
+name file_notify_bare
+type 7
+flags 0
+channel 1
+epoch 1371602926
+seq 8
+corr 0
+frag 0
+nfrag 1
+payload 0000000000000000080073686f742e706e67
+control filenotify
+field bytes 0
+field fnv1a32 0
+field name shot.png
+frame 464b010700000100eeffc0510800000000000000120000010000000000000000080073686f742e706e67
+
+name resync
+type 8
+flags 0
+channel 2
+epoch 1371602926
+seq 9
+corr 0
+frag 0
+nfrag 1
+payload 
+frame 464b010800000200eeffc051090000000000000000000001
+
+name bye
+type 9
+flags 0
+channel 0
+epoch 1371602926
+seq 0
+corr 0
+frag 0
+nfrag 1
+payload 
+frame 464b010900000000eeffc051000000000000000000000001
+
+name every_flag_bit
+type 6
+flags 15
+channel 65535
+epoch 4294967295
+seq 4294967295
+corr 4294967295
+frag 0
+nfrag 1
+payload 00
+frame 464b01060f00ffffffffffffffffffffffffffff0100000100
+

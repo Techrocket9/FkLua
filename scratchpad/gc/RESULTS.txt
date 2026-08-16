@@ -1,0 +1,106 @@
+=== building the guests ===
+
+=== 1. what the churn guest allocates, per event ===
+B/event over 200 :	2017
+B/event over 2000:	2016
+over 10000 events:	20163168	bytes =	2016.3168	B/event  checksum	1084341
+
+=== 2. where the armed page set's cost goes (mark calls vs stores) ===
+  kernel           mark() calls  leaf stores   marks/ms
+  -----------------------------------------------------
+  pure_sum                    0            1
+  pure_prng                   0            1
+  pure_dot                    0            1
+  real_entities              81       60,001
+  real_grid           1,113,721    2,812,001
+  real_names            799,747    2,577,779
+
+=== 3. barrier candidates on the real guest benchmarks ===
+# transform receipt: {'inlined_i32_store': 26, 'guarded_store_arm': 8, 'uninlinable_i32_store': 26}
+
+  reps=2 samples=15 guest=go -opt=3, table mode
+  kernel            base ms               pageset               card64k              pageset2             flagstore           flagunguard             callstore                    aa              widegate
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  pure_sum            44.50     0.988x[0.963,1.016]     0.986x[0.958,1.017]     0.994x[0.953,1.030]     0.989x[0.953,1.033]     0.980x[0.956,1.027]     0.998x[0.973,1.033]     0.992x[0.973,1.026]     0.984x[0.963,1.024]
+  pure_prng          164.12     1.010x[0.995,1.022]     1.000x[0.985,1.039]     1.002x[0.993,1.015]     1.001x[0.989,1.026]     1.009x[0.993,1.030]     1.016x[0.992,1.036]     1.003x[0.989,1.022]     1.020x[1.007,1.037]
+  pure_dot           168.95     1.001x[0.983,1.041]     1.002x[0.977,1.013]     1.008x[0.987,1.020]     1.002x[0.982,1.017]     1.003x[0.983,1.020]     1.002x[0.981,1.032]     1.001x[0.985,1.013]     1.001x[0.987,1.014]
+  real_entities      149.84     1.014x[0.996,1.028]     1.016x[0.993,1.027]     1.022x[0.999,1.028]     1.023x[1.003,1.032]     1.005x[0.985,1.010]     1.017x[0.993,1.036]     1.012x[0.989,1.015]     1.017x[0.995,1.023]
+  real_grid          853.26     1.130x[1.114,1.147]     1.085x[1.069,1.100]     1.060x[1.044,1.071]     0.999x[0.986,1.005]     0.993x[0.980,1.010]     0.998x[0.981,1.010]     0.995x[0.979,1.011]     0.997x[0.982,1.015]
+  real_names        1254.75     1.073x[1.063,1.084]     1.067x[1.056,1.083]     1.074x[1.062,1.083]     0.996x[0.987,1.004]     0.994x[0.984,1.003]     0.991x[0.979,0.997]     0.992x[0.981,1.000]     1.013x[1.000,1.024]
+
+=== 4. barrier candidates on the allocation-churn guest ===
+# transform receipt: {'inlined_i32_store': 58, 'guarded_store_arm': 0, 'uninlinable_i32_store': 58}
+
+  reps=1 samples=9 guest=churn -opt=3, table mode
+  kernel            base ms               pageset               card64k              pageset2             flagstore           flagunguard             callstore                    aa              widegate
+  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  churn_events      1219.80     1.098x[1.090,1.106]     1.088x[1.082,1.097]     1.093x[1.080,1.130]     1.009x[0.996,1.016]     1.002x[0.996,1.036]     1.018x[1.013,1.024]     0.998x[0.989,1.009]     1.015x[1.006,1.022]
+
+=== 5. barrier candidates on the bench --opt kernels ===
+  bench/wasm kernels, -opt=3, table mode, samples=15
+  kernel      base ms   pageset   card64k  pageset2 flagstoreflagunguard callstore        aa  widegate
+  ----------------------------------------------------------------------------------------------------
+  sum           447.5     0.993     0.995     0.989     0.992     0.992     0.990     0.984     0.988
+            [0.975,1.012] [0.972,1.012] [0.965,1.011] [0.970,1.021] [0.968,1.007] [0.966,1.007] [0.964,1.005] [0.961,1.009] 
+  chase         147.5     1.021     1.011     1.021     1.003     0.994     1.007     1.000     0.996
+            [0.992,1.027] [0.982,1.021] [0.988,1.029] [0.970,1.009] [0.965,1.003] [0.976,1.013] [0.979,1.005] [0.969,1.008] 
+  prng          281.8     1.000     0.994     0.993     0.997     1.006     1.004     0.997     0.999
+            [0.981,1.013] [0.981,1.015] [0.980,1.015] [0.986,1.021] [0.989,1.026] [0.984,1.023] [0.985,1.029] [0.984,1.019] 
+  dot           227.4     0.994     0.986     0.992     1.008     1.000     0.998     1.003     1.001
+            [0.972,1.009] [0.965,0.998] [0.968,1.020] [0.980,1.020] [0.976,1.013] [0.978,1.019] [0.975,1.020] [0.976,1.013] 
+  fib            68.4     1.006     1.001     1.015     0.989     1.003     1.004     1.002     1.005
+            [0.991,1.012] [0.985,1.040] [0.986,1.024] [0.971,1.017] [0.987,1.036] [0.979,1.016] [0.980,1.029] [0.986,1.036] 
+  frame          16.0     1.011     1.015     0.966     0.982     1.024     1.001     1.013     1.003
+            [0.983,1.045] [0.981,1.034] [0.950,0.983] [0.957,1.003] [1.003,1.048] [0.980,1.028] [0.987,1.035] [0.979,1.024] 
+  count          34.5     1.020     1.012     1.001     1.014     1.003     1.021     1.009     1.006
+            [0.975,1.031] [0.980,1.021] [0.962,1.014] [0.977,1.037] [0.974,1.058] [0.987,1.060] [0.986,1.062] [0.963,1.023] 
+  constdiv      126.3     1.008     1.027     1.022     1.009     1.027     1.031     1.014     1.007
+            [1.002,1.027] [1.004,1.040] [1.002,1.041] [1.000,1.031] [0.993,1.036] [1.005,1.039] [1.001,1.020] [0.993,1.018] 
+
+=== 6. mark and sweep throughput ===
+  span = 262,144 words (1 MiB of linear memory), granule 16 B, bitmap 32 bits/slot
+   density     variant   ms/pass   ns/word  4KiB pages/ms   MiB/ms
+  ----------------------------------------------------------------
+        5%        scan      3.81      14.5             67    0.263
+        5%        mark      5.30      20.2             48    0.189
+        5%   markdrain      7.19      27.4             36    0.139
+        5%       sweep      7.86      30.0             33    0.127
+
+       20%        scan      4.72      18.0             54    0.212
+       20%        mark      9.54      36.4             27    0.105
+       20%   markdrain     16.46      62.8             16    0.061
+       20%       sweep     12.08      46.1             21    0.083
+
+       40%        scan      5.92      22.6             43    0.169
+       40%        mark     14.77      56.3             17    0.068
+       40%   markdrain     25.70      98.1             10    0.039
+       40%       sweep     16.85      64.3             15    0.059
+
+  at 20% pointer density, markdrain: a 16 MiB heap is 263 ms of marking
+  at 20% pointer density, sweep:     a 16 MiB heap is 193 ms of sweeping
+
+=== done ===
+
+=== 7. false-pointer density in a real Go guest heap ===
+  churn, 5,000 events
+  heap                 66,064 .. 10,148,752  (9.62 MiB, 2,520,672 words)
+  in-range words       148,853  (5.9% of the heap)
+  ...granule-aligned   126,506  (5.0%)
+  distinct targets     65,228  of 630,168 granules (10.4%)
+
+=== 8. TinyGo's own -gc=conservative, compiled by fklua, as the reference ===
+  n=2000 events   leaking  488.4 ms  1,048,576 words (4 MiB)   checksum 179694
+                  conserv 1143.2 ms     32,768 words (0.125 MiB) checksum 179694  = 2.34x
+  n=5000 events   leaking 1256.8 ms  4,194,304 words (16 MiB)  checksum 442938
+                  conserv 2852.2 ms     32,768 words (0.125 MiB) checksum 442938  = 2.27x
+
+=== 9. the conservative root region, measured ===
+  churn: __global_base = 65536, __heap_base = 66112  ->  576 bytes of globals
+
+=== 10. does master's loop-guard fix (4c83390) move any of this? NO ===
+  emitted shape, bench guest, -opt=3 table:
+    519dcb7   8 guarded store arms, 26 inlined i32 stores, 3 hoisted marks, g95 never assigned
+    master    8 guarded store arms, 26 inlined i32 stores, 4 hoisted marks, none unassigned
+  MEMPACK.mark / store-leaf counts in the TIMED window, both builds identical:
+    pure_sum 0/0   real_entities 81/0   real_grid 1113721/2800000   real_names 799747/2577778
+  The revived loop is in a setup function, which the harness's zero-run subtracts.

@@ -1,0 +1,8 @@
+{
+  "name": "fklua-probe",
+  "version": "0.0.1",
+  "title": "FkLua day-0 sandbox probe",
+  "author": "FkLua",
+  "factorio_version": "2.1",
+  "description": "Measures the exact shape of Factorio's Lua 5.2 sandbox and writes script-output/fklua/probe.json. Not a real mod; used only to calibrate the FkLua compiler."
+}

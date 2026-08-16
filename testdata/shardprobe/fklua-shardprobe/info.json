@@ -1,0 +1,8 @@
+{
+  "name": "fklua-shardprobe",
+  "version": "0.0.1",
+  "title": "FkLua sharded-linear-memory probe",
+  "author": "FkLua",
+  "factorio_version": "2.1",
+  "description": "Measures what a SHARDED linear memory costs and buys, either side of the 4 MiB Lua array-part wall, in a bare Lua mod with no guest in it. Not a real mod; used only to calibrate the FkLua compiler."
+}

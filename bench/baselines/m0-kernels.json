@@ -1,0 +1,102 @@
+{
+  "generated": "2026-07-28T23:50:38Z",
+  "note": "ns/op is wall time net of interpreter startup, median of N runs. Ratios compare FkLua-style generated Lua against hand-written Lua.",
+  "results": [
+    {
+      "Kernel": "sum",
+      "Variant": "nat",
+      "Ops": 10485760,
+      "Checksum": "122683392",
+      "NsPerOp": 8.161242771148682,
+      "Ratio": 1
+    },
+    {
+      "Kernel": "sum",
+      "Variant": "gen",
+      "Ops": 10485760,
+      "Checksum": "122683392",
+      "NsPerOp": 23.734529781341553,
+      "Ratio": 2.908200435508054
+    },
+    {
+      "Kernel": "chase",
+      "Variant": "nat",
+      "Ops": 1966080,
+      "Checksum": "3735093248",
+      "NsPerOp": 21.823543802897134,
+      "Ratio": 1
+    },
+    {
+      "Kernel": "chase",
+      "Variant": "gen",
+      "Ops": 1966080,
+      "Checksum": "3735093248",
+      "NsPerOp": 31.146028137207033,
+      "Ratio": 1.427175550337169
+    },
+    {
+      "Kernel": "prng",
+      "Variant": "nat",
+      "Ops": 4000000,
+      "Checksum": "2639618674",
+      "NsPerOp": 106.49189575,
+      "Ratio": 1
+    },
+    {
+      "Kernel": "prng",
+      "Variant": "gen",
+      "Ops": 4000000,
+      "Checksum": "2639618674",
+      "NsPerOp": 63.189927,
+      "Ratio": 0.593377801709385
+    },
+    {
+      "Kernel": "dot",
+      "Variant": "nat",
+      "Ops": 1310720,
+      "Checksum": "3386006.666583",
+      "NsPerOp": 14.873822784423828,
+      "Ratio": 1
+    },
+    {
+      "Kernel": "dot",
+      "Variant": "gen",
+      "Ops": 1310720,
+      "Checksum": "3386006.666583",
+      "NsPerOp": 166.3257278442383,
+      "Ratio": 11.182446520636107
+    },
+    {
+      "Kernel": "dot",
+      "Variant": "genslot",
+      "Ops": 1310720,
+      "Checksum": "3386006.666583",
+      "NsPerOp": 23.698997497558594,
+      "Ratio": 1.5933360132794288
+    },
+    {
+      "Kernel": "fib",
+      "Variant": "nat",
+      "Ops": 4356617,
+      "Checksum": "832040",
+      "NsPerOp": 11.009660706920071,
+      "Ratio": 1
+    },
+    {
+      "Kernel": "fib",
+      "Variant": "gen",
+      "Ops": 4356617,
+      "Checksum": "832040",
+      "NsPerOp": 16.89320130734467,
+      "Ratio": 1.5343979943656687
+    },
+    {
+      "Kernel": "fib",
+      "Variant": "genup",
+      "Ops": 4356617,
+      "Checksum": "832040",
+      "NsPerOp": 15.337273164016942,
+      "Ratio": 1.39307409849395
+    }
+  ]
+}

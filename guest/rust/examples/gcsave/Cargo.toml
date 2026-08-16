@@ -1,0 +1,14 @@
+[package]
+name = "gcsave"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "gcsave"
+crate-type = ["cdylib"]
+
+# NO `features` TABLE. The collector arm is selected on the command line with
+# `--features fk/fkgc`; a feature declared here would be unified across the whole
+# workspace by Cargo's v2 resolver. See internal/guest.RustCollectorFeature.
+[dependencies]
+fk = { path = "../../fk" }

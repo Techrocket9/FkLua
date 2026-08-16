@@ -1,0 +1,8 @@
+{
+  "name": "fklua-growprobe",
+  "version": "0.0.1",
+  "title": "FkLua memory.grow cost probe",
+  "author": "FkLua",
+  "factorio_version": "2.1",
+  "description": "Measures what mem_grow's zero-fill costs per word and per CALL, against the grow increment, in a bare Lua mod with no guest in it. Not a real mod; used only to calibrate the FkLua runtime."
+}

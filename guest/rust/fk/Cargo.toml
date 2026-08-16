@@ -1,0 +1,32 @@
+[package]
+name = "fk"
+version = "0.1.0"
+edition = "2021"
+description = "Guest-side half of the FkLua host boundary"
+
+[lib]
+crate-type = ["rlib"]
+
+# THE COLLECTOR IS ONE FLAG AND NO SOURCE CHANGE, which is the property
+# `guest/go/fkgc` gets from a build tag and this gets from a Cargo feature:
+#
+#	cargo build --release --target wasm32-unknown-unknown -p myguest \
+#	    --features fk/fkgc
+#
+# It is OFF by default, so `cargo build` at the workspace root builds every
+# example exactly as it built before -- which is the "a leaking build is
+# byte-identical to what it was" property the Go side states for its own import.
+#
+# NO EXAMPLE MAY DECLARE THIS FEATURE IN ITS OWN Cargo.toml, and that is a rule
+# rather than a habit. Cargo's v2 resolver unifies features across every package
+# built in one invocation, so an example that declared it would turn the
+# collector on for every OTHER example in a workspace-wide `cargo build` --
+# silently, and only for that invocation. Passed on the command line against a
+# single `-p`, there is nothing to unify.
+# TestNoRustExampleDeclaresTheCollectorFeature is what stops that being a
+# comment.
+[features]
+fkgc = ["dep:fkgc"]
+
+[dependencies]
+fkgc = { path = "../fkgc", optional = true }

@@ -1,0 +1,37 @@
+# Build outputs
+/bin/
+/dist/
+/out/
+
+# Lua 5.2.1: the fetch script and patches are committed; the tarball and the
+# extracted/patched tree are not.
+/third_party/lua-5.2.1/lua-*.tar.gz
+/third_party/lua-5.2.1/build/
+
+# Go
+*.test
+coverage.out
+coverage.html
+
+# Scratch dirs used by the in-game harness (--mod-directory) and by Factorio's
+# helpers.write_file output
+/testdata/moddir/
+/testdata/tmp/
+script-output/
+
+# macOS
+.DS_Store
+
+# Rust guest build output.
+guest/rust/target/
+
+# Generated API reference; regenerate with `fklua docs`.
+docs/
+bench/guests/rust/target/
+
+# Audit scratch — reports and throwaway analysis, never committed.
+/scratch_tmp/
+
+# Python bytecode from the scratchpad harnesses.
+__pycache__/
+/fklua

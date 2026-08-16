@@ -1,0 +1,12 @@
+[package]
+name = "dict"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dict"
+crate-type = ["cdylib"]
+
+[dependencies]
+fk = { path = "../../fk" }
+fkapi = { path = "../../fkapi" }

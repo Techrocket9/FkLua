@@ -1,0 +1,41 @@
+;; The end-to-end sharding guest: a real packaged mod, through the real
+;; emitter, the real fk_rt.lua and the real fk_mod.lua, whose linear memory is
+;; a parameter so the SAME guest can be run either side of the 4 MiB wall.
+;;
+;; Two kernels, because the design has two emitted access forms and they have
+;; to be told apart:
+;;
+;;   loop A  a sequential i32 LOAD over 32,768 words at base 0. Its span is
+;;           128 KiB, which fits inside one 2 MiB shard -- so this is the loop
+;;           the guard's "span within one shard" test is for.
+;;   loop B  4,096 i32 STOREs at an 8 KiB stride, wrapping over the WHOLE
+;;           memory. Its addresses cross every shard and no analysis will ever
+;;           bound them, so this is the slow path, unhelped.
+;;
+;; A guest that was all loop A would flatter sharding and a guest that was all
+;; loop B would libel it. fk_sum is the checksum: a variant that computes a
+;; different answer is not a faster variant.
+;;
+;; @PAGES@ / @BYTES@ are substituted by scripts/run-shard-e2e.sh.
+(module
+  (memory @PAGES@)
+  (global $sum (mut i32) (i32.const 0))
+  (func (export "fk_on_tick") (param $tick i32)
+    (local $i i32) (local $s i32) (local $a i32)
+    (local.set $i (i32.const 0))
+    (loop $A
+      (local.set $s (i32.add (local.get $s) (i32.load (local.get $i))))
+      (local.set $i (i32.add (local.get $i) (i32.const 4)))
+      (br_if $A (i32.ne (local.get $i) (i32.const 131072))))
+    (local.set $a (i32.const 0))
+    (local.set $i (i32.const 0))
+    (loop $B
+      (i32.store (local.get $a) (i32.add (local.get $tick) (local.get $i)))
+      (local.set $a (i32.add (local.get $a) (i32.const 8192)))
+      (local.set $a (select (i32.sub (local.get $a) (i32.const @BYTES@))
+                           (local.get $a)
+                           (i32.ge_u (local.get $a) (i32.const @BYTES@))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br_if $B (i32.ne (local.get $i) (i32.const 4096))))
+    (global.set $sum (i32.add (global.get $sum) (local.get $s))))
+  (func (export "fk_sum") (result i32) (global.get $sum)))

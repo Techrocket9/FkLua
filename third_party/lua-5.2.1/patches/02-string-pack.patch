@@ -1,0 +1,43 @@
+Graft string.pack / string.unpack / string.packsize into 5.2.1.
+
+Factorio's Lua is 5.2.1 with these three backported from 5.4.6. Stock 5.2.1 has
+no such thing, so without this the oracle is missing a feature the real sandbox
+has -- and `--persist=packed` is built entirely on it.
+
+The implementation lives in strpack.c, copied into src/ by fetch.sh, so it can
+be read and diffed against upstream instead of living inside a patch hunk. It is
+#included rather than compiled separately because it uses lstrlib.c's already
+included lua.h/lauxlib.h and needs no separate translation unit.
+
+Semantics follow the in-game probe, not upstream 5.4: with no integer subtype an
+integer option truncates its argument rather than raising. See the header comment
+in strpack.c and the table in agents/sandbox.md.
+
+--- a/src/lstrlib.c
++++ b/src/lstrlib.c
+@@ -928,6 +928,15 @@
+ }
+ 
+ /* }====================================================== */
++
++
++/*
++** {======================================================
++** PACK/UNPACK, backported from Lua 5.4.6. The implementation is an ordinary
++** file so it can be diffed against upstream; see strpack.c.
++** =======================================================
++*/
++#include "strpack.c"
+ 
+ 
+ static const luaL_Reg strlib[] = {
+@@ -945,6 +954,9 @@
+   {"reverse", str_reverse},
+   {"sub", str_sub},
+   {"upper", str_upper},
++  {"pack", fk_str_pack},
++  {"packsize", fk_str_packsize},
++  {"unpack", fk_str_unpack},
+   {NULL, NULL}
+ };
+ 

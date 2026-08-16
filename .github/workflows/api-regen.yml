@@ -1,0 +1,112 @@
+name: api-regen
+
+# The weekly regeneration bot.
+#
+# Polls lua-api.factorio.com for a release newer than anything committed, and if
+# it finds one opens a PR containing the pulled JSON, a regenerated census and
+# the classified diff as the PR body.
+#
+# The BINDINGS in that PR are usually unchanged, and that is not a bug. They are
+# generated from factorio.DefaultAPIVersion, which is a committed pin a human
+# moves; the bot pulls a version alongside it and shows what moved. Regenerating
+# runs anyway so that a pin bumped by hand in the same PR is never stale.
+#
+# WHAT A HUMAN IS FOR: reading the breaking list. Everything else here is
+# mechanical, and the point of `api diff`'s classification is that the review is
+# bounded — a reviewer reads the Breaking section and nothing else.
+#
+# This is the one job in the repo that is allowed to reach the network, and it
+# reaches it exactly once, to fetch a JSON file. Nothing it opens a PR for is
+# ever built against the network: the JSON lands in the tree first.
+
+on:
+  schedule:
+    # Mondays, early UTC. Nothing about this is urgent -- a Factorio release is
+    # not an incident, and the diff is the same on Monday as it was on Saturday.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to pull (default: latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build fklua
+        run: go build -o bin/fklua ./cmd/fklua
+
+      - name: Record what we already have
+        id: before
+        run: echo "current=$(./bin/fklua api list | awk '/^\*/ {print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Pull the target version
+        id: pull
+        run: |
+          set -euo pipefail
+          ./bin/fklua api pull "${{ inputs.version || 'latest' }}" | tee /tmp/pull.log
+          # `latest` resolves to whatever shipped most recently, so the version
+          # comes from the FILE rather than from the input -- api pull already
+          # files it under the resolved name and says so when they differ.
+          NEW=$(ls -d api/*/ | xargs -n1 basename | sort -V | tail -1)
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if nothing is new
+        id: check
+        run: |
+          if git diff --quiet --exit-code -- api/; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "No API version newer than what is committed. Nothing to do."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Everything below only runs when there is genuinely something new, so a
+      # quiet week costs one HTTP request and no PR noise.
+      - name: Regenerate bindings and census
+        if: steps.check.outputs.new == 'true'
+        run: ./bin/fklua gen-bindings
+
+      - name: Classify the change
+        if: steps.check.outputs.new == 'true'
+        run: |
+          ./bin/fklua api diff "${{ steps.before.outputs.current }}" \
+            "${{ steps.pull.outputs.version }}" > /tmp/diff.md
+          ./bin/fklua api diff "${{ steps.before.outputs.current }}" \
+            "${{ steps.pull.outputs.version }}" --json /tmp/diff.json || true
+
+      # The suite runs against the OLD pin, which is what the committed bindings
+      # are still generated from. A red run here means the generators could not
+      # absorb the new description -- which is the interesting failure, and the
+      # PR should carry it rather than be blocked by it.
+      - name: Test
+        if: steps.check.outputs.new == 'true'
+        continue-on-error: true
+        id: tests
+        run: go test ./...
+
+      - name: Open the PR
+        if: steps.check.outputs.new == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: api/${{ steps.pull.outputs.version }}
+          title: "api: Factorio ${{ steps.pull.outputs.version }}"
+          commit-message: |
+            api: pull Factorio ${{ steps.pull.outputs.version }} and regenerate
+
+            Opened by the weekly regeneration bot. The classified diff is in the
+            PR body; a reviewer reads the Breaking section and nothing else.
+          body-path: /tmp/diff.md
+          labels: api-upgrade
+          draft: ${{ steps.tests.outcome == 'failure' }}

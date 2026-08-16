@@ -1,0 +1,91 @@
+WebAssembly/testsuite @ 193e551ff22663995b1ac95dc62344133669e14b
+converted with wast2json 1.0.41 using:
+  --disable-simd --disable-multi-value --disable-bulk-memory --disable-reference-types --debug-names
+
+Regenerate with scripts/fetch-spec.sh. The output is committed on purpose
+so CI needs no network and no WABT.
+
+Upstream is now Wasm 3.0, where multi-value and reference types are core.
+Neither is in the surface our guests emit (TinyGo wasm-unknown is
+-multivalue -reference-types), so files depending on them convert only
+partially, or not at all. Recorded here rather than left implicit.
+
+fully converted (48):
+  i32
+  block
+  loop
+  if
+  br
+  return
+  nop
+  unreachable
+  call
+  local_get
+  local_set
+  address
+  endianness
+  memory_redundancy
+  memory_trap
+  forward
+  labels
+  switch
+  stack
+  fac
+  f32
+  f32_cmp
+  f32_bitwise
+  f64
+  f64_cmp
+  f64_bitwise
+  float_literals
+  float_memory
+  float_misc
+  conversions
+  left-to-right
+  i64
+  int_exprs
+  int_literals
+  traps
+  start
+  load
+  store
+  const
+  func_ptrs
+  memory_size
+  names
+  comments
+  type
+  custom
+  inline-module
+  obsolete-keywords
+  skip-stack-guard-page
+
+partially converted (0) -- some modules need excluded features:
+
+not converted (26):
+  br_if
+  br_table
+  select
+  call_indirect
+  local_tee
+  global
+  memory
+  func
+  align
+  data
+  elem
+  local_init
+  memory_grow
+  address0
+  address1
+  float_exprs0
+  float_exprs1
+  float_memory0
+  memory_trap0
+  memory_trap1
+  traps0
+  unreached-valid
+  unreached-invalid
+  binary-leb128
+  token
+  id

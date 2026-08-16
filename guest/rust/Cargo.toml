@@ -1,0 +1,18 @@
+# The Rust guest workspace.
+#
+# One workspace so `cargo build` from here builds the substrate and every
+# example against the same lockfile, the way guest/go is one module.
+[workspace]
+resolver = "2"
+members = ["fk", "fkgc", "fkapi", "fkipc", "examples/hello", "examples/array", "examples/api", "examples/gctorture", "examples/gcsave", "examples/gcconfig", "examples/dict", "examples/ipc", "examples/demo-circle"]
+
+# Every guest ships as a cdylib into a game's tick loop, so the profile is not
+# a preference. panic=abort because there is no unwinding across the wasm
+# boundary -- FkLua compiles a trap, and a Factorio mod that unwinds mid-tick
+# has nowhere to unwind to. opt-level="s" and lto because the generated Lua is
+# parsed by the game at load, so module size is load time.
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+codegen-units = 1

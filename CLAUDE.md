@@ -1,0 +1,2581 @@
+# CLAUDE.md — working context for FkLua
+
+FkLua compiles WebAssembly ahead-of-time into Lua 5.2 source that runs inside Factorio's
+mod sandbox. Written in Go. **No LLVM dependency** — wasm is the input format and LLVM
+appears only inside toolchains users install for their own reasons.
+
+Read this before touching the emitter or the runtime library. Most of what follows is
+non-obvious and was established by measurement, not inference; the parts marked
+**verified** were confirmed on this machine and have regression tests.
+
+---
+
+## The 2026-08-04 audit, and what it left behind
+
+A second full-repo audit produced
+[`scratch_tmp/defect-report-2026-08-04.html`](scratch_tmp/defect-report-2026-08-04.html)
+— six findings (2 HIGH, 1 MEDIUM, 3 LOW), all now fixed, each with the strongest
+counter-argument against it recorded beside it. It is a much smaller haul than the
+2026-07-30 report's ten, and where it stops is the finding: **every one of the six
+sits on a surface no named test reaches.** The emitter and the runtime produced
+nothing, which is earned — spec suite at every level in both modes, golden files,
+checksum-compared benches — so read the six as a map of where that machinery has no
+reach, not as a verdict on the code around them.
+
+Three lessons, each written into the section it belongs to:
+
+- **This repo's own named failure shapes recur in new spots, and the guards built
+  for the first instance do not generalize.** Both HIGH findings are patterns
+  already described here in as many words: *two commands disagreeing about one
+  manifest key* (written for `gc`, found true of `api` — see the Host ABI section)
+  and *a skipped gate reads exactly like a pass* (written for the `needs:`-skips,
+  found true of a pipe — see Operations). Before writing a guard for a defect, ask
+  what the same shape would look like one key or one step over.
+- **A gate that cannot fail is worse than a gate nobody added**, because it is
+  reported as green. The two per-level spectest steps had run for months and had
+  never been able to go red.
+- **Doc drift is found by a reader, not by a build.** A deliverables row was
+  half-deleted — newline removed, superseded content left glued to its neighbour —
+  and asserted a Rust backlog `census.json` disproves. The table is exactly where
+  this file sends an agent for open work, so a stale row there costs a session.
+
+---
+
+## The 2026-07-30 audit, and what it left behind
+
+A full-repo audit produced [`scratch_tmp/defect-report.html`](scratch_tmp/defect-report.html)
+— ten findings, all now fixed, each with the reasoning that found it. The report is
+still worth reading before working on the optimizer or the persistence runtime, because
+what it recorded is *why* those bugs were invisible, and that has not changed.
+
+Three lessons outlived their fixes, and each is written into the section it belongs to:
+
+- **The conformance suite has structural blind spots.** Both miscompiles it missed
+  (negated float branches, deferral into an identity lowering) were reachable at the
+  default `-opt` level. It asserts comparisons through their materialised result, so
+  the negated form a branch consumes is untested by construction. `sameAtEveryLevel` in
+  `internal/luagen/opt_test.go` is the instrument for that class — add cases there.
+- **Persistence bugs live at mode and lifecycle seams**, and a test that hands live
+  values between instances cannot see them. Replay the control.lua protocol through a
+  stand-in `storage` instead, per mode.
+- **A mirror checked in one direction drifts in the other.** `factorio.Hooks` matched
+  control.lua for every hook it listed, and had been missing one for two milestones.
+
+---
+
+## Critical rules
+
+- **Never test against `/opt/homebrew/bin/lua`.** It is 5.5, which has an integer
+  subtype: `%`, overflow and `string.pack` all differ from Factorio's doubles-only
+  5.2.1, so it silently passes code that breaks in game. Use `bin/lua52f`, built from
+  PUC source and patched to Factorio's shape; `make check-lua52f` verifies it in CI
+  because if the oracle drifts, every host-side test result is a lie.
+  **Its fidelity stops at the sandbox, and that is now measured rather than
+  assumed.** `lua52f` is stock 5.2.1 inside — the missing libraries, the
+  doubles-only numerics and `string.pack`'s truncating cast are what it
+  reproduces. It does **not** reproduce Factorio's TABLE internals: a word table
+  past 2²⁰ entries costs ~20× per access in the game and nothing at all here, so
+  the same boundary-crossing grow is 27× in Factorio and 2.3× under the oracle.
+  Anything about the cost of a LARGE TABLE measured host-side does not transfer,
+  in either direction — see the 4 MiB wall row below. **Sharding removed the wall,
+  and it did NOT remove this rule**: the oracle still reads a table 4–6× faster
+  than Factorio does, so a host-side ratio between two forms that differ in
+  non-table work OVERSTATES the in-game difference. Measured at stage B: the
+  allocation-heavy `real_names` is 1.10× host-side and the same merged form is
+  1.00× end to end in game over 1,596 ticks.
+- **A commit that changes codegen must include the regenerated golden files.** The
+  golden diff *is* the review artifact; splitting it across commits makes the change
+  unreviewable. `runtime/lua/fk_mod.lua` and `fk_abi.lua` ship **verbatim** into every
+  packaged mod — changes there are field-visible runtime changes, not tooling changes.
+- **Spec-suite pass rate may rise and never fall.** `testdata/spec/PASSRATE` is the
+  gate; coverage is a weak metric for a compiler and a change that raises coverage
+  while lowering pass rate is a failure. Know its limit too: the suite asserts
+  materialized results, so negated branch conditions and deferral chains are blind
+  spots — that is where both confirmed miscompiles lived. Differential opt-level tests
+  are the instrument for that class.
+- **A variant that computes a different answer is not a faster variant.** `fklua bench`
+  and `bench --opt` compare checksums across variants/levels and fail the run on a
+  mismatch rather than reporting a flattering number.
+- **Rebase, never merge.** Trunk is `master` (set explicitly), history is linear, and
+  `git merge --ff-only` is the guard: if it refuses, the branch was not rebased first.
+  A milestone is tagged on `master` after the fast-forward.
+- **Documentation drift is a gate failure, not a follow-up.** Update this file in the
+  same commit as the change it describes. The audit found four drift instances left by
+  shipped milestones — the pattern is real.
+- **Human-facing documents follow the house style in
+  [`agents/docs-style.md`](agents/docs-style.md).** `README.md`, anything under `docs/`,
+  ledgers and reports are written for a public GitHub reader: no local paths, no
+  change-history narrative, no milestone or round codes as if known, no test-function
+  roll calls, no agent or process attribution, and no em-dashes or en-dashes anywhere.
+  This file and `agents/` are working notes and are exempt. Read that file before
+  editing a README or a `docs/` file, and run its grep check before committing.
+- **Determinism is a correctness property.** Generated code and the runtime run in
+  lockstep multiplayer: no entropy, no wall clock, no iteration-order dependence in
+  anything host-visible. The WASI `random_get` shim is a seeded PRNG in `storage` for
+  exactly this reason.
+  **And it has a second half nothing wrote down until a joining client desynced:
+  NO PEER-LOCAL SIGNAL MAY MUTATE GUEST STATE.** Under the default
+  `--persist=table`, guest memory IS `storage.fk_mem` and Factorio CRCs it, so the
+  only things a guest may branch on *when it writes* are its own state, the
+  replicated tick, and what arrived through the replicated inbound path.
+  `fk_after_load` is none of those — `script.on_load` runs on **every peer that
+  loads the state**, which on a running server means the joining client and nobody
+  else. `fk_mod.lua` already says it for `on_load` itself ("a write here is a desync
+  waiting to happen"), and a one-shot armed from `on_load` is a write from `on_load`
+  with one tick of delay. See [`agents/guests.md`](agents/guests.md), "Noticing a
+  load", and the fkipc section below for the measured instance.
+
+---
+
+## Maintaining this file
+
+**Keep `CLAUDE.md` current as the project evolves.** When a convention changes, an
+invariant is added, or a measured number is replaced by a better one, update it here in
+the same commit as the change.
+
+**When this file grows unmanageably large, split it.** Move a coherent topic into
+`agents/<topic>.md` and **leave an index entry below pointing at the file you moved.**
+Create `agents/` files on demand only — an empty stub reads as authoritative when it
+isn't.
+
+### Index of `agents/`
+
+| File | Covers |
+|---|---|
+| [`agents/codegen.md`](agents/codegen.md) | **Read before touching the emitter.** Measured lowerings, the i32/i64/float representations, NaN modes |
+| [`agents/sandbox.md`](agents/sandbox.md) | The Factorio Lua 5.2 walls, verified Lua constraints, `string.pack`, `collectgarbage` |
+| [`agents/testing.md`](agents/testing.md) | Running the suite, the audit habit, the corpus, the toolchain guard |
+| [`agents/benchmarks.md`](agents/benchmarks.md) | **Read before quoting a performance number.** What each benchmark measures; cross-language results against hand-written Lua |
+| [`agents/guests.md`](agents/guests.md) | **Read before touching a guest.** TinyGo flags and why each is mandatory, the host ABI, `scripts/run-guest.sh`, **the guest heap budget**, the ATOMIC TICK, and "what a player actually experiences" |
+| [`agents/optimizer.md`](agents/optimizer.md) | **Read before touching a pass.** What each `-opt` level does, assumes and measured, and the hazards that already bit |
+| [`agents/abi.md`](agents/abi.md) | **Read before touching the handle table or the binding generator.** The API census, the two handle spaces, status codes, dispatch, marshalling tiers, the generator |
+| [`agents/versioning.md`](agents/versioning.md) | **Read before touching the api command or the diff, and BEFORE MOVING THE DEFAULT PIN.** The version axes — schema, application, and the PIN-versus-ENGINE one that gets confused — `api pull`/`list`/`diff`, how a change is classified, **the PIN STAMP** — how a guest says which description its ids came from, why it is an export name, and `gen-bindings --into` for repinning a vendored checkout — and **"Moving the default pin"**: the whole checklist, distilled from the two migrations this repo has performed |
+| [`agents/gc.md`](agents/gc.md) | **Read before proposing anything about a guest-heap collector.** The incremental-GC design, the measured write-barrier table, the go/no-go verdict, the staged plan |
+| [`agents/ipc.md`](agents/ipc.md) | **Read before touching fkipc or anything that puts bytes on the UDP socket.** The wire format and why every field is where it is, sessions and the peer-minted epoch, the FOUR-MECHANISM filter ladder (HELLO = session boundary, epoch = frame filter, source port = mod filter, NAME = schema filter), **the ENGINE floor and why below it the library is INERT rather than send-only**, the determinism cost model that decides everything by DIRECTION — **and the rule it implies, that no peer-local signal may mutate guest state, which the load-reset design broke and a joining client measured** — the two probes' findings, the Rust mirror's five forced deviations, and what is still open |
+| [`agents/docs-style.md`](agents/docs-style.md) | **Read before creating or editing any human-facing document** (`README.md`, `docs/`, ledgers, reports). The public-audience house style: what must not appear, the formatting rules, the structure per document type, the licence wording, and the grep check to run before committing |
+| [`agents/sharding.md`](agents/sharding.md) | **Read before touching linear memory, and before quoting what a large Lua table costs.** Where the wall WAS (bracketed to 4,096 words), the in-game/host-side constant that closes gc.md's open item 1, the measured candidate table, the shipped representation and its refusals, stage B as built, **stage C: the cap is gone, the metadata scales, and the five defects that were hiding behind it**, §16: the shard-doubling residual, measured and ACCEPTED |
+
+---
+
+## The two invariants
+
+Everything in the emitter follows from these. Violating either produces Lua that is
+broken in a way unit tests will not localize.
+
+### Invariant A — i32 is an **unsigned** integral double in [0, 2³²)
+
+Never signed. This makes memory indexing, shifts, masks, unsigned compares, `div_u` and
+`rem_u` free or near-free, and pushes the cost onto signed compares — which range
+analysis eliminates for loop counters, the dominant case (the loop-header fixpoint
+proves both sides of a counted loop's `i32.lt_s` below 2³¹ and the compare goes
+direct). A signed representation would need a `+2³²` fixup on *every memory access*,
+the hottest operation in any real program. Not a close call.
+
+### Invariant B — zero `local` statements after the function prologue
+
+All wasm locals and operand-stack slots are declared in one `local` run at the top of
+the function body; nothing declares a local after the first `::label::`. Lua rejects a
+`goto` that jumps into a local's scope — declare everything up front and the
+restriction evaporates. **Verified** in `third_party/lua-5.2.1/sandbox_check.lua`.
+
+**One exception, since the counted-loop lowering: a numeric `for`'s control
+variable.** It is a local declared after the prologue, and it is legal for the same
+reason the invariant exists — the rejected case is a `goto` INTO the loop body, and
+wasm's structured control flow cannot name a label inside a loop body from outside
+it. `sandbox_check.lua` asserts all five shapes that follow (out of a body, backward
+across a `for`, a label inside a body, that jumping in is rejected, and the scoping
+of the control variable) rather than leaving it argued. Any *other* mid-function
+`local` is still the bug this invariant was written to prevent.
+
+### Further invariants (from the audit; soft until the named fix lands)
+
+- A negated comparison lowering must be the true complement **including NaN** —
+  `lt`/`ge` are not complements when an operand is NaN, so a float comparison negates
+  with `not (…)` rather than by swapping its operator. Integer comparisons keep the
+  swap; they have no NaN. *Enforced by `TestFloatComparisonsInAnIfAreFalseForNaN`.*
+- A wrap may be deferred only to a consumer whose emitted lowering actually re-reduces
+  mod 2³²; an identity lowering (shift by 0 mod 32, and-with-all-ones) absorbs
+  nothing. *Enforced by `TestShiftByZeroDoesNotAbsorbADeferredWrap`.*
+- An operand position a lowering may replace with a **range-derived constant** belongs in
+  `mayNotEvaluate`, and one the lowering **names twice** belongs in `duplicatesOperand`.
+  Both apply to the constant-divisor division added at `-opt=1`. *Enforced by
+  `TestAConstantFoldedDivisorStillTraps` and
+  `TestTheDividendIsNamedOnceInTheEmittedExpression`.*
+- Every persistence mode must round-trip a **grown** memory: whatever mirrors size into
+  `storage` is refreshed on every path that can change `MEMSIZE`, and a test proves it
+  through the mirror rather than by handing the live value over. *Enforced by
+  `TestGrownMemorySurvivesAtItsGrownSize` (table) and
+  `TestAGrownPackedHeapSurvivesTheStorageMirror` (packed).*
+- `factorio.Hooks` and the exports `runtime/lua/fk_mod.lua` actually calls match in
+  **both** directions. *Enforced by `TestEveryReportedHookIsActuallyRegistered` and
+  `TestEveryExportControlLuaCallsIsListedInHooks`.*
+- Guest dispatch state (scratch buffer, transient handle space) survives re-entrant
+  event dispatch; only the outermost dispatch clears or syncs. *Enforced by
+  `TestANestedDispatchLeavesTheOuterOneIntact`.*
+- **A Factorio method is a BOUND closure and its arity is exact.** `__index` hands
+  back a function that already carries the object, so dispatch calls `pcall(f, ...)`
+  and forwards exactly `#m.sig.args` slots. Passing `obj` a second time, or padding
+  to four with nils Lua still counts, is `Arguments count error` on **every method
+  in the API** — which is what shipped until 2026-08-01. **A stand-in object in a
+  test must be built the way the engine builds one** (methods handed back from
+  `__index` as closures, strict argument count); a `function(self, x)` left in a
+  plain table is the shape that hid it. *Enforced by
+  `TestAMethodIsCalledTheWayFactorioBindsIt`.*
+- **A lowering that writes `MEM` directly is only legal where the dirty-page
+  set is off.** `--persist=packed` flushes the pages `MEMPACK.mark` recorded, and that
+  is sound only because a guest cannot write memory except through `st8b`, `st16`,
+  `st32`, `st64`'s aligned path, `mem_copy` or `mem_fill`. `-opt=3`'s inlined 8-byte
+  store bypasses all six, so it is gated on the persistence mode as well as the level.
+  Inlined *loads* are unaffected — nothing records a read. **The gate now takes
+  `--gc=collected` too**, because the collector's write barrier IS that same page set,
+  armed only while marking — and the stakes rose with the second consumer: under packed
+  a missed mark is stale memory after a reload, under the collector it is a live object
+  the sweep reclaims. *Enforced by
+  `TestPackedModeKeepsTheEightByteStoreOutOfLine`,
+  `TestAnEightByteStoreInPackedModeReachesTheSave`, which fails `f false, i false` when
+  the gate is removed, and `TestEveryStoreShapeMarksItsPageUnderTheCollector`, which
+  walks every store width at every level and was confirmed to fail with the new
+  condition removed.*
+- **A `(ptr, len)` the guest hands the host must be consumed BEFORE the call
+  returns.** It is guest heap, and the conservative scan cannot see the host
+  holding it — so a buffered one is a use-after-free the moment a collection
+  runs, with no error anywhere. Sound today because `fk_mod.lua` reads a logged
+  string inside the call that logged it and `read_dyn` decodes eagerly; it stops
+  being sound the instant anything buffers. The general form is the collector's
+  **safe-point precondition**: a collection step runs only at an OUTERMOST
+  dispatch, where the shadow stack is empty and every live reference is in the
+  guest heap or in `[__global_base, __heap_base)`. That is what makes marking's
+  terminate-time barrier sufficient rather than needing a tricolour one, and a
+  guest that could be re-entered mid-collection would break it. *Enforced by
+  `TestACollectionStepRunsOnlyAtAnOutermostDispatch`, in two halves — a dynamic
+  one through the real control.lua and a text property on the depth guard that
+  ships in `fk_mod.lua`, because the negative case cannot be provoked without
+  building the re-entrancy the guard forbids.* **And the mirror now has teeth in
+  the INBOUND direction too**: what the host allocates to get a payload INTO the
+  guest is released at the outermost dispatch, so a guest keeping a `(ptr, len)`
+  past its dispatch reads recycled bytes rather than merely undefined ones.
+  *Enforced by `TestAHostInitiatedDispatchKeepsNoHeap`.*
+- **A lowering that replaces a loop HEADER inherits everything else written
+  there.** The loop guard's seed is emitted at the header, and the counted-loop
+  `for` replaces that header — so a loop both passes claimed declared a guard,
+  read it at every access and stepped its word index, and never assigned it. A
+  guard that is never assigned is `false` forever: the answers stay right, the
+  fast path is dead, and no checksum, conformance assertion or differential run
+  can see it. This is a **text** property or it is nothing. *Enforced by
+  `TestACountedLoopStillSeedsItsGuard` on the shape, and by
+  `TestEveryGuardAGuestReadsIsAlsoSeeded`, which emits every bench guest and
+  every example at `-opt=3` in both persistence modes and asserts that a guard
+  flag a function declares is one that function assigns — and reads, and does
+  not share a name with a module global.*
+- **An 8-byte access can STRADDLE a shard boundary, and the bounds check must come
+  first.** Linear memory is a vector of 2¹⁹-word shards, so a 4-byte aligned access
+  is wholly inside one shard by construction — but an 8-byte one at offset 2097148
+  has its low word in one table and its high word in the next. The spec requires an
+  out-of-range store to leave memory UNTOUCHED, and the flat representation could
+  not express the failure: one bounds check and two writes into one table cannot
+  half-succeed. Under sharding they can, and the failure is quiet — write the low
+  word, reach for `mem[s + 1]`, find nil, and raise a Lua indexing error instead of
+  a wasm trap with the low word already written. **Every 8-byte path checks all
+  eight bytes before touching either word, and the emitter never inlines the
+  straddle**: the merged fast test proves both words inside shard 0, and everything
+  else delegates to `st64`/`ld_f64`, which own the rule in one place. *Enforced by
+  `TestAStraddlingEightByteAccessCrossesTheShardBoundary`, which reads the halves
+  back as separate 4-byte loads on either side of the boundary, and by
+  `TestATrappingStraddleTrapsAndLeavesMemoryUntouched`, which grows a guest to a
+  memory that ENDS on a shard boundary so the last straddle point is also out of
+  range.*
+- **A page nests inside a shard and that is why the dirty-page set did not change.**
+  A page is 4 KiB and a shard is 2 MiB; both are powers of two and the page is the
+  smaller, so there are exactly 512 aligned pages per shard and **a page can never
+  straddle a shard boundary**. The set still indexes BYTE addresses, `DPLO`/`DPHI`
+  are still byte bounds, `MEMPACK.mark` and every writer's call to it are unchanged,
+  and only `pack_page`/`unpack_page` translate an index. The set is also the
+  collector's write barrier and that consumer is unaffected for the same reason.
+  A shard size that was not a multiple of the page size would break both at once.
+  *Enforced by `TestAPageNeverStraddlesAShardBoundary`.*
+- **Nothing but `S1` may hold a shard at chunk scope, and `adopt`/`restore` must move
+  it.** `fk.memory.adopt` replaces the whole vector and `MEMPACK.restore` replaces
+  its contents and the size; either one leaving `S1` on the OLD shard 0 gives a guest
+  whose fast path reads a table nothing else can reach — stores land in the new
+  vector through the slow arm, loads of the same address come back out of the old
+  one, and the two disagree silently for the rest of the session. Same failure class
+  as the dead loop-guard seed and the missed page mark, and like them it is a TEXT
+  property or it is nothing. *Enforced by
+  `TestAdoptAndRestoreRebindEveryDerivedMemoryLocal` and
+  `TestS1IsTheOnlyChunkLevelShardBinding`.*
+- **Two name families sharing a spelling is a MISCOMPILE.** Generated Lua has no
+  symbol table: whichever name is declared in the narrower scope silently wins
+  every reference in it, and neither the emitter nor Lua says anything. Each
+  family is indexed by a counter of its own and no two of those counters are
+  related, so a shared prefix collides exactly when two unrelated numbers meet.
+  The loop guard's flag was `g%d` off a header **step** index and a module global
+  is `g%d` off the **module global** index, so a guarded loop whose header step
+  index fell below the module's global count shadowed that global for the whole
+  function — a `global.set` wrote the flag, a `global.get` read a boolean, and in
+  TinyGo output `g0` is the shadow-stack pointer. Guard locals are `lg%d`/`lw%d_%d`
+  since 2026-08-01. **The rule is that a family indexed by a step index owns a
+  prefix nothing else uses**; the exhaustive table is in
+  [`agents/codegen.md`](agents/codegen.md), and a new lowering that names
+  something belongs in it. *Enforced by
+  `TestAGuardLocalDoesNotShadowAModuleGlobal` on the value and by
+  `TestNoNameFamilyCanCollideWithAnother`, which enumerates every family over
+  every index and demands the sets be pairwise disjoint.*
+
+---
+
+## Where the project stands
+
+All ten milestones through M10 are complete, plus M5a. The one-paragraph history:
+**M0** measured generated-style Lua at 1.4–2.9× hand-written on integer/pointer code
+against a 15× go/no-go (and 0.59× on `prng` — arithmetic lowerings beat `bit32`).
+**M3** made control flow, calls, globals, linear memory, floating point and i64 work:
+the spec suite passes **15,675 assertions across 48 files** with 0 failures (15,777
+under `--nan=exact`), held by `testdata/spec/PASSRATE`. **M4** put a TinyGo guest into
+real Factorio 2.0.77 as a packaged mod. **M5/M5a** built the optimizer. **M6** made
+guest state survive a save. **M7** gave guests the Factorio API (3,905 of 3,909 member
+entries reachable on the host side, 3,858 bound in Go — counts live in
+`api/<version>/census.json`, gated by `gen-bindings --check`, never re-derived by
+hand). **M8** added the Rust guest substrate with identical coverage. **M9** built
+`api pull/list/diff/check`, `docs`, `fklua.toml` and the weekly regeneration bot.
+**M10** made TinyGo wasip1 goroutines work in game behind a three-import WASI shim.
+**FkIPC** gave a guest a protocol to a companion process outside the game, over UDP.
+
+Detail lives in the `agents/` files — that is what the index above is for. What follows
+is only what you need daily, plus the traps.
+
+### FkIPC — a guest can talk to a process outside the game
+
+*Factorio, kommunikativ (per IPC)*, and it is a **guest library plus an external
+library over surfaces that were already bound**: no import, no export, no line of
+`fk_mod.lua` or `fk_abi.lua`, no golden file, no `Hooks` mirror, no census row. Framing,
+sessions, channels, correlated RPC with dedup, gap detection answered by snapshot,
+fragmentation, and bulk transfer as a file plus a digest — in `guest/go/fkipc`,
+`guest/rust/fkipc` and `sdk/go/fkipc`, with one codec (`guest/go/fkipc/wire`) shared by
+the guest and the SDK because a copy in each is the AD5 shape. Read
+[`agents/ipc.md`](agents/ipc.md) before touching any of it.
+
+**It was research, then a probe, and the probe is the reason there is a version
+floor.** `scripts/run-ipcprobe.sh` ran a 13-arm matrix against the then-pinned 2.0.77
+and found that **a headless `recv_udp` with a packet queued kills the server** at
+`TickClosure.cpp:91` — a C++ abort no `pcall` can catch, five times in five runs,
+needing BOTH the pump call and a queued packet. That is not a defect this project can
+work around, so `Open` reads `helpers.game_version` and **the whole library is INERT
+below `MinEngineVersion` = 2.1.14** — no `HELLO`, no pump, not one datagram, one log
+line saying so, and `StatusDisabled` from every call thereafter. The install moved to
+**2.1.14**, the killer arm survived 25 s with 467 events delivered, and the floor is
+what was *measured* rather than what the upstream report guessed.
+
+**It ran SEND-ONLY below the floor until 2026-08-07 and that was wrong, for a reason
+worth carrying past this feature: "outbound is free" is a statement about COST, not
+about USEFULNESS.** A session is established by a `HELLO_ACK`; an ACK arrives through
+the inbound path; inbound is exactly what the floor shuts off. So a send-only link
+searched once a second forever, never came up, refused every `Send` it was handed for
+want of a session, and put a trickle of frames on the wire that no peer could answer —
+while its author was told nothing but a counter. **The floor gates on the ENGINE and
+not on the API pin**, which is the other half: every member the library calls exists in
+the 2.0.77 description, so a mod built at the default GA pin gets the whole library on
+a 2.1.14 engine with no rebuild and no repin, and the gate is re-read on the replicated
+tick while it is shut so a save moved to a newer engine comes up by itself.
+`scripts/run-ipc.sh` and `run-ipcdemo.sh` now refuse to START below the floor, reading
+the constant out of the library through `scripts/lib-engine.sh` — because with nothing
+on the wire every leg would sit at its deadline and report a protocol failure for an
+engine that is merely too old. The same re-run answered every other TBD:
+inbound is byte-exact including NUL, one `recv_udp` drains a 20-packet backlog within
+the tick in order, latency is median 31.5 ms (~1.9 ticks) on a server, the inbound wall
+is between 4,000 and 8,192 B, and **an oversized `send_udp` fails SILENTLY** — which is
+why `MaxFrameCeiling = 3900` is enforced in the library rather than trusted to the
+engine.
+
+**The design is decided by DIRECTION and that is the one thing to carry out of it.**
+Outbound is a local side effect and is free. Inbound becomes an InputAction: replicated
+to every peer, written into the replay, quantized to a tick — about **6 kB/s once one
+player is connected**. So: talk a lot, listen a little, make the listening idempotent.
+It also buys the thing that makes the protocol legal at all — inbound arrives at every
+peer identically at the same tick, so a guest may branch on it, which is what lets the
+**peer mint the session epoch**. The guest cannot: everything it can compute is a
+deterministic function of state that time-travels with the save, so there is no
+deterministic function distinguishing two loads of one save, and any function that did
+would be a desync.
+
+**And the rule that falls out of it took the original design down: NO PEER-LOCAL
+SIGNAL MAY MUTATE GUEST STATE.** `fk_after_load` is armed from `script.on_load`,
+which Factorio runs on **every peer that loads the state** — including a client
+joining a game in progress, on its first simulated tick and on no other peer. Under
+the default `--persist=table` guest memory IS `storage.fk_mem`, which is CRC'd, so
+the session-reset-on-load design was join-unsafe by construction. **Measured on
+2.1.14 with `run-ipcdemo.sh --play`: the joining client logs `fkipc session reset`
+and the game logs `Multiplayer desynchronisation: crc test failed` from the very
+next tick, repeating.** `fk_mod.lua` states the rule one level up for `on_load`
+itself — *"a write here is a desync waiting to happen"* — and a one-shot armed from
+`on_load` is a write from `on_load` with one tick of delay. **`Reload()` is now a
+no-op in both languages**, the wiring is three lines rather than four (the export
+is optional and kept in the examples on purpose), and every session boundary is
+driven by a replicated signal: a `BYE`, the liveness test, or the guest's own clock
+having gone backwards. `boot` is the SESSION generation now rather than a load
+counter, and P6 — the double-`HELLO` first-tick window — is closed by there being
+nothing on either side of it. **This binds any mod, not only an IPC one**; the
+guest-author statement is in [`agents/guests.md`](agents/guests.md), "Noticing a
+load". *Enforced by `TestAJoiningPeerStaysByteIdenticalToTheServer`, which builds a
+server and a joiner as two module instances over one save and compares
+`storage.fk_mem` word for word after every dispatch — confirmed
+to fail against the load-reset at the first joined tick. Its joined window
+carries **inbound traffic** since P12 was fixed, so those 65 ticks compare
+event-carrying dispatches rather than the guest's own dynamics alone; before
+that, the host's own lazy buffer diverged first and would have masked anything
+fkipc did. It is FOUR arms since the safety package — both examples AND both
+demo mods, i.e. author-shaped handler code under the same gate — and the
+joiner's socket is modelled UNBOUND (record what the guest assembled, then
+raise), which is the real joining-client condition; restoring the status branch
+turns the demo arm red on three words. The corpus widening also re-taught the
+engine-shaped-stub lesson from a new angle: the exact-arity stub made every
+client-profile call fail IDENTICALLY on both peers and the new arms first
+"passed" vacuously, so the test now pins an end-of-window telemetry value no
+guest can produce without a completed round trip.*
+
+**And the rule had a SECOND instance that was not a hook but a STATUS.**
+`rawSend` counted `TxFrames`/`TxBytes` when `send_udp` returned OK and
+`QueueDrops` when it did not — and whether `send_udp` succeeds is a fact about
+the peer's COMMAND LINE, since `--enable-lua-udp` is what binds the socket and a
+joining graphical client does not have it. Two peers, two branches, two
+different words in `storage.fk_mem`, every frame. `WriteBulk` was worse: it
+returned early on a failed `write_file` and skipped the `FILE_NOTIFY`, which
+consumes the channel's seq. Both attempt-and-ignore now, so the counters describe
+what the link ATTEMPTED — a deterministic function of guest state. **The general
+form: "outbound is free" also means an outbound call's OUTCOME is per-peer, so a
+guest may make one anywhere and must never store what happened.** *Enforced by
+`TestAFailedSendIsInvisibleToGuestState` and its Rust mirror, both confirmed to
+fail before the fix.* **And since the safety package the discipline is a TYPE:
+the wasm-arm transport's `Send`/`WriteFile` return NOTHING in both languages, so
+a future edit cannot branch on delivery because there is no value to branch on.**
+`Poll`/`BaseVersion`/`Event` keep their returns deliberately — inbound is the
+replicated direction, the version is engine-identical across MP peers, and the
+event-id test is a build-time constant — and every API-level `Status` that
+remains is a deterministic refusal (a function of guest state alone). The
+interface half fails to compile if violated; the wasm arm is never type-checked
+by host tests, so `TestTheOutboundTransportSeamHasNoReturnValue` and
+`tests/seam.rs` pin it as a text property. The author-facing half is the
+**join-safety contract** — MAY branch on payloads, session events, the tick,
+`Stats`, own state, the world; MUST NEVER store an outbound call's outcome or
+anything computed in `fk_after_load` — stated once in each package doc and
+[`agents/ipc.md`](agents/ipc.md), with `WriteBulk` as the pattern for
+per-instance side effects and `fk.Log` as the only sanctioned peer-local sink
+(the game log is not CRC'd). The in-game bisection that found it is tabulated in
+[`agents/ipc.md`](agents/ipc.md) — including the trap that cost two runs: **a map
+created with an older build of the guest is not a valid join control**, because
+`same_build()` then fails and the load discards the heap instead of adopting it.
+**And that trap turned out to be sitting on a RUNTIME defect rather than only on
+an experimental-hygiene one** — the decline was never *finished*, because
+everything that finished it lived in `on_configuration_changed`, which Factorio
+does not raise for a rebuild that keeps the mod's version. Fixed 2026-08-07; the
+map guard stays, because a stale map is still not a control. See "a declined
+heap" in Persistence below.
+
+**And a THIRD instance was in the HOST, which is P12, and it binds every mod
+rather than every IPC mod.** `fk_mod.lua` caches the per-nesting-level event
+scratch buffer — and the tier-2 slots a command or remote-method trampoline
+dispatches through — in a **Lua local**, allocated out of the **guest heap**
+through `fk_alloc_static` at the first dispatch that needs one. A load rebuilds
+the local empty; the heap comes back from the save with the buffer already in
+it. So the first dispatch after a load allocated a SECOND buffer beside one that
+was already there: `event_scratch` bytes per level per load into the save, one
+more entry pinned in `kept`, and every later allocation landing that much
+further up than on an instance that never reloaded. **The general form is that a
+cache of a HEAP address is part of the heap's state and has to travel with it**
+— which is what `storage` is for, and what `storage.fk_handles` had already been
+doing for the same reason one field over. **`storage.fk_bufs` is that mirror**:
+the live tables aliased in, published by `state_init` where the heap is fresh,
+adopted back by `state_load` under the `same_build()` gate — because a pointer
+means nothing outside the heap the build that made it laid out — and, crucially,
+also published **at the allocation**, which is both the only replicated place
+the write could go and what makes a save written by an older runtime heal on its
+first load rather than never. `state_load` still only READS `storage`; the rule
+above is not bent to fix its own third instance. **The mirror carries the SIZE
+as well as the address**, because an address does not say how much room is
+behind it and `event_scratch` is not a constant of the guest — it comes out of
+the packaged event table, so two packages of one wasm against two API pins can
+disagree about it — and reusing an undersized buffer is a silent overwrite,
+which is worse than the leak. A mirror recorded at another size is refused and
+the allocation happens again. (**The stamp folds the `--api` pin in since
+2026-08-07**, so that pair takes the rebuild path now; the size guard stays for
+`fk_migrate_adopt`, which hands over another build's heap deliberately.) *Enforced by
+`TestTheEventBufferIsAllocatedOncePerHeapAndNotOncePerLoad`, six sessions of
+one guest through the real `control.lua`, asserting at the ADDRESS and the
+ALLOCATION COUNT — against the unfixed runtime the buffer walks `32768 → 32896 →
+33024` and `kept` walks 1 → 2 → 3.* **The in-game consequence was never
+established and this does not establish one**: the closing 120 s joined session
+had inbound firing throughout and logged no desync. It closes as a per-load leak
+and a host-side divergence that is gone, not as a desync that was cured.
+
+**What replaces the load-reset is the CLOCK, and the side that has one owns it.**
+A guest restored mid-session under a companion that kept running keeps the epoch
+and rewinds its per-channel seq, so every telemetry frame reads as stale at the
+peer — deaf forever, with heartbeats flowing and both sides content. So the SDK
+tracks the highest guest tick it has seen and tears the session down on a
+regression past `RollbackTicks` (**60 ticks, the SELF-HEAL budget**: below it the
+channel un-wedges by itself in as many ticks as it went back, above it the
+rollback is minutes), with a `BYE` at the live epoch — replicated, so every peer
+resets identically. **The guest's HEARTBEAT is unconditional now**, because it is
+the only frame carrying the tick and a telemetry-heavy guest suppressed it
+entirely, freezing the peer's reading of the guest clock at the `HELLO` for the
+whole session. One 40-byte datagram per second, in the free direction.
+
+**Both languages are at parity and it is a test rather than a census row**, because
+nothing generates these two libraries. `TestBothGuestLibrariesSpeakTheSameWire` builds
+both example guests, runs each through the **verbatim** runtime under `bin/lua52f`
+against one engine-shaped `helpers` stub with one script, and requires the frame
+sequences to be **byte-identical** — 9 frames, every field of every one determined.
+Below it, both codecs read `testdata/ipc/wire-vectors.txt` and must re-encode it byte
+for byte, which is the only cross-language pin that needs no toolchain.
+`sdk/go/fkipc/vectors_test.go` is also that file's generator, under `-update`.
+
+**Three defects were found on the way and none of them was fkipc's.** (1) **An event
+encode had no arena bracket**: `fk_alloc` hands out arena memory the *calling binding*
+releases, and for a host-initiated dispatch nobody made the call — so an inbound payload
+over the 4 KiB scratch leaked permanently, into the save. `fk_arena_mark`/`fk_arena_release`
+bracket the outermost dispatch now, and the event encode moved inside it. (2) **A
+nil-typed struct field took its whole struct down** rather than being omitted at field
+level. (3) **A Lua string is BYTES and Rust's `String` is not** — the generated reader
+was `from_utf8_lossy`, which silently rewrites every non-UTF-8 byte and changes the
+length while it does it, at **738 call sites**. It survived four milestones because
+every string in this repo's own corpus is a prototype name or a locale key, ASCII by
+engine constraint; it took a guest carrying binary frames to reach it. `LuaStr` is the
+fix and tier-2 arguments are by reference now — see [`agents/abi.md`](agents/abi.md),
+"A Lua string is BYTES", and the README's migration note for downstream Rust guests.
+
+**`scripts/run-ipc.sh` is the standing live gate**, and it is the first thing here that
+speaks the protocol at a running Factorio rather than measuring one. Headless
+`--start-server` on 2.1.14 with `--enable-lua-udp` and `auto_pause: false`, the example
+guest packaged by `fklua mod`, and a companion built from the SDK module the way an
+outside tool would build it — six named legs (session, an RPC carrying all 256 byte
+values, telemetry, RESYNC→SNAPSHOT, a file verified against its digest and its content,
+a clean BYE whose guest-side half is read out of the game's log), green in **both**
+language arms. **What it can honestly compare across two runs is narrower than
+everywhere else here**: the epoch is peer-minted entropy and the tick a datagram lands
+on is a race between a real clock and the update loop, so it compares the guest's own
+session-state progression and each leg's *verdict*, with the detail dropped.
+
+**It found P6 for real, and P6 is now CLOSED — not the way it was going to be.**
+Starting a headless server LOADS the map, so under the load-reset design the guest
+reloaded on its first tick and the window put **two `HELLO`s on the wire one tick
+apart**; a `HELLO` is unconditionally a new session, so a peer that heard both minted
+two and failed anything in flight with `ErrSessionLost`, and whether a run saw it was a
+race (`sessions=2` then `sessions=1` on two consecutive runs of one arm). The
+prescribed fix was a `fk_mod.lua` ordering change, and **it was never the right fix,
+because it would have kept the reset** — which is the actual defect. A load resets
+nothing now, so there is nothing on either side of the window; `ipcgate` asserts
+`sessions == 1` as a verdict where the count used to sit in the STATS line precisely
+because it was a race, and a new `clock` leg asserts the guest's tick advances in its
+heartbeats, which was silently frozen before.
+
+**Several mods in one game is now expressible, gated, and it took a THIRD filter to
+make sound.** All mods share the one `--enable-lua-udp` socket, so every inbound
+datagram raises `on_udp_packet_received` in every subscribed mod — and the
+`HELLO_ACK` epoch-test exemption has a corr collision there: two freshly-loaded mods
+both `HELLO` with `corr = 1`, both companions answer, each mod adopts whichever ACK
+lands first. Measured with no filter: a **permanent livelock** — 18 sessions minted
+per mod in ~50 s, zero telemetry delivered. The rule is now four mechanisms with
+four jobs: *the HELLO is the session boundary, the epoch is the frame filter,
+the SOURCE PORT is the mod filter, and the NAME is the SCHEMA filter* — that
+last one a build-time identity token in `HELLO`/`HELLO_ACK`'s existing `name`
+field (zero wire change), optional on both sides, closing the one gap the port
+filter cannot: a transport handshake that SUCCEEDS between peers that disagree
+about what the channels mean. The guest-side check is legal because a
+`HELLO_ACK` arrives through the replicated inbound path, so refusing it and
+counting the refusal are identical on every peer; it is a correctness check and
+explicitly not an auth boundary. The port filter itself: a link drops frames from
+a port that is neither 0 nor its configured peer, counted as `ForeignDrops`,
+mirrored in both languages,
+each pinned by a test with a positive control (a `BYE` from the CONFIGURED port must
+still tear the session down). The SDK needs no code — destination-port routing is
+the OS's job, proven over real sockets rather than assumed. The instrument is
+**`scripts/run-ipcdemo.sh`**: `--smoke` holds two mods' sessions concurrently on a
+headless server (20 legs, isolation, foreign-port and the three-arm IDENTITY leg
+among them — that last one runs last and redials, because a companion binds one
+socket per mod port and a mismatched session cannot be held beside a matched
+one), `--play` is the interactive form — two demo guests (`demo-daylight` in Go, `demo-circle` in Rust)
+driven by `sdk/go/cmd/ipcdemo`'s browser sliders against a live graphical game. It
+also measured the probe's last open cell: **ProfileClient — bare `recv_udp()`,
+omitted `for_player` — holds a full session on a headless 2.1.14 server**, so one
+profile serves both environments and the demo mods carry no build switch.
+
+**And it has a SINGLE-PLAYER arm since 2026-08-07, which is the environment the
+defect below shipped through.** `--smoke-single` is the same 20-leg conversation
+against ONE GRAPHICAL single-player process — no server, no client, no join —
+plus three legs only that environment can produce: the game's own clock read out
+of a bare-Lua mod, the guests' clocks read out of their heartbeats, and a
+teardown check, because this is the first thing here whose game is started
+through a subshell and an orphaned graphical Factorio holds the user directory's
+lock. `--play --single` is its interactive twin. **The gate WAITS for the game to
+pass tick 750 before it says a word**, and that ordering is the whole design: the
+scripted conversation is over in about seven seconds of game time, so a run that
+starts talking when the socket opens finishes four hundred ticks short of the
+dialog and reports green having never met it. The first build did exactly that.
+
+**And the script CHECKS ITS CACHED MAP AGAINST THE MODS' BUILD STAMP now, which
+is the third run this repo has lost to that trap.** The stamp fold made every
+cached demo map stale at once, and a stale map desyncs a join with **no warning
+on either peer** — `on_configuration_changed` fires when a mod's VERSION
+changes, and a dev rebuild keeps the version. `run-ipcdemo.sh` reads each
+module's `build = "…"` out of `fk_module.lua`, looks for it in the map's
+`script.dat`, and recreates the map on a mismatch, saying so in one line;
+`FRESH=1` still forces it and a same-build map is still reused. **The general
+shape: a cache keyed on a file's EXISTENCE rather than on its content is a
+stale-input defect waiting for the day the content's definition moves** — the
+same lesson `run-roundtrip.sh`'s cached wasm taught sharding stage C.
+**"A stale map desyncs a join with no warning on either peer" was the SYMPTOM of
+a runtime defect, not a fact of life**, and re-reading that sentence is what
+found it: `on_configuration_changed` not firing meant the decline was never
+finished at all — no stamp republished, no `storage.fk_mem` republished, no
+migrate hook. Fixed 2026-08-07 ("a declined heap", under Persistence); the map
+guard is kept regardless, because a map from another build is still not a
+control for what a join does with a heap it adopted.
+
+**And "omitted `for_player`" was true of the CONFIG and false of the WIRE until
+2026-08-07, which is why one of those two environments had never actually
+worked.** `Open` built the transport from the raw `Config` and `configure`
+normalised `ForPlayer 0 → -1` one line later on its own copy, so a
+`ProfileClient` guest sent every frame with `for_player = 0` — "the server if
+present", which IS the server on a headless run and a **silent no-op** in
+graphical single player. Both languages, line for line; fixed by normalising
+before the transport is built. **No test could see it: every host-side test
+enters through `Attach` with a transport the test supplies, so `newTransport` is
+on no tested path, and both in-game gates are headless servers — the one
+environment where `for_player = 0` is right.** This is the recorded shape *a
+gate that cannot fail* wearing new clothes: two green in-game gates and 60+
+passing tests, over an arm nothing exercised. **The missing gate now exists** —
+`run-ipcdemo.sh --smoke-single`, above — and the lesson generalises past this
+defect: a profile named after an environment is a claim that wants a gate IN
+that environment, because everything else about it can be green.
+
+**The `--play` topology's stated rationale was ALSO wrong, and the demo's own
+comment block carried it.** It said single player stops ticking when the game
+window loses focus. Measured 2026-08-07 on 2.1.14 with a bare-Lua tick logger:
+**59.87–61.30 ticks/s in twelve cells** — focused, defocused, refocused, never
+focused from birth, with audio and with `--disable-audio`. Focus is not a
+variable and App Nap is not the mechanism. What stopped the original runs was
+the `for_player` defect above **plus** a second, non-fkipc fact worth carrying:
+**a `--create`d freeplay map opens a MODAL at tick 750 and a modal pauses single
+player** — `show_intro_message` calls `game.show_message_dialog` in single
+player where it calls `player.print` in multiplayer, so the headless topology
+looked like a cure for something it merely could not experience. 60 ticks/s to
+750, then 0.00 forever, **with the window focused**. The multiplayer topology
+stays and is now argued from what it is actually immune to; detail, tables and
+the bisection are in [`agents/ipc.md`](agents/ipc.md), "The graphical
+single-player re-run".
+
+### Optimizer
+
+`--opt=0..3` on `fklua compile` and `fklua mod`, **default 3** since M7. Level 0
+reproduces the M4 emitter byte for byte and is what a miscompile gets bisected against.
+The conformance suite is green at every level in both NaN modes, and CI runs both modes
+at all four levels — it checked exact-NaN only at 0 and 2 until the audit, under a
+comment claiming that was the default, which stopped being true at M7.
+
+**Two miscompiles at the default level were found by audit and fixed**, both invisible
+to the conformance suite and both now pinned by tests in `internal/luagen/opt_test.go`:
+a float comparison folded into an `if` negated by operator swap (wrong for NaN), and a
+constant `shl` of 0 mod 32 absorbing a deferred wrap its identity lowering never
+applies. What made them reachable is worth keeping in mind when adding a pass: the
+suite asserts comparisons through their **materialised** result, so the negated form a
+branch consumes is a blind spot, and its wat rarely builds a single-consumer deferral
+chain into an identity.
+
+**Sub-word LOADS are inlined at `-opt=3`, and this is the broadest win in the
+optimizer** — it moves every kernel in the *realistic* half of the benchmark
+table, which is the half that resembles a mod: `real_entities` 7.23× → **5.47×**,
+`real_grid` 9.73× → **8.57×**, `real_names` 5.17× → **4.52×** against
+hand-written Lua, with `pure_sum` and `pure_prng` unchanged as the control since
+neither contains a byte load. Size cost +5%.
+
+**Why it was missed is the useful part.** This project recorded that sub-word
+accesses stay function calls because `st8b`'s read-modify-write needs five live
+values against two scratch registers — which is entirely a fact about **stores**.
+A load has no read-modify-write and needs three. Loads and stores were reasoned
+about together, only the store's constraint was written down, and the load's much
+weaker one went unchecked for four milestones. The stores genuinely do stay
+calls. Before trusting a recorded reason not to do something, check whether it
+was measured for the case in front of you or inherited from its neighbour.
+
+**One entry test replaces every bounds check in a loop, at `-opt=3`.** Where a
+loop's shape makes its address span predictable, a single test at loop entry
+proves every i32 access in range and 4-aligned, and each access keeps its address
+computation and loses everything else. **Measured 0.424× on `pure_sum` through
+the real TinyGo guest and 0.417× through the Rust one** — by far the largest win
+here against a real guest rather than a kernel. End to end that is 4.41× →
+**1.88×** for TinyGo and 4.15× → **1.73×** for Rust against hand-written Lua: a
+compiled guest is now within 2× of hand-written Lua on an array reduction.
+
+It arrived in two steps. The guard alone is 0.639× / 0.596× (its halves being
+0.773× bounds and 0.934× alignment). Then a **word index** — the base over four,
+stepped alongside the base — removes the address arithmetic from the guarded
+path entirely, worth a further 0.663× / 0.699×, and the **dirty-page marking
+hoists into the guard** for free because the span is already computed there.
+
+Two things about it are worth carrying beyond this pass. **Per-access memory
+overhead outweighs loop overhead by about seven to one** on real guest code: the
+counted-loop `for` is worth 0.950× on the same loop that this takes to 0.639×.
+And **the guard is a RUNTIME test**, which is why it exists at all — an earlier
+design needed a static congruence proof that a 4×-unrolled counter hits its
+bound exactly, and that proof is hard, while at loop entry the counter, the bound
+and the base are all live values and the whole question is arithmetic. What is
+proved statically is only the loop's *shape*. Coverage is no longer narrow —
+re-taken on this build, 8 guarded loops in the TinyGo bench guest, 5 in the Rust
+one, and 3 to 15 in every example but `grow` — since the straight-line body
+requirement became a latch rule. Detail, the census, the refusals and the
+confirmed mutations are in [`agents/optimizer.md`](agents/optimizer.md).
+
+**Seven of those guards were emitted DEAD and nothing behavioural could tell.**
+The seed block is written at the loop HEADER; the counted-loop pass replaces that
+header with a numeric `for`; and a loop both passes claimed got its declaration,
+its guarded arms and its word-index stepping but no seed — so the flag was false
+for the life of the call, every access took the checked arm, every answer was
+right and the entire win was gone. Under `--persist=packed` the hoisted page mark
+lives inside that same block, so it went too. Fixed 2026-08-01; **0.91× on
+`callcost`'s tier-2 map argument** (13.3 → 12.1 µs per host call, ±3.3% A/A
+floor) and **0.374× on the shape in isolation**, with `bench --opt` and
+`bench-guests.sh` flat because no timed kernel contained an affected loop.
+
+**And its flag was spelled `gN`, which is also how a module GLOBAL is spelled.**
+The guard's N is a loop header's **step** index and a global's is the module's
+**global** index — unrelated counters, one namespace — so a guarded loop whose
+header step index fell below the module's global count declared a
+function-scoped local with that global's name and shadowed it for the whole
+function. A `global.set` wrote the flag and vanished; a `global.get` read a
+boolean. Header step 0 is just a function that opens with a loop, and `g0` in
+TinyGo output is the **shadow-stack pointer**. Nothing in this repo's corpus hit
+it, so the only protection a user's guest had was a test that runs on this
+repo's guests. Fixed 2026-08-01 by moving guard locals to `lg%d`/`lw%d_%d`;
+emitted output moved by exactly those identifiers and nothing else. The general
+rule and the exhaustive name table are in
+[`agents/codegen.md`](agents/codegen.md).
+
+**Which loops it reaches is toolchain-specific, and that cost a whole language
+once.** rustc closes an unrolled loop with a bare `local.tee` as the branch
+condition — no comparison step at all — counting DOWN to zero, where TinyGo emits
+`i32.ne` against a bound and counts up. Recognising only the latter left Rust with
+none of this win; recognising both gives Rust MORE of it, because its loop is
+8×-unrolled against TinyGo's 4×. Before concluding a pass does not apply to a
+toolchain, check whether it is the same loop wearing different clothes.
+
+**A counted loop is a numeric `for` from `-opt=1`**, not a label plus an increment
+plus a compare plus a goto — one `FORLOOP` opcode where there were four VM
+instructions. Measured through `bench --opt` against the commit before it:
+`constdiv` **0.76×**, `count` 0.85×, `sum` 0.90×, `chase` 0.93×, and `frame`
+**0.56×** at `-opt=3` where the promoted body leaves the loop as the whole kernel.
+`fib` is flat at 1.01×, which is the control — it has no loop. Two instruments
+agree: hand-editing the emitted Lua predicted 0.858× for `count` and 0.893× for
+`sum` before the pass existed.
+
+**It finds little in a real guest and that is the honest headline** — 5 of 30 loops
+in the TinyGo bench guest after two rounds of widening the recogniser, and
+`pure_sum` measures 1.002×, flat. It is kept on the same footing as the alignment
+analysis — sound, gated, aimed at a shape that is real even where this corpus
+lacks it. **Do not quote the kernel ratios as what a mod author gets.**
+
+**The hot loop is refused for its STRIDE, and that is the whole remaining story.**
+A real guest's hot loop is 4×-unrolled, so its stride is 4 and its test is
+`i32.ne` — a `for` only when the counter hits the bound exactly, which is a
+congruence fact rather than a range one. It is provable (the bound is
+`band(x, ~3)`), but `align.go` publishes only memory-access addresses, so it must
+first record per-step values the way `Ranges` does. The full refusal census and
+what each extension bought are in [`agents/optimizer.md`](agents/optimizer.md).
+
+**A guest's own `memcpy`/`memset` becomes the runtime's from `-opt=1`.** A
+toolchain that cannot emit bulk memory ships compiler-rt's byte-and-word loop,
+which compiles to Lua and runs interpreted; `mem_copy` does the whole span with
+one bounds check and one page mark. **Measured 0.254× on a copy-heavy
+TinyGo guest** (415 → 106 ms, checksum-compared) **and flat on every
+`bench/guests` kernel** — the same split the bulk-memory custom target shows,
+except this needs nothing installed. It is also the only pass that makes output
+smaller: −14.2% lines on the bench guest. A **name** nominates the candidate and
+a structural check (no call, no global, no float, at least one store) is what
+stops that being a miscompile — the name section is a custom section and carries
+no semantics. Detail and the three behavioural differences, each with a test:
+[`agents/optimizer.md`](agents/optimizer.md).
+
+**Division by a constant is native arithmetic from `-opt=1`**, not a helper call:
+`i32.rem_u a c` → `a % c`, `i32.div_u a c` → `(a - a % c) / c`, exact under Invariant A
+and verified over 10.2M `(a, c)` pairs under `bin/lua52f` against a Go oracle rather than
+argued. The signed pair specialises only when the range analysis has also proved the
+dividend below 2³¹, because Invariant A puts an unsigned value in the slot and recovering
+the signed one costs a conditional. **Measured on a quiet machine: 0.684× against `-opt=0`
+on `bench/wasm/constdiv.wat`** (95% CI [0.668, 0.696], A/A noise floor ±0.45%) — a 1.46×
+speedup on the shape it targets, identical at `-opt=1` and `-opt=3` as the gating
+predicts. It re-ran the constant-fold hazard
+head-on: see the three guards in [`agents/optimizer.md`](agents/optimizer.md), each
+confirmed to miscompile with its guard removed.
+
+Headline measured wins (`./bin/fklua bench --opt`, vs `-opt=0`): typed-slot promotion
+71× on the shape it targets (`frame` 759 → 11 ns/op) and 1.00× on TinyGo output, whose
+mem2reg already promoted everything that does not escape; the loop-header fixpoint
+takes `count` to 0.31×; the inlined i32 load buys 1.36× on `chase`; upvalue promotion
+is worth ~14% on call dispatch with a budget of ~25 chunk locals, not the ~120 the plan
+assumed. `-opt=3` also inlines the aligned path of all four **8-byte** accesses
+(`i64`/`f64` load and store). **Measured: `dot` 0.832× at `-opt=3`**
+(CI [0.831, 0.837] against a ±1.52% floor), and on the real TinyGo guest `pure_dot` went
+18.03× → 12.78× against hand-written Lua. That is far more than the "at most half a
+call's cost" the estimate predicted, so the reassembly was costing more than the call. `dot`'s residual gap is heap-resident f64, which only an f64-typed shadow
+of linear memory can address (open question, and the two inlined stores are now what
+stands between it and a single invalidation point). Full detail and hazards:
+[`agents/optimizer.md`](agents/optimizer.md).
+
+**Alignment is proved statically at `-opt=3`, and it currently buys NOTHING.** A
+congruence analysis (`internal/analysis/align.go`) solves residues mod 4 and 8 over the
+same CFG fixpoint the range analysis uses, and where it proves an address 4-aligned the
+inlined load drops its `t0 % 4 == 0` test. Measured: **no detected change on any kernel,
+in either language.** The reason is structural and worth knowing before anyone tries
+again — `sum`, `chase` and `dot` prove zero i32 loads between them because their hot
+loops read through a pointer that arrives as a function **parameter**, which no
+congruence analysis will ever say anything about, and `chase` reloads its pointer out of
+memory, which is unknown by construction. It is kept for the same reason typed-slot
+promotion is kept despite promoting nothing in TinyGo output: it is sound, it is gated,
+and the shape it targets is real even though this corpus does not contain it. Do not
+quote it as a win.
+
+**The i32 STORE is inlined at `-opt=3` too, and it is the weakest of the three.**
+Measured on a quiet machine: `chase` 0.988× (CI [0.980, 0.995] against a ±0.51% floor) —
+real, but 1.2%, and `sum` showed nothing at all. `chase` and `sum` are the only kernels
+with a store in the hot loop and neither is store-dominated, which the estimate got
+right. It does
+**not** address `real_grid`'s gap, which is *byte* stores; `i32.store8`/`store16` stay
+calls, because expanding `st8b`'s read-modify-write needs more scratch registers than a
+function declares. What it cost is size: **+13.7% to +25.0% in bytes and +9.4% to
++12.0% in lines** across four real TinyGo guests, roughly twice the inlined load's, and
+it stacks with it.
+
+**The M0 kernels are hand-written Lua and do not move when the emitter does** — they
+are the ceiling. Only `bench --opt` measures a pass, and `scripts/bench-guests.sh`
+shows the honest cross-language picture: a real TinyGo guest is ~2× further from the
+ceiling than the hand-modelled kernels suggest, and **hand-written Lua is still faster
+than a compiled guest at everything except `prng`** — though by a good deal less since
+the M11 perf pass, which took `real_names` from 9.49× to 5.15× and `pure_dot` from
+17.46× to 12.58×, and since M12's loop guard, which took `pure_sum` from
+4.41× to **1.88×** for TinyGo and 4.15× to **1.73×** for Rust — the one kernel
+where a compiled guest is now within 2× of hand-written Lua. Read
+[`agents/benchmarks.md`](agents/benchmarks.md) before quoting any number.
+
+### Persistence (M6)
+
+| mode | what it does | cost |
+|---|---|---|
+| `table` (**default**) | `storage.fk_mem` IS the live word table; stores land in the saved structure with no sync step | 2.29 B/word in every save and multiplayer join |
+| `packed` | live table mirrored into `string.pack` pages (4 KiB) after each guest call | **0.44 B/word** saved; ~40 µs per dirty page per call, and only pages actually WRITTEN are dirty |
+| `auto` | picks by declared heap size, threshold **1 MiB**, prints its choice | the threshold is a proxy for write locality, which the compiler cannot know |
+| `none` | memory rebuilt from data segments every load | nothing survives — deterministic but stateless |
+
+Globals cannot alias, so they are copied back after every guest call — one table write
+per mutable global per event. A save records the **build id**; a rebuilt guest either
+exports `fk_migrate_adopt(old_version)` and is handed the old heap,
+`fk_migrate(old_version)` and is *told* on a fresh one, or starts clean with a logged
+warning. **Which of the three happens is decided at LOAD and acted on at the first
+REPLICATED execution point — see "a declined heap" below, because until 2026-08-07 the
+acting lived somewhere Factorio does not always go.** **A "build" is the module AND the `--api` pin it was packaged
+against**, since 2026-08-07: the stamp is
+`sha256("fklua/build-id/v2\0" || sha256(wasm) || pin)` truncated to 8 bytes, and it
+hashed the wasm alone until then — so one wasm packaged against two pins was two mods
+with one identity and `same_build()` adopted a heap straight across them. That is
+unsound as a CLASS, because member, event and define ids are dense per-version indices
+and the package's pin-derived facts reach into the heap (`API.event_scratch` is the
+size a cached buffer in it was allocated at; a cached define id is a per-build number
+living in it). The fold is unambiguous by the WIDTH of its fields rather than by a
+separator — the module contributes exactly 32 bytes at a constant offset and its own
+bytes never appear in the preimage, so a wasm containing the version string cannot move
+a boundary. A cross-pin repackage now takes the rebuild path, which is what shifted ids
+demand. *Enforced by `TestTheAPIPinIsPartOfTheBuildStamp` (different stamps, a stable
+stamp, and the two chunks differing in that line and no other) and
+`TestALoadAcrossTwoAPIPinsTakesTheRebuildPath`, which drives three sessions through the
+real `control.lua` — the same-pin load is the control that adopts, and against the
+pre-fix stamp the cross-pin load adopts too.* Full construction and its collision
+argument: [`agents/guests.md`](agents/guests.md), "Recompiling, and `fk_migrate`".
+
+**`fk_migrate` no longer adopts, and that split is the fix for a hazard no guest
+could work around.** Adopting replaces the module's ENTIRE linear memory with the
+saved one, and linear memory is not just the heap — it is `.data` and **`.rodata`**.
+A rebuilt guest refers to its string constants and type descriptors by compiled-in
+ADDRESS, so after adoption the very first line of `fk_migrate` was already undefined:
+it sends the host bytes out of the previous build's rodata. The hook offered a choice
+between losing state silently and corrupting it silently, and the first downstream mod
+exported neither and rebuilt from the world. Now `fk_migrate(old)` is a
+**notification on a fresh heap** — which is all a rebuild-from-world needs — and
+`fk_migrate_adopt(old)` is the opt-in that really hands the bytes over, for a guest
+whose state is a fixed versioned region it interprets itself. **The rodata hazard is
+inherent to adoption and is documented rather than fixed**: re-applying the new
+build's data segments would reset `.data`, which is where a Go or Rust guest's roots
+live, leaving the heap intact and unreachable. *Enforced by
+`TestMigrateIsToldAboutTheRebuildAndGetsAFreshHeap` and
+`TestMigrateAdoptReallyGetsTheOldHeap`.*
+
+**A DECLINED HEAP IS FINISHED AT THE FIRST REPLICATED DISPATCH, AND UNTIL
+2026-08-07 IT WAS NEVER FINISHED AT ALL FOR THE COMMONEST REBUILD THERE IS.**
+Both hooks and the warning lived in `on_configuration_changed`, which Factorio
+raises when the mod SET changes — for one mod, when its **VERSION** moves. A build
+stamp moves for a great deal less: a dev rebuild, a `--gc`/`--persist` change, a
+repackage against another `--api` pin. The commit that folded the pin into the stamp
+moved **every stamp in existence** without touching a single mod version. On all of
+those the hook never fired, `state_load`'s decline was never finished, and what was
+left behind was worse than a reset: nothing republished `storage.fk_mem`, so
+`storage` kept the previous build's heap while the guest ran on the fresh one
+`_initialize` built — **two unrelated tables, and the guest's writes reached neither
+the save nor the CRC** — every later load declined again off the stamp nobody
+republished, and `fk_migrate`/`fk_migrate_adopt` never fired, so the guest whose
+whole answer to a rebuild is "tell me and I will rescan the world" was never told.
+**On a multiplayer join that is a desync, measured live:** the server declines and
+runs on happily from tick 0 for twenty minutes; a client joins, downloads the same
+stale stamp, declines identically, and starts a **tick-0 heap against a server at
+tick 1250** — `crc test failed` from the first joined tick, with no warning on
+either peer, because the line that would have said so was in the hook that did not
+fire.
+
+**As built: `state_load` records the decline in an UPVALUE** — legal, since
+`on_load` may write upvalues and may not write `storage` — **and the first
+OUTERMOST DISPATCH after the load runs `finish_rebuild`**, one function that
+`on_configuration_changed` also calls, so the two paths cannot drift (they had:
+the hook's own comment claimed for two milestones that `fk_migrate` adopts). It is
+recorded **before** the adopt gate, because a guest exporting `fk_migrate_adopt`
+falls through that gate and is owed its notification and a fresh stamp just as much
+as the discarding arm is. `state_init` clears the flag, so `on_init` and the hook
+cannot double-fire it. Steady-state cost is one boolean upvalue read per outermost
+dispatch — no `on_tick` registration, because the trigger is derived from load-time
+facts rather than saved.
+
+**The determinism argument, which is what makes it legal.** The trigger is a
+function of the LOADED STATE ALONE (`storage.fk_build` against `P.build`), so every
+peer that loaded the same bytes computes the same answer with no clock, no entropy
+and no peer-local signal — which is exactly what an `fk_after_load` one-shot is
+NOT. A peer that joins LATER cannot disagree, because the handling runs before any
+guest code the load could reach, so the server's very first dispatch republishes and
+from then on `same_build()` is true. **The residual window, stated, and it is REAL
+rather than theoretical:** a peer joining a server that has declined and not yet
+dispatched *anything*. `auto_pause` defaults to **true**, so a headless server sits
+at its load tick until somebody connects — which is exactly this window, every time,
+and not a race that needs losing. It is safe, and the argument is the same one:
+both peers then hold the same flag over the same state and settle it at their next
+dispatch, which is *the same dispatch on both*, because every remaining source of one
+is replicated (a tick, an event, the deferred flush, a collector step) and the one
+peer-local source (`fk_after_load`) is itself a dispatch, so a server that had
+reached it would already have republished. A second client joining after the unpause
+downloads republished state and declines nothing. Note the earlier opportunity does
+NOT help here and must not be leaned on: `on_configuration_changed` is precisely what
+a same-version rebuild does not get. **What is NOT covered**: a guest that
+never dispatches at all never reaches `finish_rebuild`. Such a guest also never
+writes a word of its own memory, so there is nothing to diverge and nothing to lose;
+`fklua mod` already calls it Inert.
+
+*Enforced by `TestARebuiltGuestIsToldWithoutOnConfigurationChanged` (three arms —
+`fk_migrate`, `fk_migrate_adopt`, no hook — each over three sessions with the hook
+never called, plus `TestARebuiltPackedGuestRepublishesItsPages`, because a declined
+packed load left `pages` unset and therefore flushed NOTHING for the whole session),
+by `TestASameVersionRebuildIsStillHandled` over two real `--api` pins, and by
+`TestAJoiningPeerStaysByteIdenticalToTheServer`'s new **stale** arm. That last one
+is worth reading for what it says about vacuity: when neither peer republishes, both
+hold a deep copy of the same frozen heap that neither is running on, so the
+tick-by-tick comparison reports IDENTICAL over two guests with nothing in common —
+so the stale arm asserts on the SERVER (the stamp moved, `storage.fk_mem`'s checksum
+moved across the window, the author was told) before reading the joined window as
+meaning anything. Confirmed to fail in all three: `build=build-A` where `build-B`
+was wanted, `mem0=5` after a session that ran three ticks, and
+`memsum 2292103799 2292103799` across 135 ticks of traffic.*
+
+`memory.copy`/`memory.fill` are compiled natively (3.5 and 2.2 ns/byte
+against 173 for the byte loop binaryen emits — 49×/78×). `--fuel=N` stops runaway
+loops, measured at 1.98× on a bare counted loop, **defaults off**.
+
+**What `packed` records is a SET OF PAGES, and that is the change that makes the mode
+usable at scale.** It was a min/max byte range, chosen because two compares beat a
+division and a table write on every store. That was right about the cost and wrong
+about what the cost bought: a flush repacks the whole *span*, so one guest call
+touching a static near address zero and a heap object near the top of the memory
+repacks everything in between. The first downstream mod measured a 200-rig build at
+**447 s** in packed mode against ~15 s in table, shipped `table`, and its giant word
+table then handed Lua's incremental GC a **27.8 ms worst tick on an idle map** — so
+the span was, transitively, the whole per-tick story for a mod running zero Lua.
+
+Measured on the shape that caused it (synthetic guest, 2 MiB memory, 200 calls each
+writing one low static word and one high heap word, flushed after every call, `-opt=3`
+under `bin/lua52f`):
+
+| | pages repacked | total | per call |
+|---|--:|--:|--:|
+| min/max byte range | 49,243 | 2071.8 ms | 10.36 ms |
+| **dirty-page set** | **400** | **43.9 ms** | **0.219 ms** |
+| control: both writes in one page | 200 → 200 | 36.4 → 37.0 ms | unchanged |
+
+**47× on the pathology, 123× fewer pages, and flat where locality was already good** —
+which is the part that says the fast path was not traded away. It reaches the existing
+persist benchmark too: `TestWhatAHostCallCostsThroughARealGuest`'s packed *string
+return* leg, whose guest touches a static scratch region and a heap string in one call —
+i.e. the harness's own instance of this pathology — goes **637.5 µs → 172.2 µs**. Its
+other packed legs and every table-mode leg are unchanged within noise.
+
+**The fast path is still two compares**, because `DPLO`/`DPHI` are not the range: they
+are the byte bounds of the one page most recently marked, so a store whose span lies
+inside it has nothing to do. Only a store that LEAVES that page calls `MEMPACK.mark`,
+which divides, adds each page of its span to the set and re-caches. The division per
+store the original design feared is a division per page change.
+
+Two details are load-bearing and neither is obvious. The set is accompanied by a
+**LIST in first-touch order**, and the flush walks the list rather than `pairs`-ing the
+set: the repacked bytes are identical either way, but insertion order shapes a Lua
+table and what lands in `storage` is saved, CRC'd and multiplayer-synchronised, which is
+not a thing to bet on a serialiser's iteration order. And the mark function lives on
+`MEMPACK` rather than in a `local memdirty`, because the chunk-local budget is real:
+one more column-zero name and a guest with 32 globals stops compiling at `-opt=3` while
+still compiling at `-opt=2`. *Enforced by `TestAScatteredWriteRepacksOnlyThePagesItTouched`
+and `TestPromotionLeavesTheMarginItPromises`.*
+
+**It is no longer only a runtime concern.** It used to be true that every store
+funnelled into `st8b`/`st16`/`st32`, so nothing could write guest memory and miss it. At
+`-opt=3` the emitter expands `i32.store` at the use site, and `emitInlineStore32`
+carries its own `if MEMDIRTY and … then MEMPACK.mark(…) end`. Any future lowering that
+writes `MEM` directly owes the same line. A missed mark is not an error message: the
+store lands in the live table, the whole session reads it back correctly, and the save
+simply does not carry it — stale memory after a reload, i.e. a desync.
+*Enforced by `TestTheInlinedStoreStillDirtiesItsPage`.*
+
+**The page set does NOT reopen the inlined 8-byte store's gate**, and the reason is
+worth keeping: marking is now one call behind a two-compare test rather than four inline
+compares, so the wide store *could* carry it in a line — but the objection was never the
+line count. A second copy of the marking rule in generated code is a second place to
+forget it, and the 4-byte store carries one only because it is the store that dominates
+real guests. Widening that exception wants its own measurement.
+
+**And the page set costs 7–13% on a store-heavy guest in packed mode, which nothing
+here said until the GC work measured it.** `MEMPACK.mark` is called once per store that
+LEAVES the cached page, and `DPLO`/`DPHI` are a one-entry cache against a write pattern
+with a working set of several regions: `real_grid` leaves the cached page on two stores
+in five, `real_names` on one in three. Armed, that is `real_grid` **1.130×**,
+`real_names` 1.073× and the allocation-churn guest 1.098× against a ±1.2% A/A floor,
+with the pure kernels flat. A 64 KiB card takes `real_grid` to 1.085 and a two-entry
+cache to 1.060; neither helps the other two, because the distances are larger than any
+small cache. Table mode pays none of it — `MEMDIRTY` short-circuits — which is exactly
+why arming that flag is the whole write barrier the incremental collector needs. Numbers,
+attribution and the harness: [`agents/gc.md`](agents/gc.md).
+
+**And since stage C the page set has TWO CONSUMERS with different clear points**,
+which was stage A's §6 prediction and is now code. `--persist=packed` drains it
+after every guest call; the collector drains it once per collection STEP, and
+only while marking. Run both against one set and packed wins every race — the
+collector finds it empty and loses every write since its last step, which is not
+stale memory after a reload but a live object the sweep reclaims. So `flush`,
+while the collector is armed, MOVES the pages it is about to forget onto a
+second queue instead of dropping them: one table store per dirty page per call,
+paid only during a collection, and nothing at all on the store path. `MEMDIRTY`
+is the OR of the two arms and `gc_disarm` restores it to packed's rather than to
+false, so a packed guest that also collects does not come out of a collection
+with its save tracking off.
+
+**Packed shrinks the GC surface of the SAVE and nothing else, and reading that as a fix
+for the idle GC pause was this file's mistake.** The measurement below is real and
+stands — a guest heap as `storage.fk_mem` (one word per Lua array slot) against the same
+heap as 4 KiB `string.pack` pages, timed with `collectgarbage("collect")`:
+
+| guest heap | table: live / per full GC | packed: live / per full GC |
+|---|--:|--:|
+| 2 MiB | 8,210 KB / 0.17 ms | 2,110 KB / below the floor |
+| 8 MiB | 32,786 KB / 0.65 ms | 8,323 KB / 0.015 ms |
+
+3.9× less live memory and ~43× cheaper per collection — **for the `storage` copy**, which
+is the only object those two representations differ in. It is not the object the
+collector was spending the downstream mod's tick on. **The memory a guest RUNS on is a
+Lua word table in `table`, `packed` and `auto` alike**: packed adds a mirror rather than
+replacing anything, and the live table is what `traversestrongtable` walks. Downstream
+ran the same idle cell under both modes once the dirty page set made packed runnable and
+got the same tail (15.0 ms median table, 14.2 packed) — that is the falsification, and
+the numbers above were answering a question nobody had asked. **`--persist` is not a
+lever on the GC pause.** Choose the mode for the save and the multiplayer join, which
+are worth choosing for.
+
+What the pause actually is, what it costs per MiB, and the three mitigations that were
+measured and lost are in [`agents/guests.md`](agents/guests.md), **"the guest heap
+budget"**; what to do about the heap ITSELF — collect it, so it never reaches the size
+that pause is measured against — is [`agents/gc.md`](agents/gc.md), and both are worth
+reading before proposing anything about a collector. The short version of the budget: 
+Lua traverses a table in one indivisible `propagatemark`, so the worst tick is **0.2 ms
+per MiB of linear memory** (measured in 2.0.77, flat from 8 MiB to 128); it is the
+memory's SIZE and not the part in use, because `mem_grow` zeroes every new word; TinyGo
+DOUBLES on every grow, so half of a large heap is typically untouched; and `fk_mod.lua`
+now logs the number once per doubling from 16 MiB up, because nothing else could see it.
+`collectgarbage` **is** in the sandbox with every option — and moves the pause by less
+than its own noise, because there is nothing to pace.
+
+**`mem_grow`'s zeroing is PACED as of sharding stage 15, and the growth law is what
+decides how much that is worth.** The runtime keeps a fill cursor ahead of `MEMSIZE`
+and advances it in bounded pieces from a one-shot `on_tick` a grow arms, so a grow into
+pre-built words costs microseconds; `fkgc`'s quarter-grow is capped at one wasm page for
+the case where a guest outruns it. A COLLECTED guest's worst grow tick stops scaling with
+its heap — 43 / 109 / 254 ms at 4 / 16 / 40 MiB becomes **17 / 23 / 25**. A LEAKING guest
+gets a fixed ~23–28 ms off a doubling it still pays in full: **974 ms at 40 MiB against
+24.6 ms collected.** Nothing here can bound a doubling.
+
+Save-size numbers above were measured across three identical `--map-gen-seed` maps so
+map-generation variance cannot contaminate the delta (an earlier 0.93 B/word figure for
+`table` made exactly that mistake and is wrong).
+
+**A grown heap survives in packed mode too**, since the audit — it did not before, and
+the M10 fix for table mode had no effect there because it sat inside a `not packed`
+branch. Three separate things were wrong and each would have been enough on its own:
+the size mirror in `storage` was never refreshed, `restore` walked `#pages` (which stops
+at the hole a sparse flush leaves, dropping every page past it), and a page the guest
+grew into but never wrote came back as **nil rather than zero** — nil arithmetic deep
+inside guest code, a long way from the load that caused it.
+
+Two invariants fall out, both load-bearing and neither obvious from the code:
+
+- **An absent page IS zeros.** Everything written since the last full pack is dirty and
+  therefore flushed, so a page missing from the save is a page nobody wrote. `restore`
+  writes the zeros rather than skipping the page, because after a grow the live table
+  does not have those words at all.
+- **`restore` is driven by the saved SIZE, not by the page array**, which is sparse by
+  construction.
+
+**The save/load round trip is verified inside real Factorio** via
+`scripts/run-roundtrip.sh` (headless server + trigger mod; `--benchmark` never saves —
+`game.auto_save()` under it is silently a no-op). It runs **six guests × both modes**:
+`hello`; `grow`, which takes its heap past the initial linear memory and checks every
+byte it wrote is still there; `growbig`, the same guest at 5 MiB, whose memory is three
+shards of which the last is partial; **`retain`, the PERSISTENT HANDLE leg**; and the
+two COLLECTED legs, `gcsave` and `gcsave-rs`, each saved at two ticks so that a mark and
+a sweep are both interrupted.
+**The Rust leg is in the default list as of the closeout round** — `GC_SAVE_TICKS_RS`
+is `30 239` and `CHECK_TICK_RS` is `300`, measured off one instrumented run rather than
+tuned until green; see [`agents/gc.md`](agents/gc.md). The growing leg exists because both grow bugs hid
+behind a guest whose heap never moved, and it is not decorative — against the pre-fix
+runtime it traps on load, which is how the packed fix was confirmed. A `--persist=none`
+control restarts from zero, proving the check discriminates. Nothing pins `--opt` any
+more, so the guest is packaged at whatever the default is.
+
+**And a seventh leg that is not a guest: MIGRATE, because `fk_migrate` had never run
+inside a real Factorio.** Every other leg loads a save its own build wrote; this one
+loads a save written by a build that no longer exists. It packages **one wasm at two
+API pins** — the stamp folds the pin in and nothing else in the chunk moves, which
+`TestTheAPIPinIsPartOfTheBuildStamp` already asserts — so the guest bytes are identical
+and the second build's only observation is that `same_build()` is false. The mod
+**version is deliberately unchanged**, because that is what makes it a rebuild:
+`on_configuration_changed` does not fire for one, which was the defect `cd25a3b` fixed
+by moving the handling to the **first outermost dispatch**, a path only a running game
+reaches. Four assertions, both persist modes: `told=7` (the hook ran and was handed the
+old state version out of the save), the rebuild **warning is absent** (the guest exports
+`fk_migrate`, so it must not take the reset-and-scold arm), `sentinel=0` (the heap
+really is FRESH — the notification half, not `fk_migrate_adopt`, which no assertion
+about the counter can distinguish), and a **second load that does not re-notify**, taken
+from a save the rebuilt build itself wrote after `state_init` republished the stamp.
+That last one is the **absence of a log line and not a counter**, measured rather than
+chosen: `migrated=` lives in the guest heap and is therefore carried by a clean load, so
+the first attempt read `migrated=1` on a load that had plainly not migrated again. The
+leg was confirmed to fail — loudly, in both modes, with every other leg still green —
+against `cd25a3b` reverted, and its shared-stamp guard was fired on purpose so it is not
+a gate that cannot fail. `guest/go/examples/migrate` is the guest; nothing else here
+exports the hook, which is why this had gone five milestones untested in game.
+
+### The ports round (2026-08-03) — what real mods found
+
+Seven mods were ported against FkLua by guests written outside this repo, each
+keeping a findings ledger. This section is the first batch of fixes — five
+correctness and scaffolding defects — and **"The Rust generator was four
+milestones behind" below is the second**, which is six more. Each is written up
+where it belongs and indexed once, because the useful part is the SHAPE rather
+than the fix.
+
+| | what it was | where the record is |
+|---|---|---|
+| **F1** | **`fk.retain` did not survive a save**, and `fk_abi.lua`'s own header said it did. `M.persistent_table()` and `M.adopt()` both existed; the shipped `fk_mod.lua` called **neither**, so a retained handle was valid for the session and `ERR_BAD_HANDLE` on the next load | [`agents/abi.md`](agents/abi.md), "What a retained handle means after a load" |
+| **F2** | **an optional ATTRIBUTE generated non-optional.** 666 of them, and an absent one arrived as `ERR_NO_MEMBER` — indistinguishable from a member this Factorio version does not have, which is the one distinction that status exists to make | [`agents/abi.md`](agents/abi.md), under the status table |
+| **fkgc** | **a threshold or budget set before the first allocation was silently discarded**, in BOTH languages, by `initialize()` assigning the defaults unconditionally | [`agents/gc.md`](agents/gc.md), "Two knobs, and they are independent" |
+| **R6** | **Rust `subscribe_filtered` defeated the event-pruning scan**, so a guest using Factorio's own C++-side filters shipped all 218 event descriptors — 85 KB of Lua per load, measured downstream | below |
+| **R8** | **`fklua init --lang rust` scaffolded a project that could not use its own bindings**: gen-bindings wrote `api.rs` and no crate around it, into a directory the scaffold did not reference | below |
+
+**Three of the five were invisible to every test in this repo for the same
+reason**, and it is worth stating once rather than five times: *this repo's own
+corpus does not do what a mod does.* No guest here had ever called `fk_retain` —
+BBB forbids stored handles by rule and re-reads the world — so nothing exercised
+the persistent space. No guest here read an optional attribute. No Rust guest
+here used more than one filtered subscription, and **one inlines while four do
+not**, so the pruning held by a margin nobody had measured. The lesson is not
+"write more tests"; it is that a corpus written by the compiler's authors tests
+the compiler's authors' habits, and the fix in each case was to add the guest
+that has the habit: `examples/retain`, `examples/gcconfig`, and four filtered
+subscriptions in `examples/api` rather than one.
+
+**R6, and the root cause is one attribute.** `fklua mod` prunes the 219-entry
+event table to the ids it can prove a guest subscribes to by scanning the wasm
+for an `i32.const` reaching `fk.subscribe`, and it is all-or-nothing. Rust's
+`subscribe_filtered` carried no `#[inline]`, so whether the id arrived as a
+constant was rustc's cost heuristic's decision under LTO, **taken per call
+site** — its smaller sibling `subscribe` always inlined, which is exactly why
+nobody noticed the attribute rather than the size was load-bearing. Reproduced
+here on `examples/api`: **one filtered subscription inlines and four do not**, so
+a mod crossed the line by GROWING, silently, with a downstream measurement of
+**991,040 bytes of Lua against 906,393** for the same mod with the filters taken
+out. `#[inline(always)]` on both wrappers fixes it. *Gated by
+`TestTheEventIdSurvivesTheGeneratedRustSubscribeWrapper`, which is the Rust
+corpus's first pruning assertion at all — confirmed to fail against the pre-fix
+generator — and by its Go twin, whose example now uses both wrappers for the
+same reason.*
+
+**R8, and the scaffold shape it settles.** `gen-bindings` writes the Rust
+bindings to `guest/rust/fkapi/src/api.rs`, a path it hard-codes and `fklua lock`
+hashes by exact name — and it wrote **only that file**: no `Cargo.toml`, no
+`lib.rs` declaring the module, into a directory the scaffolded guest (then
+`guest-rs/`) did not reference. So `fklua init --lang rust` followed by the
+`fklua gen-bindings` it printed produced 2 MB of generated Rust that nothing
+could compile, and the way out was copying two files out of a FkLua checkout by
+hand. Two changes:
+
+- **`gen-bindings` emits the whole crate** — `Cargo.toml` and `lib.rs` beside
+  `api.rs`, byte-identical to this repo's own, and covered by `--check`. Only
+  when the bindings go to their committed path: `-o` means "write the source
+  where I said", and a manifest nobody asked for is not that.
+- **`init --lang rust` scaffolds `guest/rust/` as a two-member workspace** —
+  `fkapi` and the guest crate beside it, with `fk` and `fkapi` as
+  `workspace.dependencies` — which is the layout the first Rust port converged on
+  by hand and the shape this repo's own `guest/rust` already uses. `--lang
+  go,rust` still collides with nothing: the Go module is `guest/` and the Rust
+  workspace is a directory inside it holding no Go files. The scaffolded guest
+  **calls the API** (`fkapi::GAME.tick()`), so a fresh project proves the whole
+  chain rather than only the logging half.
+
+*Gated by `TestAFreshRustInitProjectBuildsAndPackagesCollected`, which now runs
+`gen-bindings` between init and the build — in init's own order, because what is
+under test is that init's printed next-steps produce a project that builds.*
+
+**R9 was doc drift and it pointed the wrong way.** `fklua --help` and this file
+both said `--gc=collected` "today means Go only — there is no fkgc for Rust yet",
+four milestones after `guest/rust/fkgc` shipped, measured and joined the default
+roundtrip gate. It is the line an author reads before choosing an arm. Both
+corrected; the count-bearing prose beside them was re-checked against
+`census.json` and is current.
+
+### The newcomer round (2026-08-03) — what a FIRST mod found
+
+A controlled experiment beside the ports round, asking a different question: a
+guest with **no context but this repo's own README and CLI** built a first mod
+end to end, journalling every hesitation. It **succeeded** — scaffold, first-try
+TinyGo compile, `fklua mod`, and a real headless 2.0.77 run with matching
+checksums across two `--benchmark` runs — so everything below is polish rather
+than a wall, and that is the finding worth recording first: **the generated
+files did most of the teaching.** `fklua.toml`, `main.go` and `gc.go` carry
+"why, not what" comments, and the journal says repeatedly that they pre-answered
+questions the README raised abstractly. That is an argument for keeping the
+scaffold comments dense as it changes.
+
+Five gaps, all documentation, all closed here:
+
+| | what it was |
+|---|---|
+| **N1** | **Nothing referenced `guest/go/examples/`.** The scaffold shows the two legacy hooks; the `fk_on_event` + `Subscribe*` + `ReadOnXxx` + typed-wrapper pattern a real mod is made of lives in `examples/api`, and the newcomer found it by **grepping the repo for `fk_on_event`**. The README has a "where to go next" table over that file now, and both scaffolds name their language's example |
+| **N2** | **The filter grammar was undocumented past `NameFilter`.** `SubscribeFiltered`'s comment said other terms are "an ordinary map" without saying what shape; the newcomer read `NameFilter`'s implementation and built `{filter="type", type="tree"}` by analogy — correct first try, which says the shape is fine and only the documentation was missing. Both generators' doc comments now carry a worked non-name term, the `mode`/`invert` keys, and a pointer at the `Lua<Event>EventFilter` concepts in the pinned description. `TypeFilter`/`type_filter` ships as `NameFilter`'s twin |
+| **N3** | **Headless verification was reverse-engineered from `scripts/run-guest.sh`**, which is wired to this repo's own guests and is not something a downstream author runs. The private `write-data` (Factorio LOCKS its user dir), `mod-list.json`, `--create` for `_initialize`/`fk_on_init`, and `--benchmark-runs 2` for a determinism check were all learned by reading it. The README carries that recipe now, generic over any mod, and it was **written by running it** against a fresh scaffold |
+| **N4** | **`fklua init <name>` writing into the CURRENT directory** was a beat of doubt against the README's `mkdir my-mod && cd my-mod`. Said in the README, and in init's own first line of output |
+| **N5** | **The README's memory/GC section read as a design document** — `packed` vs `table`, `collected` vs `leaking`, sharding, "974.5 ms", "2.29 B/word" — none of which changes what a first mod should do, because `init` already picked. Restructured to lead with "the default is right", with a two-row symptom table for the decisions that do exist and the measurements pushed to `agents/gc.md`, `agents/sharding.md` and `agents/guests.md`, which already hold them |
+
+**And four more from a parallel exercise**, folded in here because they are the
+same territory: the **`Valid()` shadow** (`Object.Valid() bool` is the free null
+check, and a generated `Valid() (bool, error)` on any class with a `valid`
+attribute shadows it with a real host call — `agents/guests.md`, the sixth
+thing); the **two event-id namespaces** visible when debugging a subscription
+(`110` in the bindings against the engine's `74` for `on_player_mined_entity` —
+same file, under `defines.*`); the scaffold's **`strconv` + `+` log line**, which
+is the shape a downstream mod measured as its *entire* guest heap and is the
+first code a new author copies, now carrying a comment naming the trap and the
+heap budget; and **`fklua <cmd> --help`**, which every subcommand rejected as an
+unknown argument and which `main` now answers before dispatch.
+
+#### The ergonomics round (2026-08-03) — four leftovers from those experiments
+
+| | what it was |
+|---|---|
+| **E1** | **`--lang` was one flag with two spellings and neither command took both.** `init` and `docs` parsed `--lang go` and answered *unknown argument* to `--lang=go`; `gen-bindings` parsed `--lang=all` and answered the same to `--lang all` — **the form its own usage line prints**. All three route through `langArg` now. Scoped to `--lang` deliberately: the rest of the CLI's split is consistent *by flag* and therefore not a trap — paths and names take a space (`-o`, `--api`, `--guest-module`, `--name`), compile modes take an equals (`--opt=`, `--gc=`, `--persist=`, `--nan=`, `--fuel=`) — and `--lang` was the only one spelled two ways. `docs --lang all` now says there is no `all` there and to run it twice, rather than reciting the rule |
+| **E2** | **The gc-mismatch refusal named one side of a two-sided fact.** It listed the missing exports and how to build a collector in either language, and left a reader to infer that *building one* and *not asking for one* were alternatives; only the manifest arm ever stated the two sides as a pair. Both refusals — the missing surface and the wasip1 one — now open with `what asked for it:` / `what the module says:` and close with two numbered remedies, and the remedy is sayable **where the mode was said** (a manifest arm that tells you to "pass `--gc=leaking`" is advice about a command line that did not set it). Pinned by `TestARefusedGCModeNamesBothSidesAndBothWaysOut`, which is also the first test over the wasip1 refusal |
+| **E3** | **`TypeFilter`/`type_filter` shipped in N2 with no caller.** Both `examples/api` guests subscribe their fourth filtered event by prototype TYPE now — `container`, which is every chest rather than `iron-chest`, which is one. The two helpers build the same wire shape (one map term, two keys), so **no calibrated count moved**: still six events proved by the scan in both languages, two defines in the Rust one. The comment above that assertion said "2 of 219" and the assertion said 6; reconciled, along with the Rust twin's "the same three events" |
+| **E4** | **`fklua doctor`**, because the only instrument for "did I install that right" was a build that had already started — `could not find wasm-opt` from inside TinyGo, `E0463` from inside cargo. One row per README prerequisite with the version found, non-zero exit only when **neither** guest arm is complete (the README says one, not both). It asks `guest.Available` / `guest.RustAvailable` rather than re-deriving the verdict, so it cannot disagree with the build path; `TestDoctorQuotesTheVersionsTheReadmeNames` greps README.md for every version string it prints, because a diagnostic quoting the docs is the mirror this repo has already watched drift once |
+
+**E4's own first run is the argument for the version test.** The scrape required
+a dotted number, and binaryen's is a bare integer — `wasm-opt version 131` — so
+the table said MISSING on a machine that had it while the verdict line below the
+table correctly said the toolchain was complete. A doctor that contradicts
+itself is worse than no doctor; `TestTheVersionScrapeHandlesEveryToolsShape`
+carries all four tools' real output lines.
+
+### The Rust generator was four milestones behind, and nothing here could see it
+
+The second half of the ports round, and the largest single item in it: **the
+Rust backend bound 4,140 of 4,187 members with 47 deferrals while the Go one
+bound 4,160 with 27**, and every one of the twenty was a branch `rustgen` had
+not grown rather than a shape Rust could not express. Four of them Rust
+expresses *better*. The two backends are level again, member id for member id,
+and the six things that were missing were each found by a mod written outside
+this repo:
+
+| | what was missing | found by |
+|---|---|---|
+| **R1** | **inherited-member forwarders.** `LuaEntity`'s parent is `LuaControl`, so a Rust guest had no `position`, `surface`, `force` or `get_inventory` — 1,325 members with nowhere to live | **four** ports, independently |
+| **R2** | **event payload structs.** Zero, against Go's 218, so every Rust guest read `fk_on_event`'s pointer at hand-derived offsets — 45 of them across three ports, plus two scripts that re-derived each one from the **Go** bindings because nothing else could check them | three ports |
+| **R3** | **dictionary returns keyed by a tier-2 value.** `game.surfaces`, `game.players`, `game.forces`. Two ports walked `get_surface(1), get_surface(2), …` and had to pick how many consecutive misses meant "stop" | three ports |
+| **R5** | **`defines.*` accessors and the `fk.define` import.** A Rust guest could not read a define at all; three ports declared the import by hand and re-derived ids by reading `GenerateDefines` in the Go source | three ports |
+| **AD4** | **a dictionary nested inside a struct.** A top-level dictionary return rendered fine, so only the nesting refused — and it took `CollisionMask` and `MapGenSettings` down with it, **17 of the 47 deferrals** | autodeconstruct |
+| **AD5** | **`pub struct CollisionMask {}` with a zero-byte codec.** `decode_at` compiles, runs, and returns a default while sixteen bytes of wire sit unread | autodeconstruct |
+
+**AD5 is the one worth reading twice, because this repo had already fixed it.**
+It is the *same defect in the same function* the Go generator carried — `add()`
+reserves a name in the emission order before recursing so a self-reachable type
+does not spin, and the failure path deleted it from `byName` and left it in
+`order` — fixed on the Go side with a test, and left standing on the Rust side
+for two more milestones because **the test was written against one backend**. A
+mod author found it by grepping the committed bindings.
+
+**What keeps this from happening again is a diff, not a resolution.**
+`census.json` now carries six Rust rows beside the six Go ones —
+`rust_members_bound`, `rust_members_deferred`, `rust_deferrals_by_reason`,
+`rust_members_inherited`, `rust_event_payload_structs`,
+`rust_define_accessors` — so a feature added to one backend and not the other
+shows up in the one committed file a version bump already regenerates. Before
+this round the only place the Rust coverage was written down was a line
+`gen-bindings` printed and nobody diffed, which is why "47 against 27" was
+filed as a finding by four separate people instead of being noticed here.
+*Enforced by `TestBothBackendsBindTheSameMembers`, which compares the counts
+AND the member id sets, because a missing member and an extra one cancel in a
+total.*
+
+Two decisions inside it are worth carrying, and both are recorded in full in
+[`agents/abi.md`](agents/abi.md):
+
+- **Forwarders, not `Deref`.** `impl Deref for LuaEntity { type Target =
+  LuaControl }` is 79 impls instead of ~1,300 methods and gets the override
+  rule for free. It is the *Deref polymorphism* anti-pattern; it needs
+  `#[repr(transparent)]` on all 148 handle types plus an unsafe reference cast
+  per class, because `Deref` returns a reference and there is no parent value to
+  borrow; and it would make the inherited set uncountable, which is the census
+  row this round exists to add.
+- **A `BTreeMap` where the key is `Ord` and a `Vec` of TUPLES where it is
+  not.** This is the one place the Rust rendering is plainly better than the Go
+  one and the file header had been claiming it without cashing it: a struct
+  field crosses in **both** directions, a `BTreeMap` iterates in key order, so
+  its wire order is deterministic by construction where a Go map's is
+  randomized — which is why Go needs a generated `Entry` pair type and this does
+  not. Tier 2 holds an `f64` and a `Vec` and is therefore neither `Ord` nor
+  `Hash`, so a dyn key gets the pair vector, which is the shape the hand-written
+  `Value::Map` already had.
+
+**And the subscribe import declared two parameters where the ABI has three**,
+so no Rust guest could send an event field mask however expensive the field was
+— silently, because a wasm import is a Lua function here and the missing
+argument arrived as `nil`, which reads as mask 0. `subscribe_masked` and
+`subscribe_filtered_masked` exist now, with the `SKIP_*` constants beside the
+`EVENT_*` ones.
+
+**`guest/rust/examples/dict` is the new fixture and it is the evidence.**
+`TestADictionaryFieldCrossesInsideAnEventPayload` used to carry a comment saying
+it was Go-only because the Rust generator lacked the feature; it now runs both
+guests against one host stub with one set of expectations, so an offset, a pair
+stride or a header width that differs between the two languages fails rather
+than being invisible. `examples/api` also stopped demonstrating the hand-offset
+shape it had taught every port to copy: it reads
+`read_on_player_created(ptr)`, calls `defines_direction_east()`, enumerates
+`game.surfaces()` and masks one of its filtered subscriptions.
+
+### The shapes the description carries and no generator read
+
+The other half of the ports round, and it is one theme rather than nine items:
+**for every finding here the API description said what to do and the generator
+did not read it.** 4,160 → **4,191 of 4,198 members in each language, 27 → 8
+deferrals**, and the eleven new members are a class of shape that had never been
+counted at all.
+
+| | what the description said | what came out | found by |
+|---|---|---|---|
+| **RM1** | `Class.Operators` — 11 of them on 7 classes | **nothing.** No generator read the field. Not bound, not deferred, **not counted** | resource-marker, and independently qol-research (**Q2**) and fluid-memory-storage (**F-IDX**) |
+| **G1** | 13 methods with several return values | deferred, on the generator's own admission "naming rules, not marshalling" | nixie-tubes |
+| **FTS1** | `optional: true` on an ARRAY return | honoured for scalars, dropped for arrays: absent and empty were one answer | fuel-train-stop |
+| **FTS2** | 41 unions of nothing but string literals, `WaitConditionType` 26 of them | a bare `String`, names discarded | fuel-train-stop, resource-marker |
+| **Q3** | a dictionary is ordered in Lua | a **Go map** where the key was a string, an ordered pair slice where it was a union — one generator line apart | qol-research, widened by resource-marker |
+| **F-TAGS** | `read_write` on `tags` | the getter alone, blocked by a refusal whose own reason the pair slice retires | fluid-memory-storage |
+| **R4** | `SignalID` is a struct the generator emits | ...and a union-typed FIELD holding one is a raw `Value`, so a guest writes the table out with unchecked string keys | four ports |
+| **RM2** | `dictionary[uint32 \| string -> LuaSurface]` | correct — and `pairs()` yields the NAME, which nothing said | resource-marker |
+| **G4** | — | a comment scoping the string predicate to non-optional attributes, over a guard that was DEAD | nixie-tubes |
+
+**RM1 is the one worth reading twice, and the report needed correcting on the
+way in.** `LuaChunkIterator` bound `object_name`, `object_name_is` and `valid` —
+three members, none of which was the iterator — so a guest that wanted
+`surface.get_chunks()` swept `is_chunk_generated` over a bounded square: 289 host
+calls where upstream makes one, and blind to any chunk outside the radius. The
+report predicted a fifth `fk_abi` kind for `call` and **no ABI change** for the
+other nine, reading `obj[key]` as something `GET` could already carry. It cannot:
+**every existing kind begins by resolving `obj[m.name]`**, and an index
+operator's key is an ARGUMENT. Three kinds, then — `M.IDX`, `M.LEN`, `M.SELF` —
+each two lines in `M.invoke` and placed BEFORE the member read, because falling
+through would resolve a key called `"index"` on a LuaObject: `ERR_NO_MEMBER` for
+a member that is right there. Bound as `Get(k)`, `Length()`, `Call(...)` — `Get`
+rather than `Index` because `LuaInventory` and `LuaGuiElement` each declare an
+ordinary attribute of that name, on the very class F-IDX was about.
+
+**The index key's TYPE is derived, because the description does not carry one** —
+an operator declares only what indexing yields. Two clauses over facts the
+description does state: a class that also declares `length` answers Lua's `#`,
+the sequence-length operator, so it indexes by position (`uint32`); unless what
+it yields is itself tier 2, which is the description saying the class is
+heterogeneous — `LuaCustomTable` yields `Any` and really is keyed by string at
+`force.technologies` and by number at `game.players`. `TestOperatorKeyKinds`
+enumerates all five so a pin that adds a sixth fails rather than being classified
+by a rule nobody re-read.
+
+**`Any` had to stop being a handle first, and that was a live defect.**
+`canonicalUnion`'s shape B is *one class plus scalar identifiers* — `ForceID` is
+`string | uint8 | LuaForce`. `Any` is `string | boolean | number | table |
+LuaObject`, which matches shape B **on a count** and is not shape B: the `table`
+arm makes it a genuine any-value union. It was already mistyping `remote.call`
+and `LuaLazyLoadedValue::get` as returning an OBJECT. An option that maps to tier
+2 now disqualifies the union.
+
+**Q3 and F-TAGS turned out to be one fix.** Making every dictionary the ordered
+pair slice — which Q3 asks for, because a Go map's walk order decides what the
+guest ALLOCATES and the guest heap is in the save — retires the *stated reason*
+dictionary ARGUMENTS were refused: "would need a deterministic iteration order",
+which a slice has by construction. So the seven counted deferrals are emitted,
+and four of them are the `tags` setters F-TAGS was about. Rust needed neither
+half: a `BTreeMap` walks in key order, and its arguments only ever lacked an
+emitter.
+
+**And the deferral REPORT is the durable half.** F-TAGS was described as
+generating "silently"; it was in fact *counted*, and counted where nobody could
+read it — `gen-bindings` printed the largest group and the other 14 deferrals
+went unnamed. It prints every group now, plus an accounting line reconciling
+methods, both halves of every attribute, the class operators and the three global
+functions against what reached the member table. That closes the F-TAGS half.
+It does **not** close F-IDX's, and saying so is the point: a shape no generator
+looks at cannot appear in a report about what the generator tried. That is what
+`census.json`'s new `operators_bound` and `global_functions_bound` rows are for —
+a **0** that is written down is a decision, and a 0 nobody writes down is how
+eleven members stayed invisible for five milestones.
+
+Verified in real Factorio, both languages, byte-identical log lines
+(`scripts/run-guest.sh`, `LANG_=rust`): `chunk operator: first chunk -10,-10`
+(the `__call` operator), `inventory operators: #inv = 32, inv[1] valid true`
+(`__len` and `__index` on a chest's real inventory) and `multi-return:
+registration 1 useful 1 kind 14` — `register_on_object_destroyed`, the only way
+to arm `on_object_destroyed` and the member nixie-tubes hand-wrote a binding for.
+
+~~**Known and not closed:**~~ **CLOSED in B2, and the gap was WIDER than this
+recorded.** It said `force.technologies` had no handle; the grep says **nothing
+in the API returned a `LuaCustomTable` at all**, so `Get` and `Length` were
+bound-and-unreachable from everywhere — 59 attributes across 7 classes, all 46 of
+`LuaPrototypes` among them. `MemberGetHandle` (kind 7) emits a second member over
+the same attribute returning the HANDLE: `force.TechnologiesRaw()` then
+`Get(key)`, two host calls against **14,544 B of guest heap** for the
+materialising read. A real member with its own id rather than the `<Name>Into`
+shape, because unlike `Into` the HOST does different work — a handle where it
+wrote a `(ptr, count)` — and no new branch in `M.invoke`, since only the declared
+return kind differs. The gate is on the DESCRIBED type and not on `KindDict`, or
+every plain-dictionary attribute would grow a handle accessor pointing at
+nothing. **And the pair-slice's own doc comment was a measured trap**: it advised
+building a Go map for lookup, which fklua-ports measured at 27,056 B — *worse*
+than the 24,576 B Go map the ordered slice replaced. It now names the two right
+answers, a linear scan or `<Name>Raw` + `Get`, with the union-key warning intact.
+Members bound **4,191 → 4,250**.
+
+**Subclass restrictions are counted honestly and deliberately NOT suppressed.**
+854 members are declared on a class but restricted to certain subclasses, and the
+generator emits every one everywhere — so a guest can call a SpiderVehicle method
+on a chest and get `ERR_NO_MEMBER` at runtime. Honouring the restriction in
+emission is the obvious fix and is the wrong one, measured rather than argued:
+**none of the 202 subclass tokens is a class name** (overlap 0 of 202 with the
+148-class graph). They are `entity.type` discriminants, and **15 of the 16
+declaring classes have no descendants at all**. The one that does,
+`LuaItemCommon`, would have 170 of its 1,329 forwarders suppressed *wrongly* —
+the tokens there are item kinds and both children can hold a blueprint — and that
+is 6.8% of the restricted members anyway. What WAS wrong is the count: the census
+asked `api.Method` and never `api.Attribute`, reading **184 against 854, a 78%
+undercount**, with attributes the larger half four to one.
+`subclass_restricted_attributes` is a census field now and the diff reports it.
+Revisit only with a token-to-class table in hand. Detail:
+[`agents/abi.md`](agents/abi.md).
+
+### Host ABI and bindings (M7–M9)
+
+`fk.call`/`fk.subscribe` + the handle table are the whole API surface — one generic
+import, so a member Factorio removes degrades to `ERR_NO_MEMBER` on one call instead of
+failing instantiation. `fklua gen-bindings` emits committed Go and Rust `fkapi`
+bindings (at the default 2.0.77 pin: **4,255 of 4,257 members each**, plus **240
+`<Name>Into(dst, …)` variants** over the array returns, 1,329 inherited forwarders,
+219 event payload structs and 1,137 defines accessors — the same numbers in both
+languages, member id for member id, since the ports round below), gated by `--check`;
+`fklua mod` prunes member/event tables to the constant ids reaching
+`fk.call`/`fk.subscribe`, shipping ~0.6 KB instead of ~890 KB, and ships the full table
+whenever an id cannot be proven constant — a bigger mod, never a broken one. Coverage
+counts, deferral reasons and the version-diff workflow are **committed data**
+(`api/<version>/census.json`), not prose. Detail:
+[`agents/abi.md`](agents/abi.md), [`agents/versioning.md`](agents/versioning.md).
+
+**THE DEFAULT PIN IS THE GENERAL-AVAILABILITY RELEASE, AND THAT IS A DECISION
+RATHER THAN A LAG.** `DefaultAPIVersion` is **2.0.77**. A default is what a mod
+author who has pinned nothing ships to players, and players are on stable; the
+newest description in `api/` is not the same question. 2.1.x is one line away —
+`api = "2.1.14"` in `fklua.toml`, or `--api=2.1.14` — and every description this
+repo supports stays committed, so a project chooses without the game or the
+network. It went to 2.1.14 on 2026-08-06 and back on 2026-08-07, and the
+round trip is the reason
+[`agents/versioning.md`](agents/versioning.md) now carries **"Moving the default
+pin"**, a checklist distilled from both moves rather than from what the change
+looks like it ought to involve.
+
+**The pin is a BUILD-TIME axis and the ENGINE is a RUN-TIME one, and nothing in
+this file is more worth keeping straight.** The pin decides which
+`runtime-api.json` the bindings and the packaged member table come from. The
+engine is whichever Factorio a player launches; a guest that needs to know asks
+`helpers.game_version`. The installed engine here is still **2.1.14** and that is
+not a contradiction — see Operations. They meet in exactly one place,
+`info.json`'s `factorio_version`, which is a claim about the ENGINE and merely
+DEFAULTS to `majorMinor(DefaultAPIVersion)`. That derivation is deliberate — two
+constants that must agree about one manifest key is this file's most-repeated
+failure shape — and it is a DEFAULT, overridable by `[mod] factorio_version` and
+`--factorio-version`, because **a 2.1 engine refuses a mod declaring `2.0`
+outright at game start**. Every in-game gate under `scripts/` therefore packages
+with the INSTALLED engine's series, derived once in `scripts/lib-engine.sh`, and
+so does every hand-written harness mod it copies. Without that the pin revert
+would have broken every one of them, in a way that reads exactly like a broken
+gate. `internal/factorio`'s test `apiPath` follows the pin constant for the
+related reason that it had once named a version outright and would otherwise
+compare one version's generator output to another's golden file and blame the
+generator.
+
+**What the two moves measured, as a delta between the committed descriptions:**
+classes 148 ↔ 156, events 219 ↔ 224, members bound 4,255 ↔ 4,840 in each
+language, inherited 1,329 ↔ 1,529, defines 1,137 ↔ 1,185, class operators 11 ↔ 9,
+`Into` variants 240 ↔ 281. Deferrals are **2 in each language at either pin**,
+both a Go/Rust name colliding with another member of the same class; the 2.1-only
+shapes that once deferred (an array of an array, dictionaries of containers) all
+bind since the nested-container round below. **A handful of host-side tests are
+about a SHAPE that exists in only one description** — the `nil`-typed concept, a
+three-level nested container, the class-operator table — and they passed at
+whichever pin happened to have it, which is a coupling and not a property. They
+name their own description now (`loadShapeAPI`/`shapeAPIVersion`), except the
+operator table, which is genuinely per-pin and is one (`operatorsByVersion`).
+
+### A nested container binds, and the census arithmetic closes
+
+Two things, both of them the same lesson at different scales: *a number nobody
+adds up is a list, and a shape one level deeper than the emitter recurses looks
+exactly like a shape the wire cannot carry.*
+
+**16 of the 18 remaining member deferrals were nesting depth, not
+expressiveness** — 8 "a dictionary of a dictionary", 7 "a dictionary of an
+array", 1 "an array of an array". **The host never had the gap**: `LayoutStruct`
+recurses, `placedList` renders a nested `stride/key/elem` descriptor at any
+depth, and `fk_abi.lua`'s `read_value` routes `K_ARRAY` and `K_DICT` to one
+`read_array` walk that calls `read_value` again — whose own comment has said "a
+dict of structs, or an array of dicts, works without anyone having written that
+case" since the ABI existed. Every one of those members has been in the table,
+correctly marshalled, all along; what was missing was a guest TYPE and a
+guest-side codec. **This is AD4 one level over**, and it took the same kind of
+tail with it: `LuaPrototypes::utility_constants`, which the nil-field fix had
+moved from an unreachable skip to a named deferral on the promise that it would
+arrive free the day this landed, is bound in both languages.
+
+**A dictionary's VALUE and an array's ELEMENT recurse to any depth**
+(`LuaPlayer::get_alerts` is three levels and comes out whole); **a dictionary's
+KEY does not**, deliberately — a Lua table key is not a table, no pinned version
+keys one that way, and that refusal keeps a census reason of its own so a
+description that grows one arrives as a NEW number rather than a guess.
+**Determinism is applied PER LEVEL**: Q3's ordered pair slice in Go and
+`rustDictType`'s BTreeMap-or-pair-Vec in Rust, each asked once per level, so
+neither backend can produce a per-client walk order at any depth. And the codec
+is a generated FUNCTION per distinct shape rather than a deeper inline loop —
+which is why the depth-one output is byte for byte what it was and the golden
+diff is only new members and new helpers. *Enforced by
+`TestANestedDictionaryCrossesInsideAStruct`, which pins the literal stride and
+both offsets at EACH level three ways — the Lua descriptor, the Go decoder and
+the Rust decoder — and then round-trips the shape through the real `fk_abi.lua`.
+The inner pair is the reason it is a test: a string key aligns to 4, so a `bool`
+value sits at 8 and the pair pads to **12**, not 9 and not 16. That is the
+`(dyn, handle)` stride-24 lesson one level down. One test over both backends,
+because AD5 is what happens otherwise.*
+
+**And the census's three member rows did not reconcile, by exactly one, in both
+languages.** `host_members_bound == <lang>_members_bound +
+<lang>_members_deferred` is an identity — one loop, one member per iteration,
+each ending in an emit or a deferral — and it read 4842 against 4843. The extra
+one was not a member: the string-enum constant loop called the same `defer1` the
+member loop does, and one literal in the description (`LinkedGameControl`'s
+empty string) has no identifier name. **The accounting line `gen-bindings`
+prints had the same defect pointing the other way**: it reconciles methods, both
+halves of every attribute and the class operators against the member kinds they
+became, and `MemberGetHandle` is in none of those buckets — so it summed to
+**4784 against 4842** and said nothing about the 58 missing. Both are rows now
+(`<lang>_literals_deferred`, `custom_table_handle_members`) and the line prints
+its own total. Standing rule, fourth instance: *a 0 nobody writes down, and an
+arithmetic nobody closes, are the same failure.* *Enforced by
+`TestTheCensusMemberArithmeticCloses`, over the live generation and the
+committed `census.json`, in both languages.*
+
+**Five guest-author traps from six ports are written down**, in
+[`agents/guests.md`](agents/guests.md): `on_nth_tick` has no binding and needs
+none (a self-re-arming `fk.Defer()` is the timer, with the permanent-`on_tick`
+cost stated); **exporting `fk_on_tick` IS the subscription** and all three early
+ports also subscribed redundantly; a POLLING guest wants `SetBudget(4096)` — the
+default gave 15 outruns and 3 deadlines, measured; subscribing in a LOOP ships
+all 219 event descriptors, **and the build output already says so in as many
+words** (`API: all 219 events -- an event id was not a compile-time constant`),
+which is a correction to the report that filed it as having no tell; and
+re-entrant dispatch is legal and measured at depth 2, while the same write that
+raises an event during play **raises nothing during `on_init`** — Factorio's rule,
+not this runtime's, and the asymmetry that surprised a port. Plus, in
+[`agents/abi.md`](agents/abi.md): a host call is **~12.5 µs** cross-confirmed over
+2,487 real calls, so the cost model is CALLS and not bytes; the headless walls
+including charting, which is unreachable by every route; and two adjudications
+that came out "already answered" — `table_size` is moot now that dictionary
+returns carry their own count and a `LuaCustomTable` has `Length()`, and G2's
+"no escape hatch" is closed by `ObjectAt`/`Handle` with the residual need
+removed by the operators. **The `collectgarbage` contradiction is reconciled**:
+`agents/sandbox.md` said "not a lever" and `agents/guests.md` measured ~10% a
+milestone later, and the difference is sharding — one gray object became many, so
+there is something to pace. Both measurements are correct for their own world and
+each now names the other.
+
+**Commands and remote interfaces reach a guest, through a SEAM rather than a
+binding.** Three of the generator's five host skips are the same problem twice:
+`LuaCommandProcessor::add_command` and `LuaRemote::add_interface` take a Lua
+FUNCTION, and `LuaRemote::call` is the API's one variadic method. Between them
+they put an entire genre of mod out of reach, and fklua-ports reported it four
+times from three ports in both languages (AD7, G6, FTS4). **The function does not
+cross** — a wasm guest has no callable Lua value and never will. The host
+synthesises the closure, gives that to Factorio, and dispatches back in by an id
+the guest chose, which is what `fk.subscribe` has always done for events: two
+imports (`fk.register`, `fk.remote_call`), one export (`fk_on_call(id, argp,
+retp)`), tier-2 arguments, and the same `fk_alloc_static` per-level buffer.
+**The guest declares them from `init()`, not `fklua.toml`**, because a command
+registration is NOT SAVED — control.lua is re-executed on every load, so it must
+be made on every load, and `_initialize` is the only place that happens by
+construction. Two things the pass found that were not the feature: `write_dyn`'s
+container payloads came from the ALLOCATOR, which for a host-initiated dispatch
+has no bracket to release it and would have leaked every invocation's arguments
+forever; and `dispatch` resets the scratch region at depth 0 **after** a
+trampoline has written into it, which read correctly until the first NESTED
+callback and then read somebody else's — the re-entrancy defect
+`TestANestedDispatchLeavesTheOuterOneIntact` exists for, met from a new
+direction. *Gated by `TestACommandAndARemoteInterfaceReachTheGuest`, which drives
+a real TinyGo guest through the verbatim runtime against engine-shaped
+`commands`/`remote` stubs — command dispatch, remote methods in and out, arity
+preserved through a `f(1, nil, 3)` hole, a nil return that is not the previous
+call's leftovers, an outbound `remote.call` made from inside a command's own
+dispatch, a missing interface as a status rather than a trap, and the outer
+arguments surviving both nested encodes.* `LuaBootstrap::get_event_handler`
+stays a skip: it RETURNS a function, and there is nothing for a guest to do with
+one. Detail: [`agents/abi.md`](agents/abi.md), "The callback seam".
+
+**The 2.1.14 pin added a fifth host skip and an attribute-shaped SIXTH, and the
+sixth is now a FIELD OMISSION instead.** `LuaDebugAdapter::print` joined
+`LuaRemote::call` as a second variadic method, which is unremarkable and is
+still a skip. The other was not: `UtilityConstants` carries a field
+`frozen_color_lookup` whose type is the concept `ColorLookupTable`, which 2.1
+declares as **`nil`**, and one unrepresentable field took the whole concept and
+therefore `LuaPrototypes::utility_constants` — an ATTRIBUTE — with it. **Every
+skip the generator had ever produced was a method**, because a callback
+parameter and a variadic one are shapes only a method has, so
+`TestNothingTheDescriptionModelsIsUnaccountedFor` reconciled methods against the
+whole skip list and read an attribute skip as *two* broken identities with
+nothing saying which. A skip is charged to its declaring kind now, and that
+still holds — but the attribute skip it was written for is gone.
+
+**The marshalling answer is to OMIT the field, and the reason it is safe is a
+sentence in the description rather than an argument.** `ColorLookupTable`'s own
+description is *"Does not return the value at runtime."* — so a `nil` type is
+not a value this layer cannot express, it is the statement that there is no
+value. Nothing is lost by leaving the field out and nothing could be gained by
+keeping it; an always-absent optional would spend a presence byte, forever,
+saying no. `mapFields`' standing rule — a field that cannot be expressed fails
+the WHOLE struct — is right and is untouched, because it is about a field that
+carries something. **This is AD4 read the right way round**: there, a nested
+dictionary one field could not express was answered at CONCEPT level and took
+`CollisionMask`, `MapGenSettings` and 17 members with it; here a field-level
+fact is answered at field level and the concept, the attribute and every other
+field survive. `host_members_bound` **4841 → 4842**, `host_members_skipped`
+**6 → 5**, and the `nil` skip reason is gone. Those are the numbers at the
+**2.1.14 pin, which is where the shape exists at all**: `nil` occurs exactly
+once in any published description — as the concept `ColorLookupTable`, in 2.1.12
+and 2.1.14 — and **never in 2.0.77**, so at the default GA pin the machinery is
+correct and has nothing to do. The tests that assert this against a description
+name 2.1.14 explicitly for that reason; asserting it against 2.0.77 would be a
+gate that cannot fail.
+
+**Its whole cost is that it is invisible, which is what the census row is for.**
+The member binds, the struct generates, both backends agree and every gate is
+green — a description that grew a hundred of these would look exactly like one
+that grew none. `census.json` carries `fields_omitted` and
+`fields_omitted_by_reason` (**1** under `nil` at 2.1.14; **0** at the default
+2.0.77 pin, which is the honest answer there and is written down rather than
+omitted, for the reason the standing rule below gives), the version diff reports
+movement in both, and `gen-bindings` prints the omission by name under its own
+heading rather than among the deferrals, which it is not one of. Standing rule,
+third instance: a 0 nobody writes down is how eleven class operators stayed
+invisible for five milestones.
+
+**Two things about the outcome are worth stating rather than rounding off.**
+~~`utility_constants` is back in the host member table and is still **not bound
+in either guest backend**~~ — **it is bound in both, since the
+nested-container round above.** `UtilityConstants` also carries
+`default_trigger_target_mask_by_type`, a dictionary of a dictionary, which was a
+real and separately counted limitation with seven other instances (`go`/`rust
+members deferred` 18 → 19, both, in step). So the member moved from a skip
+nothing could reach to a deferral with a name, and it arrived free the day that
+shape was built — which is what the promise recorded here was worth, and is why
+the row said "deferral with a name" rather than rounding it to "unavailable".
+And the FULL member table grew **1,056,337 → 1,100,428 bytes,
++4.2% for one member**, because `UtilityConstants` is a large nested struct and
+the table carries its whole layout — paid only by a mod whose event or member id
+cannot be proven constant, which is the "bigger mod, never a broken one" arm.
+
+*Enforced by `TestANilTypedFieldIsOmittedAndItsStructStillBinds`, which checks
+the omission through the real `fk_abi.lua` and against BOTH generated decoders'
+byte offsets — AD5 is why it is one test over two backends and not two tests —
+plus `TestTheNilTypeIsFollowedThroughItsConceptAlias`,
+`TestNilInAPositionThatIsNotAStructFieldIsStillASkip`,
+`TestAStructOfNothingButNilFieldsIsStillRefused`,
+`TestTheOmittedFieldIsCountedInTheCensus` and
+`TestTheNilConceptNoLongerCostsAnAttribute`.*
+
+**The omission is scoped to a struct FIELD, deliberately.** `nil` occurs exactly
+once in the whole description — as the concept `ColorLookupTable`, in 2.1.12 and
+2.1.14, never in 2.0.77 — and reaches exactly one field. Nowhere is it a
+parameter, a return, a union option or an array element, so those positions keep
+the skip: a field is the one place a value can simply not be there, and if 2.2
+grows one of the others it should arrive as a NEW reason in the census diff
+rather than as a field that quietly stopped being generated. The alias hop is
+the reason this was hard to see at all, and it is what the resolver follows: no
+published version has a field whose declared type is spelled `nil`.
+
+**`fklua mod --include DIR` carries the mod's data stage.** `Files()` returned exactly
+the five generated entries, so `data.lua`, `prototypes/`, `graphics/` and `locale/` had
+nowhere to go and `--zip` was unusable for any real mod. Included trees merge into
+`Files()` before `WriteDir`/`WriteZip`, so both writers carry the same bytes; a
+collision with a generated name is an error at package time rather than a mod that is
+silently wrong in game. `fklua mod` also reads `fklua.toml` now — identity, `[mod] data`
+as `--include`'s default, `dependencies` reaching `info.json` verbatim, and **`api`**
+— so a mod with a manifest needs no flags at all. Detail and the decisions:
+[`agents/abi.md`](agents/abi.md).
+
+**And `api` is the one whose absence was a MISCOMPILE, not an inconvenience.**
+`attachAPI` loaded `DefaultAPIVersion` unconditionally while `gen-bindings` and
+`lock` honoured the pin, so a project pinned to any other cached version got guest
+bindings from one description and a packaged member table from another. Member ids
+are dense sorted indices per version, so a member added or removed anywhere shifts
+every later id: the guest calls the **wrong member**, silently wherever the kinds
+line up, in a lockstep game — and both versions being committed is what made both
+loads succeed and nothing say anything. It travels the way `gc` does now (manifest
+is the default, `--api=VERSION` is the override, no manifest keeps
+`DefaultAPIVersion` byte for byte), and every `API …:` line `fklua mod` prints names
+the version it used.
+`compile` is deliberately unwired: it emits a bare chunk and never attaches a table,
+so there is no version for it to be wrong about. **And the pin is part of the BUILD
+STAMP as of 2026-08-07** — see the persistence section — because the fix above made a
+pinned project package the right table while leaving one wasm at two pins sharing one
+identity, so `same_build()` adopted a heap across them: the *same* key, one step
+further down. Found by the 2026-08-04 audit;
+*enforced by `TestTheAPIPinTravelsToMod`, which asserts on a member id the two
+committed descriptions name differently — derived at test time, never hard-coded —
+plus `TestTheAPIFlagOverridesTheManifest` and
+`TestWithNoManifestTheDefaultAPIIsPackaged`.* Relatedly, `gen-bindings -o` refuses
+two languages: every target took the same path, so `--lang=all` wrote the Go
+bindings and then the Rust ones over them, leaving Rust source in a `.go`-named file
+at exit 0.
+
+**And PRINTING the version was not enough — the pin is proven from the guest's own
+exports as of 2026-08-08.** The fix above made a *pinned project* package the right
+table. It could not make a guest **linked against the wrong bindings** say so, and
+that is a different arrangement with the same consequence: the library packages that
+live inside the FkLua guest module — **`fkipc` above all** — import *that module's
+own committed `fkapi`*, which sits at `DefaultAPIVersion`. A consumer that vendors a
+checkout and pins anything else therefore has bindings from one description and a
+table from another **by construction**, and both halves succeed on their own.
+Measured downstream at pin 2.1.14 against committed bindings at 2.0.77: `fkipc`
+subscribed to event 207 believing it was `on_udp_packet_received` and got
+`on_train_changed_state`, and read `helpers.game_version` and got
+`LuaForce.object_name`, so its engine-floor gate parsed `"0.0.0"` and the library
+went **inert**. The mod loaded, ran, logged and ticked — **one log line about a
+version was the entire symptom**, which is exactly what a version printed in build
+output does not catch. So `gen-bindings` emits a **pin stamp** into every generated
+binding set — one exported function named `fk_api_pin_<version>`, in **both**
+languages — and `attachAPI` refuses the package when the guest's stamp is not the pin
+being packaged, naming both versions and where the packaging one came from. It is an
+**export** rather than a call because a call has to be *live* to survive `-opt=2` plus
+`wasm-opt` and Rust's `lto = true`, while an export is a root by definition; it is the
+**name** rather than a returned constant because a version is a string and a wasm
+result is a number. **An absent stamp stays quiet**: bindings older than the stamp
+carry none, and refusing those would break correct GA-pinned builds to catch what
+cannot be proven — the opposite call from `api check`, and for the same reason, since
+there the alternative is calling a guest clean that it could not read. The remedy is
+supported rather than hand-rolled: **`fklua gen-bindings --into DIR`** regenerates a
+vendored checkout's committed bindings at *this* project's pin, in every language the
+manifest declares, and `--check` makes it a standing gate. See
+[`agents/versioning.md`](agents/versioning.md), "The pin stamp, and repinning a
+vendored checkout". *Enforced by `TestAGuestBuiltAtAnotherPinIsRefused` and
+`TestAGuestLinkingTwoBindingSetsIsRefused`, with the two controls that stop a guard
+which refuses everything from passing —
+`TestAGuestBuiltAtThePackagedPinIsAccepted` and
+`TestAnUnstampedGuestIsPackagedUnchanged` — plus
+`TestBothGeneratorsStampTheSameName` for the language parity and
+`TestGenBindingsIntoRepinsAVendoredCheckout` for the flow.*
+
+**`--guest-module` resolves the same three layouts in BOTH languages now.**
+`rustSubstrateDir` has always probed for the substrate directory on the stated
+grounds that **one flag serves both languages** — a `--lang go,rust` project gets
+one `--guest-module` and needs two substrates out of it, and a FkLua checkout
+keeps them as siblings — so the path a person naturally has is the **checkout
+root**. The Go arm wrote the flag verbatim into its `replace`, one path segment
+short of the guest module's own `go.mod`, and `go mod tidy` failed with *"found
+… but does not contain package …/fk"*: `fklua init --lang go` scaffolded a
+project that did not build. Reported by fklua-ports (G5b), which is the third
+sighting of an init-path defect (G5, Q6). **The integration test passed
+throughout because it handed `init` the answer** — `filepath.Join(root, "guest",
+"go")`, the one layout needing no normalisation at all. It passes the checkout
+root now, and was confirmed to fail on the unfixed scaffold, so it is a test of
+`goSubstrateDir` rather than of a coincidence.
+
+**A command that builds a mod writes only into the working directory.** `gen-bindings`
+resolved its bindings against the cwd and its census against the **executable**, so
+running it in a mod project rewrote the census in whichever FkLua checkout built the
+binary — silent for as long as that census was current. It now writes a census only
+where `api/<version>/runtime-api.json` is in this directory. It also reads
+`fklua.toml`'s `lang` and `api` (flags override), which `fklua lock` always did and it
+never did: `init --lang go` then advised a command that dropped a `guest/rust/` the
+lock refused to hash. *Enforced by the `cmd/fklua` gen-bindings tests.*
+
+**An absent optional ARGUMENT crossed as its zero value**, for as long as the ABI has
+existed: `read_struct` honoured a field's presence byte and `decode_args` did not, so an
+absent boolean arrived as `false` and an absent number as `0` — a guest saying nothing
+about `raise_teleported` was heard as saying no. Fixed and pinned by
+`TestAnAbsentOptionalArgumentCrossesAsNil`. Relatedly, an optional argument whose type
+the Go layer cannot express is now **omitted rather than deferring the member**, which
+is what unblocks `create_surface` and hidden-surface mods; a mandatory one still defers.
+
+**Event payloads have generated Go structs, and a subclass reaches its parent's
+members.** **All 219** events get a struct plus a `Read<Event>(ptr)` reader, which
+retires reading fields at hand-derived offsets — silent when wrong, and the layout was
+already computed for the Lua side. Inheritance is **1094 one-line forwarders rather than an embedded
+parent**, because embedding would break every `fkapi.LuaEntity{Object: h}` composite
+literal. Doing this surfaced a pre-existing silent defect: **a struct whose layout was
+deferred was emitted as an EMPTY type under the concept's real name** — ten of them
+shipped, `MapGenSettings` among them. Detail: [`agents/abi.md`](agents/abi.md).
+
+**A dictionary field inside a struct generates, and it is a SLICE of pairs.** That
+one refusal took three things with it: the 5 deferred event payloads (all blocked on
+`tags`), `MapGenSettings` and therefore `create_surface`'s optional argument, and 12
+members blocked by a struct blocked by one of those. **3859 → 3875 members bound, 46
+→ 30 deferred, 213 → 218 event payload structs, 5 → 0 deferred.** The field is
+`[]EntryStringValue` rather than `map[string]Value` and that is the whole design
+question: a struct crosses in BOTH directions, and writing a Go map to the wire means
+choosing an order Go deliberately randomizes — which in a lockstep game reaches the
+engine as a per-CLIENT ordering, i.e. a desync. A slice of pairs is deterministic by
+construction, the same reasoning behind tier 2's `Value.Map`. Proved by running it,
+not by construction: `TestADictionaryFieldCrossesInsideAnEventPayload` encodes a real
+`on_built_entity` through `fk_abi.lua` and reads it back through the generated
+decoder, and reports `colour=MISSING` when the value is read from the key's offset.
+Detail: [`agents/abi.md`](agents/abi.md).
+
+**A dictionary RETURN keyed by a tier-2 value binds, so a guest can enumerate
+surfaces.** `game.surfaces`, `game.players` and `game.forces` all deferred, and the
+downstream mod probed surface indices instead. The refusal was arithmetic rather than
+design — `Value` holds slices so it cannot be a Go map key, and "three members do not
+earn a second container shape" was true only while there was no second container
+shape. The dictionary-FIELD work built one, so `goDictKV` stops refusing and the
+**caller picks the container**: a pair slice when the key is dyn, a map otherwise.
+**3875 → 3878 members bound, 30 → 27 deferred**, and that reason leaves the census.
+A comparable-keyed return stays a `map[K]V` on purpose — it is decode-only, so there
+is no order for the guest to get wrong — which makes the asymmetry a comparability
+fact, not drift. *Enforced by `TestADictionaryKeyedByADynamicValueBinds` and
+`TestADictionaryKeyedByADynamicValueCrosses`, the second of which pins what no
+compiler checks: a (dyn, handle) pair strides by **24**, because the value sits at
+the key's PADDED size and a decoder using its width would read out of the tag.*
+
+**A host call keeps NO guest heap, since the marshalling arena.** Measured through
+`examples/heap`, which reads the allocator's own bump pointer: an argument block cost
+**16 B/call and a return block another 16, whatever their size** — `var a [4]byte` whose
+address is taken does not stay on the stack under TinyGo — and `fk_alloc` was a
+`make([]byte, n)`, 96 B for a three-entry tier-2 map. Under `-gc=leaking` none of it came
+back, so 128 B/call of `create_entity` lived in every save and every multiplayer join,
+and it fed `--persist=packed`'s then byte-range dirty record a fresh page per call. Blocks and
+`fk_alloc` now come from one chunked arena restored at the bracket every binding already
+opens: **128 → 0 B/call**, gated by `TestAHostCallKeepsNoHeap`. What remains is 48 B for
+a returned Go **string**, which is the caller's own value and must not be arena'd — the
+downstream report groups it with the rest and is wrong to. One new export,
+`fk_alloc_static`, exists because `fk_mod.lua`'s per-level event buffers outlive the call
+that allocates them; that invariant used to hold only because nothing was ever reclaimed.
+Detail: [`agents/abi.md`](agents/abi.md).
+
+**A STRUCT ARGUMENT allocates too, and Rust never bracketed one — 301 of 375 bound
+members, latent because `AllocMark` is a no-op.** A generated `encode_at` writes each
+field in turn and a container field needs somewhere to put its elements, so
+`LuaTrain::set_schedule` allocates for `TrainSchedule.records` and `LuaSurface::
+request_path` for a container that is a field OF a field. **The `allocs` predicate is
+character-for-character identical in `gogen.go` and `rustgen.go` and neither loop tested
+`KindStruct`** — Go emitted the bracket anyway from a *separate* clause, `args.Size > 0`,
+which is about its argument blocks being arena memory. **Two backends that agree through
+a third condition look exactly like two backends that agree**, which is why the census
+diff and `TestBothBackendsBindTheSameMembers` could not see it: the member sets match, it
+is the emitted bracket that differs. This is `HostAllocatesFor`'s own lesson arriving on
+the other side of the call — that predicate is a *whitelist* of fixed-width scalars
+precisely because the enumerate-what-allocates form drifts, and `KindStruct` fell through
+the going-out loop exactly as `KindString` once fell through the coming-back one. Fixed
+**fails-closed**: all 375 are bracketed rather than the 64 whose struct really allocates,
+because deciding precisely means walking the concept transitively and a walk that is
+subtly wrong under-brackets, which is the defect. **It is LATENT and not live**: Rust's
+`fk_alloc` is the global allocator rather than a marshalling arena, so `AllocMark` is an
+empty struct with an empty `Drop` and nothing is reclaimed at the bracket either way.
+What is pinned is the SHAPE, against the day `guest/rust/fk` grows a real arena — the
+change its own `fk_alloc` doc comment names. *Enforced by
+`TestAStructArgumentIsBracketedInBothBackends`, which compares the two backends' SETS
+rather than each independently (a hole in one is invisible in a per-backend test the
+other also passes) and was confirmed to report `301 of 375` with the clause removed.*
+
+**And that was only the GUEST-INITIATED half — a host-initiated dispatch had no bracket
+at all.** `fk_alloc` hands out arena memory and every generated binding gives it back; an
+event Factorio raised, a console command, or a remote method has no binding, because
+nothing on the guest side made the call. A string larger than what is left of the 4 KiB
+scratch region falls back to `fk_alloc` and `fk_free` is a no-op, so **every such
+dispatch advanced the bump pointer permanently**: measured at **16,442 B per event and
+16,444 per remote call** carrying a 5 KB string, against **0 and 0** after. Under
+`-gc=leaking` that is a leak into every save; under `--gc=collected` it is *worse*,
+because the arena's chunks hang off a package-level root the collector can never reclaim.
+The fix is the rule the scratch region already follows — **the OUTERMOST dispatch takes
+the bracket**, through two OPTIONAL guest exports (`fk_arena_mark`/`fk_arena_release`,
+feature-detected as a pair, so a guest built before them behaves exactly as it did) — and
+it is sound because everything crossing inbound is COPIED OUT before the handler returns,
+which is the safe-point precondition read in the other direction. It costs **+366 ns per
+outermost dispatch** and nothing on any dispatch that allocates. **The corpus could not
+see it because no event here carries a large string** — the ports round's lesson again,
+and the feature it was found ahead of (fkipc) exists to carry payloads. *Enforced by
+`TestAHostInitiatedDispatchKeepsNoHeap` (both legs gated at zero) and
+`TestAGuestWithoutTheArenaBracketStillDispatches`.*
+
+**Placing that bracket exposed a second defect: the event payload was encoded OUTSIDE
+the dispatch.** `subscribe`'s closure ran `H.write_struct` before entering `dispatch`, so
+the payload's strings were written at the bottom of the scratch region and `dispatch`
+then reset it out from under them — the handler's own first host call wrote its returned
+string over an event field the handler still held a pointer to. Invisible because every
+generated decoder copies eagerly; a guest reading LAZILY, which is what `fk_abi.lua`'s
+own re-entrancy note says a handler does, got somebody else's data with no error
+anywhere. *Enforced by `TestAnEventsStringFieldSurvivesTheHandlersOwnHostCall`, which
+asserts at the BYTE through a wat guest that reads the pointer rather than the value.*
+Rust needs neither export and does not have the same defect — its `fk_alloc` is the
+global allocator, so a collected guest reclaims the block and a leaking one keeps it
+exactly as it keeps every other allocation; **a Rust guest at `--gc=leaking` still keeps
+its inbound payloads**, deliberately, documented at `fk_alloc`. Detail:
+[`agents/abi.md`](agents/abi.md), "The outermost dispatch brackets the arena".
+
+**A host call costs 427 ns of dispatch and up to 14.3 µs of tier 2**, measured through a
+real guest driven by the real `control.lua` (`TestWhatAHostCallCostsThroughARealGuest`).
+A bare call is within noise of the host-side 513 ns, so the guest adds nothing to
+dispatch; `writeDyn`/`read_dyn` is the whole of the ~12 µs a downstream compiler felt,
+and `create_entity` is exactly that shape.
+
+**`--persist=packed`'s cost was a SPAN, and the two measurements of it disagreed by 7×
+— that is now history rather than a caveat, and the history is why the caveat existed.**
+This harness reported 134–678 µs per host call, ~100× `table`, and still did after the
+arena; the first downstream mod, measuring **in real Factorio**, reported about **21 µs
+per host call** on a `create_entity` shape. Neither was wrong: the dirty record was a
+min/max byte RANGE, so the cost tracked the *span* one call touched, and this harness's
+guest touches a static scratch region (low) and a Go string sink in the heap (high) in
+the same call while a mass-builder touches neither. That is why the *ratio* between two
+honest measurements of "packed" was 7×.
+
+The dirty-page SET removes the mechanism, and the harness's own worst leg moves with it
+(string return, packed: **637.5 µs → 172.2 µs**). What survives of the old advice:
+`packed`'s per-call cost is still ~40 µs per page ACTUALLY WRITTEN, so a guest that
+scatters over many distinct pages in one call still pays for each, and `auto`'s
+heap-size proxy still cannot see write locality. What does not survive: "packed is
+100× table", and the reason downstream shipped `table`.
+
+**Tier 2's decode is the STRINGS, and `fk_str` had never been batched.** Rounds
+1–3 named `read_dyn` as the target; ablating it says a bare number costs 86 ns
+and a 14-byte string twenty times that, so string decoding is essentially the
+whole of it — keys included. `fk_str` was one `string.char` call and one table
+slot per **byte** while its mirror `fk_wstr` had been batched to four words per
+`string.unpack` a milestone earlier: **the same load/store asymmetry this file
+already records for sub-word accesses**, where a reason measured for stores was
+inherited by loads. Writing the lesson down did not prevent the next instance.
+It now reads four words per `string.pack`: **94 → 14 ns/byte at 148 bytes**
+(13.9 µs → 2.08 µs), against `fk_wstr`'s 6.44 ns/byte the other way.
+
+**Do not quote it as a win for a mass-builder.** A short string gains nothing and
+below 8 bytes it pays, so there is an explicit fast path — without it a map of
+six one-character keys went 4.15 → 4.54 µs — and a `create_entity`-shaped map,
+whose ten strings are all 1–14 bytes, shows **no reliable change** (two paired
+runs at 11.0 µs against 14.1, one at 14.2). The win is long strings: blueprint
+strings, localised strings, descriptions. *Gated for correctness rather than
+speed by `TestReadStringIsExactAtEveryAlignmentAndLength` — every length 0–40 at
+every alignment 0–7, round-tripped through `fk_wstr` and back, because a
+head/body/tail split is wrong at boundaries or not at all.* `read_dyn`'s own
+tidy-up (tag constants as module locals, branches in frequency order) measured
+**0.974× paired — the noise floor**, and is kept as a simplification, not a win.
+
+**The actionable target for dispatch cost is `read_dyn`, not the guest-side encode.**
+Round 1 suggested hoisting a guest's tier-2 argument construction; downstream did it
+and it **bought nothing** — its buffers were already reused and the recompile stayed
+at 4.4 ms. The residual it measures, ~12.6 µs/call, matches the 14.3 µs this harness
+attributes to the tier-2 path, and the guest half of that is already hoisted. What is
+left is the HOST-side decode.
+
+**A returned string costs a bump, not an allocation.** The guest exports a 4 KiB
+scratch region (`fk_scratch_base`/`fk_scratch_size`) and the host writes returned
+strings into it, falling back to `fk_alloc` for anything that does not fit. Worth
+**2.26×** on a string return measured with a real compiled guest allocator bound
+(2429 → 1072 ns) — `fk_alloc` is a `//go:wasmexport` whose body is
+`make([]byte, n)` compiled to Lua, and it was ~53% of the call. The re-entrancy
+rule is the hard part and it is the same shape as the scratch-buffer bug the
+audit found: a host call reclaims only back to **its own mark**, and only the
+**outermost dispatch** resets the region — an event handler reads its fields
+lazily and makes its own calls while doing so. *Enforced by
+`TestANestedCallDoesNotClobberAStringTheOuterOneIsStillReading`.* Detail:
+[`agents/abi.md`](agents/abi.md).
+
+**Event dispatch nests, and is re-entrant since the audit.** Factorio raises some events
+synchronously from inside the API call that caused them (`create_entity{raise_built=true}`,
+`entity.die()`), so a guest handler that calls the API can be re-entered before it
+returns. It used to lose both things a dispatch owns: the single scratch buffer, which
+the inner event encoded over while the outer handler was still reading fields lazily
+from its pointer, and the transient handle space, which the inner `dispatch_done`
+released wholesale — re-numbering ids as it went, so an outer handle could come back
+pointing at a *different* object, a desync rather than an error.
+
+`fk_mod.lua` now counts dispatch depth: one scratch buffer per level (a guest that never
+nests still allocates exactly one), and clear+sync happen only when the outermost call
+returns. Every guest entry point goes through `dispatch()`, whose pcall is load-bearing
+— a trap must not strand `depth` above zero, and it is what makes `clear_transient`'s
+promise (a guest that trapped keeps no handles) true rather than aspirational.
+
+**`fk.subscribe` carries event filters, as a tier-2 value rather than a generated
+constant.** The engine applies `script.on_event`'s filter list in C++ before the
+handler runs, so a guest caring about one prototype stops paying a dispatch plus a
+host call plus a string crossing for every build event on the map. The round-1
+sketch had it travelling in the generated table beside the event name, the way member
+ids do — **that is wrong**: the prototype names a mod filters on are the mod's own
+and no scan of `runtime-api.json` would ever find them. What is constant is the event
+*id*; the filter is data, so it crosses as a pointer to a `DYN_ARR` of `DYN_MAP`,
+which is the shape Factorio's list already has, and is decoded **once at subscribe
+time**. Two subscriptions to one event share a registration, so their filters are
+UNION-ed and an unfiltered one widens the pair — the only merge that cannot silently
+stop delivering an event somebody asked for. This also gave the **Go** bindings a
+`Subscribe` at all: every Go guest hand-declared `//go:wasmimport fk subscribe`,
+which Rust never made anyone do. Both wrappers inline under TinyGo `-opt=2`, so the
+constant scan still prunes 219 event descriptors to 2 — *gated by
+`TestTheEventIdSurvivesTheGeneratedSubscribeWrapper`, because a wrapper that stopped
+inlining would silently ship the full event descriptor table (about 55 KB of Lua per
+load at the default pin) instead of two rows*.
+
+**`fk.subscribe` carries a FIELD MASK too, and a masked field reads as EMPTY
+rather than as garbage.** The event encode is eager and complete, which is right
+for a flat payload and wrong for the few carrying a container:
+`on_undo_applied`'s `actions` deep-copies an undo step's whole `BlueprintEntity`
+list to give a handler one `uint32`. A `uint32` bitmask over field indices,
+resolved once at subscribe time like a filter, says which fields to leave out.
+**Measured through the real dispatch protocol: 20 actions × 2 entities, 725 µs →
+1.9 µs per dispatch; 200 actions, 7.49 ms → 2.7 µs.** The cost is linear in the
+array and the masked leg is flat, so the mask is worth exactly what the field
+cost — a property of the payload, not a ratio to quote.
+
+Two things make it safe, and both are load-bearing. **A masked field is WRITTEN
+as empty, never skipped**: the scratch buffer is reused across dispatches, so
+leaving the bytes alone shows the guest the *previous* event's data — the
+mutation reports `masked 9 3 hi`. And **only OPTIONAL and CONTAINER fields are
+maskable**, because presence-byte-0 and `(ptr, count) = (0, 0)` are readings
+every generated decoder already produces, while a masked mandatory scalar would
+be a zero the guest cannot tell from a real value. The generator emits a
+`Skip<Event><Field>` constant only for a maskable field and the host refuses the
+bit as well — both, since a guest can compute a mask. The layout never moves.
+*Enforced by `TestAMaskedFieldReadsAsEmptyNotStale`,
+`TestASubscriptionCarriesItsFieldMask`,
+`TestAMaskOverAMandatoryFieldIsLoggedAndIgnored` and
+`TestWhatAnEventFieldMaskIsWorth`.*
+
+**`defines` are generated on both sides now, and resolved BY NAME at load.**
+`defines.direction.east` was a hand-written `4` in guest code, in a project whose
+own ABI doc says defines are never hardcoded. The downstream report's premise for
+fixing it was wrong and the reason is the design: `runtime-api.json` carries
+define **names** and an order and **not their values**, so there is nothing to
+bake from. `fk.define(id)` is a fifth import; the generated table carries the
+dotted path, `control.lua` resolves it against the running game once at load, and
+the guest holds a per-build id. **1137 values across 60 groups**, every group
+except `defines.events` — which has its own resolved table and whose numbers are
+not what `fk.subscribe` takes.
+
+An import call rather than a table in guest memory, and that is a pruning
+decision: the whole set is ~45 KB of paths and `usedIDs` — a scan for a constant
+reaching an **import** — is the only pruning machinery here, so `UsedDefines` is
+`UsedMembers` with a different name. The per-read cost comes back on the guest
+side, where the generated accessor caches on first use; caching in a package
+initialiser instead would name every id in every mod and prune nothing.
+*Enforced by `TestDefinesAreGeneratedAsNamesNotValues`,
+`TestDefinesGenerateGuestAccessors` and
+`TestADefineIsResolvedAgainstTheRunningGame`.*
+
+**`fk_after_load` is the first tick after a LOAD, and then it is gone.** Factorio's
+own `on_load` cannot touch `game`, so a literal `fk_on_load` would not have bought
+rebuild-from-world; this is a one-shot on `on_tick` armed from `on_load` and torn
+down by its own handler, which is what `off_event` was built for. It fires only
+after a load, never on a new map — `script.on_load` does not run for one and
+`fk_on_init` covers it — so `--persist=none` plus a world scan is a real option now
+instead of costing a permanent `on_tick` subscription. *Enforced by
+`TestTheFirstTickAfterALoadIsAHook`.*
+
+**A blueprint paste is P SEPARATE dispatches in one tick, which is why batching is
+`fk.defer()` and not an end-of-dispatch hook.** The downstream request was for a hook
+at `dispatch_done`, on the grounds that the depth counter already knows when the
+outermost dispatch returns. It does — and it would have batched nothing, because
+Factorio raises one `on_built_entity` per entity from its own loop, so `depth` goes
+0→1→0 P times and the hook fires P times. Nesting is a different phenomenon
+(`create_entity{raise_built=true}` raising from inside a handler) and is not what a
+paste is. `fk.defer()` instead registers a **one-shot `on_tick`** and tears it down
+again from inside the flush: an idle guest pays zero registrations and zero per-tick
+calls, and P builds in one tick cost one `fk_on_deferred`. Two costs are real and
+stated rather than hidden — the flush lands on the **following** tick, because this
+API has no end-of-tick hook and `on_tick` for the current one has already been
+raised; and the armed flag lives in `storage`, because Factorio does not save event
+registrations and a mod re-registers from `on_load`. *Enforced by
+`TestManyEventsInOneTickFlushOnce` and
+`TestDeferredWorkSurvivesASaveTakenBeforeItRuns`.* It also made the per-event
+dispatcher list *removable* (`off_event`), which is the machinery every later
+one-shot hook wants — and the walk is now by identity rather than by a count taken
+up front, because `for i = 1, #list` evaluates `#list` once and a handler removing
+itself would make the last index a nil and call it.
+
+Still true and still a trap: adding a hook means editing `runtime/lua/fk_mod.lua`
+*and* `factorio.Hooks`, and the guard tests fail if only one moves — **both
+directions**, since the audit. `fk_on_event` was missing from `Hooks` for two
+milestones and only the listed→registered direction was checked, so nothing caught it.
+That mattered more than a missing line of output: `fklua mod` hands `Hooks` to the
+emitter as the reachability root set, so diagnostics inside a guest's event handlers
+were silently dropped, and `Inert()` told a subscribe-only guest it would never run.
+
+### Guests (M4, M8, M10)
+
+**TinyGo builds at `-opt=2`, not its default `-opt=z`.** That default optimises for
+SIZE, which is the one cost this target does not have — the day-0 probe measured Factorio
+parsing 4 MB of Lua in 106 ms and a chunk never appears in a save. It was the single
+largest win of the M11 perf pass and it is one flag: `real_names` **0.577×**, `real_grid`
+0.771×, `pure_sum` 0.770×, `pure_dot` 0.847×, `real_entities` 0.958×, against `-opt=z`
+through the same compiler. `pure_prng` is ~2% slower and is the only kernel that loses.
+It also retired a claim: Rust used to beat TinyGo everywhere by 1.05×–1.46×, which was
+rustc `-O3` measured against TinyGo `-Oz`.
+
+TinyGo `wasm-unknown` (mandatory flags in `guest/go/fk.BuildFlags` — each is
+load-bearing) and Rust `wasm32-unknown-unknown` (needs both `RUSTFLAGS` and
+`wasm-opt --llvm-memory-copy-fill-lowering`, because rustc ships a precompiled
+`compiler_builtins` with bulk-memory baked in). TinyGo wasip1 works — goroutines run in
+game deterministically; `-buildmode=c-shared` is mandatory (a mod needs a REACTOR, not
+a COMMAND). 
+Bulk-memory is **partial and labelled as such**: `memory.copy`/`fill` compile natively,
+the segment-indexed half (`memory.init`, `data.drop`, `table.copy`/`init`, `elem.drop`)
+needs the data and elem sections kept live past instantiation and is *unscheduled* —
+no guest toolchain has been seen emitting one. It said "M10" until the audit, two
+milestones after M10 shipped, which reads as work someone is doing. Everything else:
+[`agents/guests.md`](agents/guests.md).
+
+**The guest heap is COLLECTABLE now, and it is one flag plus one import.**
+`--gc=collected` on `fklua compile`/`mod` says the guest was built with TinyGo
+`-gc=custom` and imports `guest/go/fkgc`, which supplies the seven runtime hooks
+TinyGo's custom-GC seam expects. The import is an EMPTY PACKAGE under every other
+`-gc`, so it is unconditional in guest source and a `-gc=leaking` build is what it
+was. Measured on `churn`, an ordinary allocating event handler: **60,000 events
+reach 128 MiB of linear memory under `-gc=leaking` and 768 KiB collected**,
+checksum-identical, in the same wall time.
+
+Four costs, none of them the one that was expected. **Allocation is not slower —
+it is 0.962× on `churn`** and 1.033× on `real_names`, because the allocator carries
+no per-allocation counter where `-gc=leaking`'s carries two `uint64` ones. **163 KiB
+of linear memory** goes to statically reserved collector metadata, which caps the
+heap (until sharding stage C deleted the cap; see the Sharding C row) and is more memory than
+`examples/hello` has. And **a mass-builder is still not covered** — ~190 KB/s of
+reclamation at a 0.5 ms/tick budget covers an event handler with headroom and
+3,200 entities in one tick not at all.
+
+**`--gc=collected` is a claim about the GUEST, and it is now checked as one.**
+The flag is refused unless the module exports the collector's pacing surface —
+`fk_gc_step`, `fk_gc_dirty_base`, `fk_gc_dirty_cap`, which is what `control.lua`
+binds and therefore what "there is a collector in here" means to the host — and
+refused separately for a wasip1 guest, which *can* carry that surface but whose
+parked goroutines are the untested second root-discovery path (`agents/gc.md`
+§1). It checked only the wasip1 half until 2026-08-01, so **every Rust guest and
+every Go guest built the default `-gc=leaking` way was accepted**. The flag is
+not inert: it takes the inlined 8-byte store back out of line and emits the
+barrier's arming surface, so such a module paid for a collector it did not have.
+The export list is read from `factorio.CollectorSurface()` rather than spelled a
+second time. **BOTH LANGUAGES HAVE A COLLECTOR** — `guest/rust/fkgc` shipped at
+the closeout round and a Rust guest turns it on with `cargo build --features
+fk/fkgc`, no import and no second flag, because `guest/rust/fk` owns the single
+`#[global_allocator]` site. This paragraph said "in practice this means Go only"
+for four milestones after that stopped being true, and `fklua --help` said the
+same; both were corrected 2026-08-03 after a Rust port read one of them and had
+to check ([`FKLUA-FINDINGS`](https://github.com/Techrocket9/fklua-ports-samples)' R9).
+What is still refused is a **wasip1** guest, which can carry the surface but
+whose parked goroutines are the untested second root-discovery path.
+*Enforced by `TestCollectedIsRefusedForAGuestThatCarriesNoCollector`,
+whose positive leg builds `gcsave` both ways so the required list is the list a
+real collected guest has, and by `TestTheCollectorSurfaceIsWhatControlLuaBinds`,
+which checks that list against `fk_mod.lua` in both directions.*
+
+**The pause is PACED since stage C, and the headline is 555×.** A collection is
+cut into bounded steps driven from a one-shot `on_tick` that exists only while
+one is in flight — `fk.defer` with a different payload, down to the
+unregister-before-dispatch ordering and the `storage` flag — so an idle guest
+still registers nothing and pays nothing. At a 5.69 MiB heap where a
+stop-the-world collection costs **110.8 ms in one tick**, the same collection
+paced at the default budget is 622 steps whose worst is **0.18% of the cycle,
+about 0.20 ms**. In real Factorio, `gcsave` runs **2 collections over 120 ticks**
+with every retained block intact, two `memory.grow`, and identical guest lines
+across two runs; `run-roundtrip.sh` saves it MID-MARK and MID-SWEEP in both
+persist modes and it resumes. **That count said 18 here and 6 in `agents/gc.md`
+until the fkipc closeout re-ran it**, which is one measurement wearing three
+numbers: the 18 was taken on 2.0.77 before stage C, when a mark terminated as
+soon as a re-scan pass completed — and that pass was completing *without
+covering the heap*, which is the use-after-free stage C fixed. A collection is
+~47 ticks now, which is what `run-roundtrip.sh`'s `GC_SAVE_TICKS` were
+re-derived against.
+
+Marking runs behind the **armed `MEMDIRTY` page set** — the stage-A design,
+which is the barrier `--persist=packed` already maintains, turned on for the
+mark phase only; sweeping needs no barrier because the bitmap is fixed once
+marking terminates, so a store cannot change a decision it makes. The sweep is
+both paced by span range (which bounds the worst tick) and LAZY on allocation
+(which bounds the heap: `allocSpans` sweeps one bounded bite before it grows). Two knobs:
+`fkgc.SetThreshold` is when a collection starts, `fkgc.SetBudget` is how fast it
+runs — **1024 granules of heap touched per step, calibrated as 0.5 ms against
+stage B's measured 32.8 ms/MiB**. Detail, the five defects the stage found and
+the safe-point precondition: [`agents/gc.md`](agents/gc.md), "Stage C, as built".
+
+**Stage D measured all of that IN THE GAME, and three numbers moved the wrong
+way.** The 555× above is a host-side derivation; it is not wrong and it is also
+not what a mod gets. `scripts/run-gcbench.sh` now reports a per-TICK
+distribution — `--benchmark-verbose <counters>`, **header-driven** parsing
+because Factorio emits the columns in ITS OWN order, with the load tick dropped
+as a row rather than swallowed as a maximum — and in 2.0.77 at a 2.8 MB heap the
+same comparison is **240 ms stop-the-world against 32.6 ms paced, 7.4×** (median
+0.020 vs 0.103 ms, deterministic to the tick across three runs). Three findings
+sit on top of it. A stop-the-world collection costs **88 ms/MiB in game against
+stage B's host-side 13.9–32.8**, which is unexplained and is the stage's first
+open item — *nothing derived from that band should be quoted as an in-game
+number*. **A `memory.grow` crossing the Lua word table's 2²⁰-entry array-part
+boundary is a 2.8-SECOND tick**, so this feature's own premise was priced three
+orders of magnitude low: it had been "0.2 ms/MiB of permanent worst tick
+afterwards", and the grow itself was never measured. And **a budget must clear
+the guest's dirty rate, not just its pause target** — `examples/gcbench`
+allocated 3× the reclaim rate `agents/gc.md` had published as its own acceptance
+criterion, and sat in the mark phase for 600 ticks with `cycles=0` and the heap
+climbing exactly as if there were no collector, which the old per-RUN instrument
+reported as a plausible table. Full record: `agents/gc.md`, "Stage D, as built".
+
+**A toolchain guard must PROBE BY DOING, not by asking.** `RustAvailable` decided the
+guest target was installed by running `rustc --print cfg --target
+wasm32-unknown-unknown` — which exits 0 on a machine that has never installed it,
+because the target spec is compiled *into* rustc and printing needs no rlibs. So the
+guard passed and the cargo build it blessed failed on a missing `core`, turning a
+should-have-skipped test into a hard CI failure on every push from M8 to 2026-07-31.
+It now compiles a 2-line `no_std` crate (26 ms) and believes the compiler, not the
+description. `Available()`'s TinyGo/wasm-opt checks are `LookPath`s for a binary that
+either exists or does not, so they do not have this failure mode — the asymmetry is
+worth keeping in mind before adding a third guard.
+**And the same guard was missing `cargo` until 2026-08-07**, which is the other half of
+the asymmetry rather than a contradiction of it: nothing in this repo shells out to
+`rustc` to BUILD anything — `BuildRust`, `BuildRustCollected`, `BuildRustLib` and every
+`cargo test -p` gate go through cargo — so a machine with rustc and no cargo passed the
+guard and died inside a build, which is the exact failure mode the rlib probe removed
+for the other input. A `LookPath` is right there and the rule is not violated: the rule
+is about a question whose ANSWER CAN LIE, and rustc describing an uninstalled target is
+such a question while "is there an executable named cargo on PATH" is not.
+
+---
+
+## Canonical workflows
+
+```sh
+make lua52f        # build the oracle -- COPIES it from the main checkout in a worktree
+make check-lua52f  # assert it still matches Factorio's sandbox
+make test          # go test ./... -- depends on the oracle, so it cannot silently skip
+make spectest      # WebAssembly conformance suite
+make bench         # M0 kernels + the go/no-go gate
+./bin/fklua bench --opt                                      # what the passes are worth
+./scripts/bench-guests.sh                                    # real TinyGo + Rust vs hand-written Lua
+for L in 0 1 2 3; do ./bin/fklua spectest --opt=$L; done      # green at EVERY level
+for G in leaking collected; do ./bin/fklua spectest --gc=$G; done  # ...and in BOTH gc modes
+./bin/fklua spectest --nan=exact --opt=3                     # …and in exact mode at the default
+./scripts/run-guest.sh                                       # guest in real Factorio
+GUEST=gcsave ./scripts/run-guest.sh                          # ...with its heap COLLECTED
+./scripts/run-roundtrip.sh                                   # save/load round trip, real Factorio
+FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-ipc.sh            # the fkipc protocol against a live game
+LANG_=rust FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-ipc.sh # ...the Rust arm
+FACTORIO_USERDIR=/tmp/fkdemo ./scripts/run-ipcdemo.sh --smoke # TWO mods on one socket, automated
+FACTORIO_USERDIR=/tmp/fkdemo ./scripts/run-ipcdemo.sh --smoke-single # ...in GRAPHICAL single player
+FACTORIO_USERDIR=/tmp/fkdemo ./scripts/run-ipcdemo.sh --play  # ...the interactive slider session
+FACTORIO_USERDIR=/tmp/fkdemo ./scripts/run-ipcdemo.sh --play --single # ...single player, one process
+(cd sdk/go && go test ./...)                                 # the external SDK + the wire-vector golden -- also in `make test` and CI
+(cd guest/rust && cargo test -p fkipc)                       # the Rust codec + link, host-side -- also in `make test` and CI
+FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-gcbench.sh        # paced vs stop-the-world, PER TICK, in game
+FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-gctail.sh         # LUA's own GC tail, 24k ticks, bare Lua mod
+FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-guest.sh          # ...while a Factorio is already open
+./bin/fklua gen-bindings --check                             # committed bindings are current
+./scripts/run-probe.sh && python3 scripts/analyze-probe.py   # in-game probe (needs Factorio)
+```
+
+**Fixing a defect from the report:** re-read its Coupling field → confirm phase
+prerequisites → write the failing test from the fix plan's Test field (the report's
+repros are ready-made test bodies) → fix → full gate stack above → regenerate goldens
+in the same commit → update this file (remove the `[BUG]` marker, promote the
+invariant) → for runtime-Lua changes, finish with run-guest and run-roundtrip.
+
+**Adding a bench kernel variant:** `bench.Run` compares checksums across variants
+before any timing is trusted; a mismatch fails the run.
+
+**Branching:**
+
+```sh
+git checkout master && git pull --rebase
+git checkout -b m<n>-<topic>
+# ... work ...
+git rebase master && git checkout master
+git merge --ff-only m<n>-<topic> && git branch -d m<n>-<topic>
+```
+
+Committed on purpose, trading repo size for hermetic CI: `testdata/spec/` (wast2json
+output), `api/<version>/runtime-api.json`, generated bindings, `bench/baselines/`,
+`testdata/ipc/wire-vectors.txt` (the fkipc golden both codecs read) and
+`testdata/ipcprobe/` (the probe mod).
+Never committed: the Lua tarball, `dist/`, rebuildable `.wasm` fixtures, anything from
+the Factorio install, `scratch_tmp/`.
+
+---
+
+## Where things live
+
+**This list is the packages that exist.** A directory named here that is empty, or
+named here and absent, is a bug in this file.
+
+```
+cmd/fklua/          the only binary
+internal/wasm/      decoder behind a narrow interface (vendored watgo + adapter)
+internal/ir/        stackified wasm → typed value graph; per-function CFG (cfg.go)
+internal/analysis/  the M5 passes: range/wrap deferral (CFG fixpoint), shadow-frame
+                    escape analysis, spill planning, hot-callee ranking. Answers
+                    questions; never rewrites IR — see agents/optimizer.md
+internal/luagen/    THE emitter — agents/codegen.md lives or dies here
+internal/factorio/  mod packaging, runtime-api.json parsing, binding + docs
+                    generation, api diff, census
+internal/guest/     guest toolchain: feature guard, builds, end-to-end tests
+internal/spectest/  wast2json ingestion + runner
+internal/luahost/   drives bin/lua52f
+internal/bench/     the M0 kernel harness and the -opt harness
+runtime/            embed.go + lua/: the hand-written runtime. fk_rt is the prelude
+                    inlined into every chunk; fk_mod is a packaged mod's control.lua;
+                    fk_abi is the handle table it requires. SHIPPED VERBATIM.
+guest/go/           its own Go module (//go:wasmimport needs GOARCH=wasm).
+                    fk/ hand-written; fkapi/ GENERATED, committed, gated by --check;
+                    fkgc/ the -gc=custom collector, empty under any other -gc;
+                    fkipc/ the IPC guest library, hand-written, with wire/ the
+                    codec the external SDK imports (no build tags, stdlib only)
+guest/rust/         the Rust twin: fk/ hand-written, fkapi/ GENERATED WHOLE
+                    (Cargo.toml and lib.rs too, since the ports round -- api.rs
+                    on its own is not a crate), fkgc/ the collector, fkipc/ the
+                    IPC mirror, examples mirrored line-for-line against the Go ones
+sdk/go/             ITS OWN MODULE, and the only one here that is not compiled
+                    for wasm: the external half of fkipc, for a companion process
+                    beside the game. fkipc/ the library, cmd/ipcgate the worked
+                    consumer that scripts/run-ipc.sh drives. It depends on
+                    guest/go through a `replace`, which does NOT travel to an
+                    importer -- publishing means tagging guest/go
+api/<version>/      committed runtime-api.json + census.json, so a build needs
+                    neither the game nor the network
+third_party/        lua-5.2.1 patches + SHA-pinned fetch script
+scripts/            the in-game and corpus tooling, five families: run-* (guest,
+                    roundtrip, probe, gcbench, gctail, growbench, growprobe,
+                    shardprobe, shard-e2e, ipcprobe, ipc, ipcdemo), analyze-*.py (one per
+                    run-* probe), fetch-spec + coverage-gate + bench-guests,
+                    the generators gen-kindnames.py / shard-e2e-edit.py /
+                    ipc-probe-driver.py, and lib-engine.sh -- SOURCED, not run:
+                    what the INSTALLED engine is, which is a different axis
+                    from the API pin, and the one place that derivation lives
+scratchpad/         COMMITTED measurement harnesses (the GC arc's Python models +
+                    RESULTS.txt) — not scratch despite the name; the git-ignored
+                    scratch dir is scratch_tmp/ below
+bench/kernels/      hand-written Lua: the performance ceiling
+bench/wasm/         .wat kernels + drivers compiled at each -opt level; the only
+                    thing that measures a pass
+scratch_tmp/        git-ignored audit/analysis scratch — the 2026-07-30 and
+                    2026-08-04 defect reports live here
+```
+
+A C guest is M11 (optional): needs a wasm-capable clang this machine lacks; prefer
+wasi-sdk SHA-pinned into `third_party/`, used as a bare freestanding clang; evaluate
+`zig cc` first. **There is no wazero differential oracle and there is not going to be
+one** — the conformance suite under `bin/lua52f` compares against the spec's own
+expectations, which is stronger than a second implementation's opinion. Do not add a
+wasm interpreter to get a second opinion the suite already gives.
+
+`internal/ir`, `internal/analysis` and `internal/luagen` are held to ≥80% coverage in
+CI, but the real gate is spec-suite pass rate (see Critical rules).
+
+---
+
+## Operations / local environment
+
+- **Factorio LOCKS its user directory**, so an in-game gate run while the game is open
+  dies at startup and reads as a broken gate. Set `FACTORIO_USERDIR` and both scripts
+  write a `config.ini` with that `write-data` and pass it with `-c` — the environment
+  variable alone only tells the script where to read logs.
+- Factorio **2.1.14** (build 87180, Steam) at
+  `~/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents/`
+  — `doc-html/runtime-api.json` (156 classes), and `MacOS/factorio` supporting
+  `--benchmark`, `--benchmark-ticks/-runs/-verbose`, `--run-replay`, `--until-tick`,
+  `--mod-directory`, `--instrument-mod`, `--enable-lua-udp`. Saves in
+  `~/Library/Application Support/factorio/saves/`. `--benchmark` **never saves**; the
+  roundtrip script runs a headless server instead, which does.
+  **THIS IS THE ENGINE AXIS AND IT IS NOT THE API PIN**, which defaults to the GA
+  release 2.0.77 (148 classes) — the 156 above is what this INSTALL ships and is not
+  what the committed bindings are generated from. The two disagreeing is normal and is
+  the reason `scripts/lib-engine.sh` exists: every in-game gate packages with
+  `--factorio-version "$(factorio_series)"`, i.e. `2.1`, because a 2.1 engine refuses a
+  mod declaring `2.0` at game start. `factorio_series` and `factorio_version_triple`
+  read the binary; `fkipc_min_engine` and `require_fkipc_floor` are the fkipc floor's
+  half of it, and the floor constant is READ OUT OF `guest/go/fkipc/version.go` rather
+  than spelled a second time in shell.
+- Go 1.26.4, TinyGo 0.41.1, binaryen 131 (`wasm-opt` — **not optional**: TinyGo shells
+  out to it for every wasm target), wabt, Rust 1.97.1 with `wasm32-unknown-unknown`.
+  Not installed: wasi-sdk; no local clang targets wasm32.
+- Per-version API JSON: `https://lua-api.factorio.com/<version>/runtime-api.json`.
+  CI takes no **test input** from the network (no WABT, no Factorio, no API fetch); the
+  weekly `api-regen` workflow is the one job allowed to reach the network, and it
+  fetches exactly one JSON file. Provisioning a toolchain is not an input: `setup-go`
+  downloads Go and `rustup target add wasm32-unknown-unknown` downloads the guest
+  target's rlibs. Say "hermetic inputs", not "no network" — the loose phrasing is
+  what made the missing Rust target look like it could not be the CI failure it was.
+- CI (`.github/workflows/ci.yml`): gofmt, vet, **`make lua52f`**, `go test -race` +
+  coverage gate, bindings `--check`, lua52f sandbox conformance, spectest at every
+  `-opt` level in **both** NaN modes, **and their exit codes gate the job** — the
+  two per-level loops pipe through `tail -1` and carry `shell: bash` for the
+  pipefail it brings, because GitHub's default `bash -e {0}` has none and the
+  2026-08-04 audit found both steps unable to fail. The in-game gates are local-only and worth
+  running before anything touching the runtime lands.
+- **The `go` job builds the ORACLE as of 2026-08-02, and until then it did not.**
+  `make test` builds `bin/lua52f` before `go test` precisely so the suite cannot
+  silently skip; the job ran bare `go test`, which bypasses that. So the ~30
+  oracle-dependent tests — the emitter, ABI, persistence and collector tests that
+  measure against `lua52f` — had **never run in CI at all**, and the job reported
+  `ok` for a run that did not measure them. It costs ~15 s and is the same
+  SHA-pinned fetch the `lua52f` job already performs. The lesson is the one this
+  file keeps relearning: *`go test ./...` is not the entry point, `make test` is*,
+  and anything that reimplements the entry point inherits the obligation to
+  reproduce what it sets up.
+- **`spectest` declares `needs: [go, lua52f]`, so a red `go` job takes the real gate
+  with it** — silently, as a *skip* rather than a failure. That is how eight commits
+  between M8 and 2026-07-31 (including two `-opt=3` inlining changes) landed on master
+  with the conformance suite never run. A green checkmark is not the assertion; the
+  spectest job having *run* is. Check that it did before trusting a push.
+  **It happened a second time on 2026-08-03**, on both pushes, for the reason in the
+  next bullet — so this is a recurring shape and not a one-off. Two pushes' worth of
+  work sat on master with the conformance suite never run.
+- **The same shape exists LOCALLY, and stage D closed it.** `/bin/` is gitignored, so
+  every fresh `git worktree add` starts without `bin/lua52f` — and about thirty tests
+  across five packages respond by SKIPPING. `go test` prints nothing for a skip without
+  `-v`, so `ok …/internal/guest 0.4s` is what a package whose entire collector suite
+  declined to run looks like. **A skipped test reads exactly like a pass, and there is
+  no loud channel below a failure**: a passing test that writes a banner to `os.Stderr`
+  was built and discarded, because `go test` captures the binary's output and prints it
+  only when the package fails. So the absence is reported ONCE, by something that
+  fails — `internal/luahost.TestTheOracleIsBuilt` for the oracle,
+  `internal/guest.TestTheGuestToolchainIsAvailable` (opt out with `-short`) for tinygo
+  and wasm-opt. `make lua52f` in a worktree now COPIES the binary from the main
+  checkout rather than re-fetching and rebuilding Lua to reproduce it, and `make test`
+  depends on it so the repo's own entry point cannot reach the silent state.
+- **Those guards were written for a worktree and CI is the OTHER case, which took
+  master red for two pushes on 2026-08-03.** A guard that fires on absence cannot
+  tell a silent gap from a declared one, and CI declares two: it does not install
+  TinyGo (stated in `ci.yml`, for a cost reason — `internal/guest` is 113 s locally
+  with a toolchain, nearly all of it TinyGo builds) and, until the bullet above, it
+  did not build the oracle. The oracle half was a real gap and is fixed by building
+  it. The TinyGo half is declared by **`FKLUA_NO_GUEST_TOOLCHAIN=1`** in the job's
+  `env:`, read through `guest.ToolchainDeclaredAbsent()` so the two guards cannot
+  drift on the spelling.
+  **Three things about that channel are deliberate.** It is a *declaration*, not a
+  sniff at `CI`, so a future job that does install TinyGo is still guarded rather
+  than quietly exempt. It is **not** `-short`, the guards' own opt-out, because
+  blanket `-short` would also skip `TestTheRustToolchainIsAvailable` — and CI is the
+  one environment that installs the Rust target, so it is exactly where that guard
+  is worth running (it was a false positive on every runner until 2026-07-31 and
+  nothing noticed). And it needs no stale-declaration check: setting it on a machine
+  that HAS a toolchain changes nothing, because `Available()` reports true and the
+  guard passes on its own.
+  **What CI therefore still does not run, stated rather than implied**: the TinyGo
+  differential corpus, the collector suite, the end-to-end mod runs and the
+  init-scaffold build. None of those need Factorio — only a toolchain — so they are
+  candidates for a job of their own, not permanently out of reach.
+- **`go test ./...` does not reach `sdk/go`, because it is a SEPARATE MODULE**, and
+  the same is true of `guest/go` and every crate under `guest/rust`. `make test`
+  runs the SDK module's tests explicitly for that reason — it is pure Go, needs no
+  toolchain and no oracle, and it is where the fkipc wire-vector golden lives, so
+  leaving it out would have been a golden nothing regenerates and nothing checks.
+  **`cargo test -p fkipc` runs in `make test` and in CI as of 2026-08-07**: 68
+  host-side tests over the Rust codec, the link state machine and the committed
+  wire vectors, which until then ran in neither and were a person's job to
+  remember. **The `-p` is not optional** — a bare `cargo test` at the workspace
+  root cannot compile, because `fk` and `fkgc` name `core::arch::wasm32` and the
+  host has no such module, so anything that widens either call site has to name
+  the crate. It was the "a gate nobody added" half rather than the "a gate that
+  cannot fail" half — visibly absent rather than reported green — which is why it
+  cost one Makefile line and one CI step: fkipc declares `fkapi` only under
+  `cfg(target_family = "wasm")`, so on the host the crate has no dependencies,
+  needs no wasm target and fetches nothing. **A missing `cargo` is a NOTICE in
+  `make test`, not a failure**, and that is the one place this repo's "absence
+  must be loud" rule is served by something other than a failing gate:
+  `internal/guest.TestTheRustToolchainIsAvailable` already hard-fails on a
+  Rust-less machine and is deliberately not exempted by
+  `FKLUA_NO_GUEST_TOOLCHAIN`, so `make test` is already red one line earlier —
+  and make, unlike `go test`, does not capture its output, so the notice for the
+  residual case (cargo absent, rustc present, which `RustAvailable` never asks)
+  is genuinely seen. **CI's `go` job also runs the `sdk/go` module's tests now**
+  — its own module, unreachable by any module-scoped command, and the home of
+  the wire-vector golden's Go-side reader and `-update` generator — so between
+  the two new steps CI checks BOTH readers of that golden, where before it
+  checked neither.
+
+---
+
+## Deliverables carried forward
+
+Open items a later change must not forget. (Resolved rows are pruned; their outcomes
+are recorded in the sections above and in `agents/` — git has the full history.)
+
+| From | Deliverable |
+|---|---|
+| **Sharding B/C** | **SHIPPED, BOTH. Linear memory is a vector of 2¹⁹-word shards, the 4 MiB wall is gone, and as of stage C so is the fkgc heap cap.** *Stage B:* the bounds check IS the shard test — below 2 MiB `SHBOUND` **is** `MEMSIZE`, so every emitted access opens on a test it already had. Three forms landed: the **static fold** (a constant address folds to a constant SHARD and a constant WORD INDEX, not to shard 0), the **guard-hoisted** form (one extra conjunct proving the whole span inside one shard), and the **shard-0 fast path**. In game, paired, through the real emitter: **2 MiB — 1.007× median over 1,596 ticks** with the un-merged control at 1.43×; **6 MiB — 17.8×**. `gcbench stwbig` worst tick **5,299.7 → 446.7 ms**. Costs stated: +1 VM instruction per inlined access (1.10× host-side on the allocator-heavy `real_names`, invisible in game), `-opt=0..2` access 1.14–1.22× host-side, a 16-bit load above 2 MiB falls back to `ld16`, and a guarded loop whose SPAN crosses a shard loses its guard (strip-mining is still open). <br><br>*Stage C:* **`fkgc.HeapCap` and the `fkgcheap4`/`fkgcheap64` tags are DELETED.** The cap existed only because the mark bitmap and the span table were statically reserved `.bss`; they are now **one 40,960 B chunk per 4 MiB slice of heap, allocated FROM the heap under a new class `clsMeta`, behind a 4 KiB directory that covers all 4 GiB of wasm32**. The size model is `MetaBytes = 32,116 + 40,960 × ceil(heap / 4 MiB)` — a **0.977% tax on a 31.4 KiB floor**, against the old 163 KiB floor and 16 MiB ceiling — and it is **asserted by a test** rather than written in a comment, because the comments it replaces were wrong by 39% and 10.6% and nothing read them. The bounds left are wasm32's 4 GiB less one span and whatever `memory.grow` refuses. Proven in a real Factorio: a paced collected guest at a **52 MiB heap**, checksum unmoved, worst paced step **1.22× its budget**. <br><br>**Five defects, four of them older than the stage, and none of them was what gc.md's open item 5 said.** (1) The instrument could not see the work — `step()` zeroed its accumulator on entry and left it dirty on exit, so 1.17× host-side and 65× in game were never the same quantity; `Stats().MaxUnpaced` is the missing half. (2) The sweep-ahead was unbounded twice over: stage C's sweep-cursor window left the mutator's search space EMPTY the instant marking terminated (`clsFresh` replaces it per span), and even a bounded bite ran **131 times in one dispatch** in game (it is gated per tick now). (3) A re-scan of a dirtied page re-read the WHOLE object — one slot of a 176 KiB array per tick is eleven steps of budget, and marking never terminated: **1,100 ticks in phase 1 with `cycles=0`** in a real Factorio. A re-scan is one SPAN now, which also deletes the O(size²) patch it needed. (4) **A full re-scan pass could complete without covering the heap** — `ingestDirty` set `rescanOwed` and left `rescanCursor` where it stood, so a store below the cursor was never re-scanned and the sweep freed a live object; it survived three stages because the heap cap was hiding it. (5) The dirty page record was perishable — the host overwrites the landing pad every step, so a batch not drained in one step forced a full re-scan on **876 of 1,752 steps**; there is a pending list of the collector's own now, and the same guest runs **264 steps with one pass**. Also: the mark deadline did not end the phase it was supposed to end, and is a loop now. <br><br>**In game, before → after** (`run-gcbench.sh`, paced arm, 3,597 ticks): p90 **0.906 → 1.251 ms**, worst paced step **not measurable → 1.20× budget**, worst in-call burst **not measurable → 0.13× budget**. p90 = budget × the ~2.5 host-to-game constant, which is what open item 5 asked for. **The worst TICK is `memory.grow`, not the collector**: 107 ns a word predicts both the 22.7 ms tick at a 3.5 MiB heap and the 288.6 ms tick at 40 MiB to within 5%, and fkgc grows by a quarter. **That is fixed at sharding stage 15 — see the row below.** <br><br>**`--gc=collected` is the RECOMMENDED default for a new Go guest** — `fklua init` says so, `agents/guests.md` is reordered around it, and `-gc=leaking` is demoted to the expert path for allocation-disciplined guests. (This row cited BBB as having measured both arms and shipped leaking, which it had; **it re-measured on this sharded pin and ships collected since 2026-08-02** — see the `BBB` row.) **The compile-flag default is deliberately UNCHANGED**: `--gc=collected` is refused unless the module exports the collector surface, so flipping it would turn every existing `tinygo -gc=leaking` build into a compile error naming a flag its author never chose. **This is now a DEFAULT rather than a recommendation — see the `collected` default row below.** <br><br>**A SIXTH defect, and it took four wrong fixes because the harness was lying.** `run-roundtrip.sh`'s `gcsave` leg went red: 140 ticks in `phase=1` with `cycles=0` in game, where master completes 16-17 collections. First, `build_guest` is `if [ ! -f "$wasm" ]` — **the wasm is cached across runs**, so four "that was not the cause" conclusions came from the binary the FIRST run built; identical numbers across three genuinely different code paths is a stale input, not a result. Then two real causes. (a) **The pending dirty list had no dedup**: a page written every tick took a new slot every tick, so owed work reached **103,092 granules on a 32-span heap**. `clsPending` makes the list a set. (b) **The escape was keyed on the wrong signal three times over** — on "the record was lost" (reads **0** through the whole livelock: nothing is lost, the collector is only too slow), on "did this step mark anything new" (rises every step: that is the target moving, not the chase closing), and on "did owed work fall step-to-step" (oscillates). What works is to ask the two OWNERS separately over a window: **SCAN work** (gray + resumable scan + re-scan remainder — only the collector adds to it) and **DIRTY work** (spans the mutator wrote). A window is stalled when the pending list never emptied in it AND scan work did not shrink across it; after N such windows the mark stops yielding. That is "no net shrinkage of (unmarked + dirty)", and each clause is load-bearing: gcsave is dirty-dominated (`pempty=0` for the whole run) and escapes; `pacedhuge` at a **54.5 MiB heap over 24,000 ticks** is scan-dominated (sixty consecutive steps inside one 1 MiB object) and is NOT forced — `stalls=1`, `deadlines=0`, worst paced step 1.21× budget. Also: the escape now finishes the MARK phase only (its unbudgeted allowance was falling through into the sweep and sweeping the whole heap in one step), and `run-gcbench.sh` no longer calls a slow mark a livelock — `phase=2` or `stalls=0` is a run too short for the heap at that budget, which is a different remedy. **Still open:** strip-mining a guarded loop whose span crosses a shard, and `real_names`' 1.10× host-side. See [`agents/sharding.md`](agents/sharding.md) §14. |
+| **Sharding 15** | **SHIPPED. `memory.grow` was the last unbounded stall and it is paced now.** Stage C left the collector at 1.20× its budget and a worst TICK it could not explain with the collector; the attribution to `mem_grow`'s zero-fill held up, and `scripts/run-growprobe.sh` — a bare Lua mod with no wasm in it — turned the model from arithmetic into a measurement: **109.7–127.7 ns a word, and a NEGATIVE least-squares intercept at every heap size.** There is no fixed cost per grow, so the milestone's own premise (smaller increments buy a lower worst tick at the price of overhead) is **false**: 0 → 40 MiB in 640 one-page grows costs **0.984×** what 10 four-megabyte grows cost. <br><br>**The design is a HYBRID and each half covers what the other cannot.** (a) **A fill cursor in the runtime**: `FILL` runs ahead of `MEMSIZE`, advanced in 8,192-word pieces from a one-shot `on_tick` that `mem_grow` arms through `MEMPACK.grow_hook` — the `fk.defer`/`fk_gc_step` shape for the third time, so **a guest whose declared memory is enough registers nothing and pays nothing**, not one word and not one callback. The words between `MEMSIZE` and `FILL` are zero BY CONSTRUCTION, because every path that can write one opens with a bounds check against `MEMSIZE`. A grow into them costs **1.2–2.7 µs**; pacing the fill costs **1.02–1.03×**. It serves BOTH growth laws because it is in `mem_grow`. (b) **`fkgc`'s quarter is capped at one wasm page** (`growCapSpans` = 16 spans); `needSpans` always wins, so this bounds only the speculative part and only for a COLLECTED guest. <br><br>**In game** (`scripts/run-growbench.sh`, 6,000 ticks, the guest logs the tick of every grow so these are GROW ticks rather than a maximum). Collected, worst grow tick at 4/16/40 MiB: **43.2 → 17.2**, **108.5 → 22.8**, **253.9 → 24.6 ms**; p90 at 40 MiB **168.5 → 3.7 ms**. **The collected column stopped SCALING, which is worth more than the ratio.** `gcbench paced` worst tick **29.9–35.9 → 16.6–17.2 ms** over three runs each. <br><br>**Leaking gets almost none of it, and that is the honest half.** The lookahead is capped at 1 MiB because a materialised word is real cost and "one grow ahead" is unbounded for a doubling guest, so the pre-build removes a fixed ~23–28 ms: **127.4 → 98.0 ms** at 4 MiB and **998.0 → 974.5** at 40. **Nothing in FkLua bounds a doubling guest's grow tick**, and at a 40 MiB target that is **974.5 ms leaking against 24.6 ms collected — 40×, same guest, same rate, same run.** It is the strongest number here for `--gc=collected` and it is about the GROWTH LAW, not about collecting: neither arm reclaims anything. <br><br>**Three things moved the wrong way and all three are the same trade** — work that landed on one tick lands on many: `gcbench paced` p99 3.81–4.23 → 7.06–7.14 ms, mean 0.67–0.69 → 0.77–0.78, and the worst IN-CALL collector burst 141 (0.14× budget) → 1024 (**1.00×**), which is `allocSpans`'s one sweep-ahead bite being REACHED rather than the bound moving. The storm test is slightly better (heap 13.88 → 13.10 MiB, one latched escape, 209 grows against 22). <br><br>**And the residual is attributed: it is LUA REALLOCATING A SHARD.** What is left is 16.2–19.1 ms on a 16,384-word grow — 1,090–1,503 ns a word against a 107 ns/word model — at **every odd megabyte, 1.00 through 41.00, flat in heap size**, deterministic across passes. That is 2¹⁸ entries into a 2¹⁹-word shard: the last array-part doubling a shard ever does, one indivisible reallocation per 2 MiB of guest memory ever taken. It was always there and the fill was bigger. **So the grow tail is bounded by the SHARD SIZE**, exactly as Lua's own collector's worst tick is; halving the shard would roughly halve both and cost the guard lever. **STILL OPEN**, recorded rather than taken. Also refused, with numbers: `{table.unpack(z,1,524288)}` really does presize a shard (0.59–0.68× of the fill loop, and `fk_rt.lua`'s "a presize is impossible" comment was right about the FLAT table and wrong about a shard) but it is ONE INDIVISIBLE C CALL and cannot be paced; and lazy `__index` materialisation, which would move a shard's keys into the hash part — the one thing sharding exists to prevent — and needs a metatable `storage` cannot carry. **THE RESIDUAL IS NOW CLOSED AS BOUNDED, ATTRIBUTED AND BEST KNOWN — see the Sharding 16 row.** See [`agents/sharding.md`](agents/sharding.md) §15. |
+| **Sharding 16** | **CLOSED, ACCEPT-WITH-NUMBERS. The shard-doubling residual was re-measured against the shape that ships, and nothing beats it.** §15 refused the presize because `{table.unpack(z,1,524288)}` is one indivisible C call, and scored it at "0.59–0.68× of the fill loop" — against a fill loop that was then a **57 ms stall**. Pacing landed in the same milestone, so the thing to beat stopped being the TOTAL and became the LARGEST PIECE; a shape cheaper in aggregate and larger in its largest piece is a regression, which is the opposite of how the presize was originally scored. Retaken in game (`run-growprobe.sh` §6, every 8,192-word piece timed separately because `create_profiler` will not hand Lua a number), one 2 MiB shard at 4/16/40 MiB: **A — paced fill, what ships: worst piece 15.7/18.0/16.5 ms, total 57–64 ms over 64 pieces. B — clone 2¹⁹ at creation: worst 37.0–39.6 ms, ALL of it indivisible, total 52–54. C — clone 2¹⁸ then pace: worst 18.8–19.6 ms indivisible, total 55–57.** B is 0.84–0.92× on total and **2.25–2.36× on the worst tick**; C is 0.89–0.96× and 1.09–1.19×. <br><br>**And the hybrid pays the doubling TWICE, which settles where Lua's doublings land.** The worst piece in A *and* in C is piece **32, at word offset 262,144 — which IS 2¹⁸** — so §15's attribution is confirmed to the piece, and presizing to exactly 2¹⁸ does not skip the last doubling: the first store past the array part forces the identical rehash to 2¹⁹, now straight after a 19.5 ms indivisible presize. **There is no presize that skips it, because a presize to N followed by a write to N+1 IS the doubling.** What B genuinely buys is real and insufficient — its pieces run at a 0.146 ms median against A's 0.541–0.662, so the clone does remove the fill rather than move it. <br><br>**The pre-build cursor already absorbs it**: a splice into pre-built words is **0.0010–0.0025 ms**, so the doubling is already on a pre-build tick whenever the cursor keeps up, and the 16–19 ms `run-growbench.sh` sees is the case where the guest OUTRAN it. Moving the presize there changes nothing about its size — a one-shot `on_tick` is not a background thread. Also uncosted in either table: B and C need a permanently live 2¹⁹-word zero template, which is 8 MiB of host RAM, 2.29 B/word of save, and one more table for Lua to walk every cycle, paid by every guest whether or not it ever grows. **Do not re-try the presize without a new argument about the LARGEST PIECE** — "40% cheaper in total" is true, was true before, and is not the question. The only lever left is the shard size, which halves both this and Lua's own worst `propagatemark` and costs the guard lever: still recorded, still not taken. [`agents/sharding.md`](agents/sharding.md) §16. |
+| **Lua GC tail** | **CHARACTERISED, and it is Lua's ATOMIC step — the hypothesis was right about the mechanism and wrong about when you pay it.** `agents/guests.md` carried two 24,000-tick rows it could not explain: 4.178 ms of `luaGarbageIncremental` at a 52 MiB sharded heap against 1.141 ms at 54.5 MiB, both far above the ~0.5 ms a shard's `propagatemark` costs. `scripts/run-gctail.sh` is the new instrument — a **bare Lua mod with no wasm in it**, holding a configurable vector of live tables — because through a real guest the heap size, the table COUNT and the allocation rate all move together and the question needs them varied one at a time. <br><br>**It reproduces the tail with no FkLua in the picture, and it scales with BYTES, not tables: 8.909 / 11.428 / 14.084 ms at 32 / 52 / 64 MiB, which is 0.278 / 0.220 / 0.220 ms per MiB — i.e. the 0.202 ms/MiB per-cycle TOTAL, collapsed into one indivisible tick.** That is `propagateall` inside `atomic()`. Cutting the same 52 MiB into 2× and 4× as many tables does NOT reduce it (11.4 → 14.2 → 12.4), so **no shard size fixes it** and the shard bound simply does not apply. <br><br>**It is a ONE-OFF on a quiescent live set, not a period.** In every arm the worst tick lands in the first ~350 ticks and never recurs — `s26`'s second-worst over the remaining 23,700 ticks is 0.527 ms. **And a live set that is WRITTEN never shows it at all**: storing 256 words/tick into the same 52 MiB caps the worst tick at **1.76–2.05 ms** over 24,000 while raising the body (p99 0.065 → 0.79 ms). The obvious refinement was FALSIFIED on the way — the width of the write set does not matter, 1 / 6 / 26 shards giving 2.05 / 1.91 / 1.76 ms with the NARROWEST worst. <br><br>**`collectgarbage` pacing is a real ~10% lever and this repo's recorded claim was out of date**: one `collectgarbage("step", 2)` per tick is 0.93× worst / 0.89× p99 / 0.87× mean, and 7.711 ms against 11.428 on the quiescent arm. "Moves the pause by less than its own noise, because there is nothing to pace" was measured when linear memory was ONE table. It is still not a fix — 10% off 11 ms is 10 ms. Outcome is a **guidance entry with a shape and a period rather than a point**, in `agents/guests.md`'s cost table. |
+| **`collected` default** | **SHIPPED. `collected` is the DEFAULT FOR A NEW PROJECT, and it is a default rather than a recommendation because init now produces it.** Before this, `fklua init` wrote one file and printed four lines of shell the author had to retype correctly against a Go module they had to create themselves — and `fklua.toml` had no `gc` key, so `fklua mod` defaulted to leaking whatever the author had been told. Five parts: (a) **`gc` is an `fklua.toml` key** under `[fklua]`, written by `init` as `"collected"` — for a Go project when this row shipped, and **for BOTH languages** since `guest/rust/fkgc` gave Rust a collector for the key to be about, which is what the row below records; (b) **init scaffolds a buildable collected guest** — `go.mod`, `gc.go` (the fkgc import, mirroring every example's) and `main.go` (which calls it from `fk_on_tick`), with `--guest-module PATH` writing a `replace` onto a local FkLua checkout and the default flow being one `go mod tidy`. *(Into `guest/` when this row shipped and into **`guest/go/`** since — see the `init` layout row below, which is the Go half of R8.)*; (c) **`fklua mod` and `fklua compile` read `gc` the way identity and the data stage travel** — manifest is the default, flag is the override; (d) **a bare invocation with NO manifest keeps the leaking default, and an ABSENT KEY IS "nobody said" rather than "leaking"**, so every project written before the key existed emits byte-for-byte what it emitted before; (e) docs in `guests.md`, `gc.md` and init's own next-steps agree, with `leaking` documented as the expert opt-out for allocation-disciplined guests. *(That last clause cited BBB as the guest that had measured both arms and shipped leaking; it re-measured on the sharded pin and ships **collected** since 2026-08-02, so the citation is gone from all four places and the property is stated without a witness. See the `BBB` row below.)* <br><br>**Making the manifest a source obliged the DIAGNOSTIC to name it.** `checkGC` opened with "`--gc=collected` is refused…" which is right when somebody typed it and actively misleading when they did not — the first thing a reader does with a message naming a flag is search their command line for it. It now says `gc = "collected" (from fklua.toml)` and, for the mismatch case, names BOTH halves: the tinygo flag and the key have to agree, and changing one alone lands back on the same error. <br><br>*Gated by `TestAFreshInitProjectBuildsAndPackagesCollected`, which runs init, builds the scaffolded guest with `guest.CollectedBuildFlags` and packages it with NO flags, then asserts `factorio.CollectorSurface()` reached the emitted control.lua — the two halves check each other, since `checkGC` would have refused had the scaffold not really carried a collector. Plus `TestAProjectWithNoGCKeyKeepsTheLeakingDefault` (the backward-compatibility half, no toolchain needed), `TestTheGCFlagOverridesTheManifest` and `TestABadGCKeyNamesTheManifest`.* |
+| **the escape split** | **SHIPPED, BOTH LANGUAGES. `Stats().Deadlines` counted two different escapes with two different remedies, and every document that read it read the wrong one at least once.** The escape fires on `steps > markLimit || stalls >= markStallLimit`: the second is the forward-progress window and says the mark has **stopped converging**; the first is `markDeadline`, a backstop at `4 × (heap granules / budget) + 600` steps that is deliberately far enough out for a short run to finish first, so on its own it says the mark is affordable but **slow for its heap**. **Two misdiagnoses asked for this and both are already in this file.** The root-scan floor above presented as a rising `Deadlines` and was filed against the allocation rate for a day, on the strength of a sentence in `agents/gc.md`. Then the same mod's marathon suite reported six of them and its own notes attributed them, in writing, to the write rate of the two legs they were counted in — **including a leg that allocates 16 B per operation and could not outrun anything** — an attribution later retired as unsupported, because a collection started under one leg is still marking when the schedule has moved to the next, so the leg column locates a mark termination and not a mutator. **The split is purely ADDITIVE**: `Deadlines` is `StepEscapes + StallEscapes` exactly and nothing is renamed, so `examples/gcbench`, `examples/gcsave`, `scripts/run-gcbench.sh` and every downstream grep of `deadlines=` read the number they always read. `MemStats` gains two fields, Rust mirrors them as `step_escapes`/`stall_escapes`, and both `gctorture` corpora expose them at stat indices 27 and 28. **It does not identify the root-scan case** — `EffectiveBudget() > Budget()` does that, and the collector logs a line the first time the floor binds — and it does not say which allocation caused a stall, which still wants a per-collection trace no guest emits. What it buys is that a bare escape count can no longer be read as evidence for a cause it never carried, which is the failure mode both misdiagnoses had. *Gated inside `TestAnAllocationStormGrowsInsteadOfCollectingSynchronously`, which asserts the sum invariant and — because that leg is a dirty-rate storm by construction — that the escape it provokes is the STALL and not the backstop (measured: 1 stall, 0 backstop). The Rust arm has no leg that produces an escape, so it carries the field, the mirror and the doc rather than an assertion; `fk`'s collector-less `MemStats` shim mirrors the fields too, because one example source builds against both arms and a field only the collected one has is a leaking build that does not compile.* Detail: [`agents/gc.md`](agents/gc.md), "One counter, two diagnoses". |
+| **`init` layout** | **SHIPPED. `fklua init` scaffolds the Go guest at `guest/go/`, which is where `gen-bindings` and `fklua lock` have always looked, and it used to scaffold it at `guest/`.** This is the Go half of R8 and it arrived a round after the Rust half. `GoBindingsPath` is the hard-coded `guest/go/fkapi/fkapi.go` and `lock` hashes that exact name, so a guest module rooted at `guest/` swallowed the generated bindings as a subpackage one segment deeper than any document describes — importable as `<mod>-guest/go/fkapi`. **It BUILT, and that is the whole reason it lasted**: the Rust version of the same defect orphaned the generated crate outright and was found in days, while this one produced a working project with a layout nobody wrote down, so nothing failed and **three independent mods — BetterBeltBalancer, nixie-tubes, qol-research — each moved their guest to `guest/go` by hand and identically**. Three mods converging on the same deviation is the report; there was never going to be a bug to file. The fix is the constant, and the two languages are plain siblings again (`guest/go` beside `guest/rust`, which is this repo's own shape). **Nothing existing moves**: `init` refuses to overwrite `fklua.toml` and refuses per file under it, so no scaffolded project is reachable — what changed is where the NEXT one starts. *Gated by `TestTheScaffoldIsWhereTheBindingsGo`, which asserts the RELATIONSHIP rather than the strings — whatever the scaffold picks, in EITHER language, the bindings crate is a direct subpackage of it — and was verified to fail on the old layout. Verified end to end by hand as well: init, gen-bindings, lock, a guest importing `<mod>-guest/fkapi`, `tinygo -gc=custom`, and `fklua mod` emitting the three collector exports.* |
+| **the root-scan floor** | **SHIPPED, BOTH LANGUAGES. A guest whose ROOT SET is bigger than one step's budget could never terminate a mark — at any allocation rate, including zero.** Filed by BetterBeltBalancer through fklua-ports (item 21). A termination attempt re-scans `[__global_base, __heap_base)` wholesale and charges what it walked; when that charge saturated the whole allowance the post-scan check read "out of budget" and deferred to a step that did exactly the same thing. **But the scan had already happened** — `charge()` is post-hoc accounting for a completed walk — so the budget said nothing about whether marking was finished. Measured on `examples/gctorture` at 390 root words: **1 termination attempt at a 1024-granule budget, 903 at 64, 3,014 at 8**, and worse as the budget falls because `markDeadline` scales as `heap/budget`. Rust reproduced at 3,398. **The symptom is identical to the dirty-rate livelock** — `Deadlines` rising, `Phase()` stuck at 1 — and `SetBudget`'s comment plus `gc.md`'s own "what a later stage needs to know" item 2 both attributed that symptom, unqualified, to the allocation rate; the downstream mod mis-filed it for a day, and this file's own Rust row above had written the defect down as an accepted property. **The scan cannot be made resumable and that is soundness, not measurement**: the roots live below the heap, `ingestDirty` drops every dirty page below `heapBase`, so there is no barrier over the globals and the terminate-time barrier is sufficient only because the range is read in ONE pass at ONE safe point. So the budget yields: `EffectiveBudget()` floors `Budget()` at `rootScanCost() + 64`, the scan's cost is **RESERVED** — held back from the queues and added again at the attempt, so an attempt is affordable on every step that reaches one and no step spends more than its budget — and the post-scan check drops its now-meaningless `budget == 0` term. **The reservation was a second cut and the first reintroduced the livelock from the other side**: flooring alone, with the attempt guarded on having enough LEFT, means a guest with a high dirty rate and large roots spends its allowance on the queue every step and defers forever. `examples/gcsave` under Rust showed it as `terms=0`, `phase=1` and `cycles=0` across 300 ticks of a real Factorio — worse than the defect being fixed — and **`scripts/run-roundtrip.sh` was the only gate that saw it**, because no host-side test drives a guest that writes most of its heap every tick. **915 steps → 12 at a 64-granule budget, 3,051 → 17 at 8, deadlines 1 → 0**, with nothing moving where the floor does not bind — the overrun gate is 1.11× as before and the **dirty-rate** livelock still fires 12 deadlines at 128 granules, so the two causes stay distinguishable by measurement. **The collector logs one `fkgc:` line the first time the floor binds**, because `rootWords` is measured inside a scan the host never sees and `Budget()` is a number the guest chose — the collector is the only thing holding both. Both comments now name both causes and the one-line test that separates them. *Gated by `TestAMarkTerminatesWhenTheRootsCostMoreThanTheBudget` and its Rust mirror, each asserting termination, no deadline, that the floor did it, that the line was logged, that the retained structure is unchanged, and a default-budget control asserting the floor does NOT bind.* Detail: [`agents/gc.md`](agents/gc.md), "The root-scan floor". |
+| **Player framing** | **`agents/guests.md`'s cost section now says what a tick over budget IS.** The worst-tick tables read scarier than they are and the missing sentence was the frame budget: a >16.67 ms tick drops ONE FRAME. Every worst-tick class is now tabulated against it and against vanilla autosave (100s of ms, every few minutes, no mods installed) — and against the pre-arc numbers, 254 ms / 2.8 s / 5.3 s, which is where these came from. Two of the classes are once-EVER rather than per-tick and the tables could not show it: the shard doubling is one frame per 2 MiB the guest ever takes (a 40 MiB guest drops twenty frames over its whole lifetime), and the grow tick exists only while the heap is climbing. The honest caveat is kept: a dropped frame in a lockstep game is dropped for everyone, which is why these are worth bounding rather than shrugging at. |
+| **fkipc** | **SHIPPED, both languages, with a live gate. Two of its carried items are now CLOSED and four remain.** ~~**P6**~~ was the first-tick double-`HELLO`; a load resets nothing now, so it is gone, and the `fk_mod.lua` ordering change it was waiting on was never the right fix because it would have kept the reset. ~~**P12**~~ was the runtime's per-level scratch buffers not being load-stable — a Lua local cache over a heap allocation — and it is fixed by mirroring both caches into `storage.fk_bufs`; see the fkipc section above. What is left: **(1) P8, custom-input events**, is the push-to-talk requirement and the one genuinely new non-IPC ABI gap: custom inputs subscribe **by string name** with dynamic ids while `fk.subscribe` is numeric over the generated events, so the fix shape is a third `fk.register` kind — the same seam as commands. Needed by the interactive-agent profile, not by the server profile; explicitly a follow-on milestone. **(2) P7**, rounding the scratch bump to 8 so a frame's base address is aligned and the header's deliberately-aligned layout actually buys aligned loads — one line in `fk_abi.lua`, worth taking in a phase already editing it. **(3) `recv_udp`'s own per-call cost is still DERIVED** (~12.5 µs, from the generic host call) because nothing has separated the poll from the event dispatch it performs — no number in `agents/ipc.md`'s budget table marked "derived" may be quoted as an fkipc measurement. **(4) P10/P11** — multiplayer-client IPC and a muxing daemon — are expressible-but-untested and on-demand respectively. Detail for all of them: [`agents/ipc.md`](agents/ipc.md), "Open items". |
+| **bindings** | ~~**8 members defer on "a dictionary of a dictionary" and 7 on "a dictionary of an array"**~~ — **SHIPPED, both, plus the one "array of an array": 16 of the 18, in both languages, and `4,824 → 4,840 bound / 18 → 2 deferred` — measured at the 2.1.14 pin, which is the only one that had those shapes.** The prediction in this row held exactly: it was a nesting depth the emitters did not recurse to, not a shape either language cannot express, and `AD4` was the right precedent. What it cost is one recursion point per backend (`goElemType` / `rustElemType`) plus a generated codec triple per distinct nested shape; what it bought includes `LuaPrototypes::utility_constants`, which the nil-field row had promised would arrive free on this day. **What remains deferred is 2 in each language, both a Go/Rust name colliding with another member of the same class**, and one string LITERAL with no identifier name, which is now counted in a row of its own because a constant is not a member. Still deliberately refused and counted separately: a dictionary keyed BY a container — no pinned version has one, and a shape nobody has reasoned about should arrive as a new census reason. Counts live in `census.json` under `go_deferrals_by_reason`/`rust_deferrals_by_reason`; do not re-derive them by hand. Detail: [`agents/abi.md`](agents/abi.md), "A nested container". |
+| **M7** | **`--run-replay` becomes worth running** once guest behaviour can depend on player input. Through M6 the guest surface was `fk_on_tick` only, so a replay checked what two `--benchmark` runs already check. Revisit now that the API bindings let a guest observe players; producing a log needs an interactive session. |
+| **M7** | ~~**47 members are Lua-bound but not Go/Rust-bound**~~ — **CLOSED, and the row's own advice is why it was still readable.** It said the counts live in `census.json` and are not to be re-derived as prose, which is exactly what kept the five successive rounds honest: multi-return (13, a naming question) shipped with the ports round, the structs and dictionary arguments with the AD4 and Q3 work, and the nested containers with the round above. **2 remain in each language, both name collisions.** Read `go_deferrals_by_reason`/`rust_deferrals_by_reason`; do not re-derive them by hand or write the reason as prose beside them. |
+| **M8/M10** | ~~The TinyGo bulk-memory custom target~~ — **largely superseded at M12.** A guest's own `memcpy`/`memset` is now replaced by `mem_copy`/`mem_fill` in the emitter, which reaches the same place for the same shapes (0.254× copy-heavy, flat on the kernels) without the `$TINYGOROOT/targets` packaging problem that made the target not worth adopting. What the custom target still buys that this does not: the wasm size win (−8.3%), and `memory.copy` at sites LLVM inlines rather than routing through the named function. Original entry: **measured FLAT** on all four bench kernels tried (no detected change against a ±0.7–2.7% A/A floor), which is consistent with the 49×/78× being **per byte** while these kernels copy tens of bytes at a time and pay call overhead instead. It remains 5.78× for a genuinely copy-heavy guest and a real size win (wasm −8.3%), so it is not dead — but it is not worth the `$TINYGOROOT/targets` packaging problem for a typical guest, and nobody should adopt it expecting the headline number. |
+| **audit** | Both defect reports are CLOSED — the 2026-07-30 report's ten items and the 2026-08-04 report's six (B1/B2, O1/O2, X1/X2). The ids are RECYCLED between the two and mean different findings; each report's own section above says which. |
+| **BBB** | ~~`--persist=packed` is the mode to re-measure downstream~~ — **MEASURED downstream, and it settled two questions in opposite directions.** The page set's fix is real in game (a 200-rig create went from a 447 s-class pathology to 45.8 s for 4× the work) and packed's save/join win is large (49.3 → 3.6 MB, 21.6 → 8.2 s), so the mod flipped. **The GC half of this row was wrong** and is corrected in the persistence section above: the 3.9×/43× is the `storage` copy, the collector walks the LIVE word table, and that is the same object in every mode — same tail under both (15.0 ms median table, 14.2 packed). `auto`'s heap-size threshold remains a proxy for write locality and still sees none of this. |
+| **BBB** | **The idle GC pause is CLOSED as an investigation and OPEN as a budget: it is the guest heap's size, and no upstream code change is the answer.** 0.2 ms of worst tick per MiB of linear memory, measured in 2.0.77 and flat from 8 MiB to 128; it is SIZE not usage, and TinyGo doubles on grow. The three mitigations were measured and each lost for a different reason — pacing has nothing to pace, wider slots cannot represent two u32 in a double, sharding is 272× on the tail and 3–5.5× on every load and store. Full curve, numbers and the sharding design (should a heap-huge compute-free guest ever justify a flag) in [`agents/guests.md`](agents/guests.md), "the guest heap budget". What a later change owes this row: if anyone builds the sharded representation, the access cost is the gate, not the tail. **AND THE SHARDING VERDICT IS NOW WRONG IN BOTH DIRECTIONS, because it was measured under the oracle.** `bin/lua52f` has no 2²⁰ wall, so it could see a cost and not a benefit: above 4 MiB a flat store is 2,410 ns and a sharded one is 84 — **29×, the other way**. And the cost it measured is the price of the form the design does not take. A shard test folded INTO the bounds check every access already carries is **0.93–1.01× below the wall** — paired in game, and 0.98× end to end on a packaged mod over 1,596 ticks — against **17.3×** above it. The tail claim survives and the access claim does not. See [`agents/sharding.md`](agents/sharding.md). |
+| **GC** | **CLOSED: stages A-D are done and the guest heap is collected, INCREMENTALLY.** The history in one paragraph, because the shape of it is the reusable part. **A** stress-tested a sketch and found the write barrier the feature needed ALREADY EXISTED — `--persist=packed`'s `MEMDIRTY` page set, maintained by every writer in every mode — so the whole emitter change was one existing gate widened by one condition, and the verdict was GO on a measured zero idle cost. **B** built `guest/go/fkgc` stop-the-world and the go/no-go reversed sign: the allocation path came out FASTER than `-gc=leaking`. **C** split marking behind the armed barrier, paced it from a one-shot `on_tick`, and found five defects, four of them in its own work. **D** discovered that the in-game arm had never worked: the instrument read `--benchmark`'s per-RUN avg/min/max, where the first tick carries the save load, so it could not see that the paced arm was LIVELOCKED. Rebuilt per-tick, it reproduces the comparison in game — 240 ms stop-the-world against 32.6 ms paced, 7.4× — and the first guest outside this repo measured both arms and shipped LEAKING, which was the expected outcome for a guest whose heap is already diet-bounded and not a failure of the feature. **It re-measured on the sharded pin and ships COLLECTED since 2026-08-02** — the steady state could not tell the arms apart, and the doubling stall it had been avoiding by discipline measured 782 ms leaking against 71 ms collected. Detail: [`agents/gc.md`](agents/gc.md). <br><br>**Six things a later change must not forget.** **The barrier is armed for the MARK phase only** — sweeping needs none, because the mark bitmap is fixed once marking terminates, and anything that changes that puts the measured 7-13% store cost back over the whole cycle. **`markDeadline` is a livelock escape, not pacing**: each step re-scans the pages dirtied since the last one before trying to terminate, so a budget smaller than the guest's own dirty rate spends everything on the backlog and marks forever with the heap growing as if there were no collector — which has now happened twice in a real Factorio, silently, and `Deadlines` reads 0 while it does because the escape is deliberately far out **And `Deadlines` is `StepEscapes + StallEscapes` since the escape split — read the split before reading a cause into the total, because the far-out one fires for a mark that is merely slow.** **The HOLD WINDOW is the subtle part of the paced sweep**: a class's current run is protected at the window it had when marking TERMINATED, because `curPtr` advances while the sweep runs and a window read from the live cursor reclaims every block handed out since — measured at 19 of 32 live blocks lost, with no error. **The gray unit must stay a GRANULE**: a large object scanned in one call was a 98× budget overrun, the trap `agents/gc.md` had warned was already walked into once. **The page set has two consumers with different clear points** — packed flushes per call, the collector drains per step, and `MEMPACK.flush` moves what it clears onto the collector's queue while armed. **The allocation path is still FASTER than `-gc=leaking`** (0.962× on `churn`) and the reason is not about allocators: under `-gc=custom` TinyGo gives every Go POINTER live in a function a shadow-stack slot zeroed on entry, which in Lua is a bounds-checked 8-byte store. |
+| **GC** | **THE 4 MiB WALL — FIXED BY SHARDING AS OF THIS COMMIT. Kept in full because it is the largest single in-game cost this project has measured, and because the reasoning that found it is the reusable part.** Linear memory is a vector of 2¹⁹-word shards now, so no table a guest runs on can reach 2²⁰ keys at any size and none of what follows is reachable. **The residual costs, stated:** an inlined access is +1 VM instruction, invisible in game (2 MiB e2e, 1,596 ticks, 1.007× median) and 1.10× host-side on the allocator-heavy `real_names`; `-opt=0..2` memory access is 1.14–1.22× host-side because every access there is a helper call that now selects a shard; a 16-bit load above 2 MiB falls back to `ld16` rather than inlining, the one access shape sharding makes no faster above the line; a guarded loop whose SPAN crosses a shard boundary loses its guard and takes the fast path (stage C strip-mines it); and host RAM is 16 B/word as before, which above 4 MiB is a 2.5–5× SAVING because an unsharded table there abandons its array part for 40 B `Node`s. What follows is the record of the wall itself. **It is not a collector question.** Stage D's item (2) said `mem_grow` should presize its array part. It cannot, and the number it was chasing has a different cause. Measured in Factorio 2.0.77 with a **bare Lua mod containing no guest at all**: a Lua table holding more than **2²⁰ = 1,048,576 keys stops behaving like an array, for ALL of its keys**. 200,000 stores into keys 1..200,000 cost **24 ms at 1,000,000 keys and 482 ms at 1,100,000** — ~20×, permanently, on the low indices too. A word table is one slot per 32-bit word, so the wall is at **4 MiB of linear memory**. Crossing it is a **2,716 ms tick**; rebuilding the table on every LOAD is 2,871 ms at 5 MiB and 5,284 ms at 8 MiB. Confirmed through the REAL runtime — a packaged guest at `-opt=3`, one 8-page `memory.grow`: **2,959 ms when the grow crosses 4 MiB and 9.6 ms when it does not, 308× for the identical grow**. **Six append shapes were measured and five are within 4% of each other** (ascending, descending, top-first, 4 KiB chunks, `rawset`; binary-spread is 2× worse), and Lua 5.2 cannot presize an array part past 2²⁰ from Lua at all — `{table.unpack(t,1,n)}` is the only presizing constructor and it refuses n at 1,000,000. **`bin/lua52f` cannot see any of this** (2.3× where the game is 27×), which is why the ~19-rehash explanation in `agents/gc.md` was reasoned from a `ltable.c` that does not describe Factorio's build. What DOES work is not letting one table hold more than 2²⁰ keys: **four shards of 524,288 build the same 8 MiB in 215 ms against 5,284 and take a store in 84 ns against 2,410 — 24.6× and 29×**, with the shard division and modulo already inside the 84 ns. That REFINES rather than overturns the heap-budget row's "3–5.5× on every load and store": sharding costs ~3× below the wall and wins ~29× above it, and the row could only measure the cost because it was measured under the oracle. What shipped at the time was the notice (`fk_mod.lua`, once, at 4 MiB) and the record; **the representation change landed at sharding stage B and the notice is deleted, because every sentence it printed is now false.** Measured after: the identical `gcbench` arm at a 6.7 MiB heap goes from a 5,299.7 ms worst tick to 446.7, and its 827 ms/MiB to 69.7 — the below-wall band. ~~**This is also the strongest lead on open item (1)**~~ — **it was not, and the arithmetic was already in the table that said so**: that `gcbench` heap is 711,680 words, 0.68 of 2²⁰. Re-measured either side of the wall, the arm reproducing 88 ms/MiB (84.5) is the one that never crossed, and crossing costs **15.9× more again**. The host-side gap is the INTERPRETER — Factorio's Lua reads a table **4–6×** slower than `bin/lua52f` on the same below-wall table, with the loop machinery at 1.04–1.10×. **And sharding's "~3× below the wall" is the price of the form the design does not take**: fold the shard test into the bounds check every access already carries and the below-wall cost is **0.93–1.01×**, paired and end to end on a real mod, with **17.3×** above it. Full record, tables and refusals: [`agents/gc.md`](agents/gc.md), "The 4 MiB wall", and [`agents/sharding.md`](agents/sharding.md). |
+| **GC** | **`--gc=collected` IS THE RECOMMENDED DEFAULT FOR A NEW GO GUEST as of sharding stage C, and the flag default is deliberately not.** What changed is not the collector, it is what happens when it is outrun: there is no `fkgc.HeapCap` any more, the metadata scales with the heap, and a guest that allocates faster than its budget reclaims GROWS like a leaking one instead of trapping. There is no size at which turning it on is worse than leaving it off. Carried by `fklua init` itself since the `collected` default row below — it writes the key and scaffolds the guest, so a new project IS collected rather than being told to be — and by `agents/guests.md`'s ordering; `-gc=leaking` is the EXPERT path for an allocation-disciplined guest and the only option for wasip1. **It is no longer carried by a downstream citation**: BBB measured both arms, shipped leaking, re-measured on the sharded pin and **ships collected since 2026-08-02**, so what recommends the opt-out now is the property (a guest that reclaims nothing buys back the collector's own emitted code — +32.4% of `fk_module.lua`, +13.7% of the zip) rather than a witness. **`fklua init` now writes `gc = "collected"` and scaffolds a collected guest for a RUST project too**, into **`guest/rust/`** — it was `guest-rs/` for one round, and moving it is the R8 fix rather than a tidy-up, because `gen-bindings` hard-codes `guest/rust/fkapi/src/api.rs` and the two never lined up; there is no import to add on that side, because `guest/rust/fk` owns the single `#[global_allocator]` site and `--features fk/fkgc` chooses what backs it. **`fklua mod` with no manifest still defaults to `--gc=leaking` on purpose**: the flag is refused unless the module exports the collector surface, so flipping the default would turn every existing `tinygo -gc=leaking` build into a compile error naming a flag its author never chose. |
+| **GC** | **Four things stage D left OPEN, in the order they should worry someone.** (1) ~~**The in-game/host-side gap.**~~ **ANSWERED, and the recorded lead was wrong.** The prescribed test — re-measure a collection either side of 4 MiB — was run, and the arm that reproduces 88 ms/MiB (84.5) **never crossed the wall**. Above it the same collection costs **15.9× more again**, so the wall is a second and larger effect. The 2.7×-6.4× is the interpreter: Factorio's Lua reads a table **4–6×** slower than `bin/lua52f` on the identical below-wall loop, whose machinery is 1.04–1.10× in both. **So a host-side ms/MiB figure DOES carry into the game, ×~2.5 below the wall and ×~40 above it**, and stage C's 555× keeps its ratio and gains its milliseconds. [`agents/sharding.md`](agents/sharding.md) §2. (2) ~~**`mem_grow` appends one word at a time and pays Lua's rehash for it**~~ — **ANSWERED, and the premise was wrong. See the 4 MiB WALL row below**; the number is real, the cause is not `mem_grow`, and the finding underneath it is much larger than a grow. (3) ~~**The paced collection's TERMINATING step is not budgeted like the others** — 65× the default budget in game.~~ **ANSWERED at sharding stage C, and there is no such step.** It was FIVE separate defects, four of them older than that stage, every one of which put collector work where the budget could not see it, and all of which land in the same tick as mark termination — which is why one step got the blame. In game after: p90 **1.251 ms** against a budget worth ~1.25 ms in game, and a worst paced step of **1.20×**. The worst TICK is `memory.grow` and not the collector. Full record: the **Sharding B/C** row above and [`agents/sharding.md`](agents/sharding.md) §14. (4) ~~**Rust has no `fkgc`**, so `--gc=collected` is Go-only.~~ **CLOSED. `guest/rust/fkgc` is built, and the go/no-go answered YES for a reason the question missed.** The premise was right — rustc does keep live references in wasm locals no scan can see — and the conclusion did not follow, because a step runs only at an OUTERMOST DISPATCH, where there is no guest frame and so no live local to miss. rustc links wasm32 **stack-first** (`__stack_low`=0, `__stack_high`=`__global_base`=1 MiB, one mutable global holding the stack pointer), so `[__global_base, __heap_base)` is the same contiguous range TinyGo's `--stack-first` produces and the range test is the same two compares. One flag and no source change: `cargo build --features fk/fkgc`, because `guest/rust/fk` owns the single `#[global_allocator]` site. Two things genuinely differ and both follow from rustc: **allocation never collects at all** (Go's last-resort synchronous `Collect()` on a refused `memory.grow` is deleted, not ported — it is sound in Go only because `markStack()` reads the frame it landed in; here a refused grow traps), and ~~**the useful budget floor is higher** because a Rust guest's statics are bigger and the root re-scan is charged — ~300 granules a termination attempt against the Go churn guest's ~36, so under ~512 the mark ends on `markDeadline` rather than on the budget.~~ **THAT SENTENCE WAS THE DEFECT, WRITTEN DOWN AS A PROPERTY — see the `root-scan floor` row below.** A mark that "ends on `markDeadline` rather than on the budget" is a mark that never terminated: the budget was not merely tight, it was structurally unable to finish, at any allocation rate. It is fixed and the floor is applied by the collector. Parity is the mirror table in [`agents/gc.md`](agents/gc.md), "The Rust collector, as built": every pure-arithmetic checksum agrees across the two languages, retention **1.013×**, same live-object count. |
+| **M12** | ~~Hoisting a loop's bounds and alignment checks behind one entry guard~~ — **BUILT**, and then extended twice. The decomposition that motivated it is kept because it is still the best account of where a hot loop's time goes: alignment guard alone **0.934×**, bounds guard alone **0.773×**, both **0.637×**. What shipped went further than that estimate by removing the address arithmetic too — see the loop-guard sections in [`agents/optimizer.md`](agents/optimizer.md). |
+| **M12** | **Do not re-try eliding a bounds check against the module's declared memory MINIMUM.** `MEMSIZE` never drops below `Memory.Min * 65536`, so a constant address under that floor needs no check, and 42 of the bench guest's 151 inlined accesses qualify. Built as a source rewrite and measured before implementing: `real_names` 0.990×, `real_entities` 1.002× — at the noise floor, because the constant-address accesses are statics and none of them are in a hot loop. Rejected. |
+| **M12** | ~~Branchy loop bodies~~ — **BUILT**, worth **0.899×** on `real_entities` (5.53× → 4.83× vs hand-written Lua). The number was RE-MEASURED first and had moved: the old 0.950× was taken when ~60% of that loop was `ld8`/`ld16` calls, and inlining them made the same absolute saving a larger fraction of a smaller loop. Three changes together — a latch-block rule in place of the straight-line one, a block-aware `defOf`, and treating an undescribable access or base as a SKIP rather than a refusal. Detail: [`agents/optimizer.md`](agents/optimizer.md). |
+| **M12** | **Do not re-try these five. Each was prototyped by hand-editing real emitted Lua and timed.** *Byte-per-entry linear memory*: 0.730× on `real_grid` but **2.927× WORSE on `pure_sum`** — a word load becomes four table reads, and the compiler cannot know which side of that a guest is on. *Per-signature `call_indirect` views*: both bench guests and all four examples contain **zero** `call_indirect` and no table section. *Host-backed hash tables*: `real_names` **contains no map** — it is byte-append plus FNV-1a — and a string key would have to be materialised as a Lua string anyway. *Compressed packed pages*: 0.978× on an init heap, **1.091× (worse)** on a realistic one, and resident `storage` rises 36–52% because there is no `on_save`. *Registered-metatable lazy zero pages*: `restore`'s "an absent page IS zeros" already does this, and an `__index` on `MEM` is a metamethod dispatch on the hottest table in the system. |
+| **M12** | **The f64-typed shadow's ceiling is 0.465× on `pure_dot`, measured.** That is with the reassembly deleted and no coherence cost paid — an upper bound on an upper bound. A **loop-scoped** shadow, built at a guard's entry and discarded at its exit, is provably negative for `pure_dot`: building it is itself a pass, and `pure_dot` reads each element once. A shadow only pays where a loop reads elements more than once. The `ldexp` slice of that ceiling has since shipped separately as `PE`. |
+| **M12** | **The counted-loop recogniser's coverage is the single highest-value next step, and it unlocks two passes rather than one.** It lowers 2 of 30 loops in the TinyGo bench guest, and the guarded-hoist idea above is blocked on the same analysis for the same loops: the hot kernel is 4×-unrolled, so its stride is 4 and its test is `i32.ne`, which is a **congruence** obligation (`align.go` solves residues mod 4 and 8, and the bound really is `band(x, ~3)`); and ~10 loops are the two-counter `range` shape with a second exit, which needs the counter materialised on every edge out — giving the `for` its own name and paying a move per iteration, worth measuring before assuming. |
+
+## Open questions
+
+| Question | How it gets answered |
+|---|---|
+| Real save **time** for a 262k-entry `storage` table | Save SIZE is measured (table 2.29 B/word, packed 0.44); `--benchmark` never saves, so time needs an interactive run. That is what an `auto` threshold still lacks. |
+| Is the Dekker f32 rounding split exact over the whole domain? | Exhaustive 2³² check in Go, offline |
+| True `frexp` vs `string.pack` punning ratio | The probe's frexp kernel extracts only the exponent; a full pun needs the mantissa math too — re-measure with the real sequence |
+| Actual upvalue ceiling | The probe's test is bounded by the enclosing chunk's 200-local cap; not urgent — the real constraint is chunk-local headroom (~25 on the M4 guest) |
+| Would an **f64-typed shadow of linear memory** pay for itself? | The only thing that addresses `dot`'s heap-resident f64 gap, which shadow-stack promotion cannot. The savings side now has a checksum-verified six-variant harness (`call`/`inline`/`noldexp`/`nocheck`/`shadow`/`nat`) waiting on a quiet machine. The cost side has a named crux: a shadow wants ONE invalidation point, the store funnel was it, and at `-opt=3` BOTH inlined stores now bypass that funnel — including `i32.store`, the aliasing case that actually needs invalidating, which is inlined in every persistence mode. See **The f64-typed shadow** in [`agents/optimizer.md`](agents/optimizer.md). |
+| Does anything *else* write guest memory outside the store funnel? | Answered and FIXED on master in `79f2318`. The three store leaves are the *guest's* writers only; `mem_copy`, `mem_fill` and `fk_wstr` write the word table directly and each marks its own span. `fk_wstr` marked nothing, so a host-written string was missing from every packed-mode save. Enforced by `TestAHostWrittenStringIsMarkedDirty` and `TestASubstitutedCopyReachesTheSave`, both of which assert the page COUNT since the dirty-page set — which a byte range could not be asked, because a span over the right bytes and a span over the right *pages* were the same number. |
