@@ -47,9 +47,14 @@ jobs:
       - name: Build fklua
         run: go build -o bin/fklua ./cmd/fklua
 
+      # `api list --current` and not `api list | awk '/^\*/'`: the table is a
+      # human-facing presentation and its trailing legend line ("* is the
+      # version the committed bindings are generated from") starts with the very
+      # character that awk was keying on, so the step wrote TWO lines into
+      # $GITHUB_OUTPUT and the job died on `Invalid format 'is'`.
       - name: Record what we already have
         id: before
-        run: echo "current=$(./bin/fklua api list | awk '/^\*/ {print $2}')" >> "$GITHUB_OUTPUT"
+        run: echo "current=$(./bin/fklua api list --current)" >> "$GITHUB_OUTPUT"
 
       - name: Pull the target version
         id: pull
@@ -57,15 +62,30 @@ jobs:
           set -euo pipefail
           ./bin/fklua api pull "${{ inputs.version || 'latest' }}" | tee /tmp/pull.log
           # `latest` resolves to whatever shipped most recently, so the version
-          # comes from the FILE rather than from the input -- api pull already
-          # files it under the resolved name and says so when they differ.
-          NEW=$(ls -d api/*/ | xargs -n1 basename | sort -V | tail -1)
+          # comes from what the pull WROTE rather than from the input -- api pull
+          # already files it under the resolved name and says so when they
+          # differ. Asking git rather than taking the highest directory on disk,
+          # because those are the same answer only when the pulled version is
+          # also the newest one committed: a hand-dispatched older version would
+          # otherwise be diffed and branched under somebody else's number.
+          # --porcelain is git's stable machine format, and it is the same
+          # question the next step asks, so the two cannot disagree. Empty means
+          # the pull changed nothing, which the next step turns into a no-op.
+          NEW=$(git status --porcelain -- api/ | awk -F/ '{print $2}' | sort -u)
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
 
+      # A GATE THAT CANNOT FAIL IS WORSE THAN A GATE NOBODY ADDED. This asked
+      # `git diff --quiet -- api/`, and a version this repo has never seen
+      # arrives as a whole new UNTRACKED directory -- which git diff does not
+      # report. So the one gate whose job is to notice a new release was
+      # structurally unable to see one: it would have said "nothing to do" and
+      # exited GREEN on exactly the week the bot exists for. The pull step's
+      # output is derived from the same `git status`, so this reads it rather
+      # than asking a second time and risking a second answer.
       - name: Stop if nothing is new
         id: check
         run: |
-          if git diff --quiet --exit-code -- api/; then
+          if [ -z "${{ steps.pull.outputs.version }}" ]; then
             echo "new=false" >> "$GITHUB_OUTPUT"
             echo "No API version newer than what is committed. Nothing to do."
           else

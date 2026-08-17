@@ -44,7 +44,7 @@ Usage:
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
             [--description D]        (identity defaults to fklua.toml's [mod])
   fklua api pull <version> | --from-install
-  fklua api list
+  fklua api list [--current]        (--current: just the pin, one line, for a script)
   fklua api diff <from> <to> [--breaking] [--json PATH]
   fklua api check GUEST.wasm --to <version>
   fklua init <mod-name> [--lang go,rust] [--api VERSION]

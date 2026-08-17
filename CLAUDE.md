@@ -2451,6 +2451,26 @@ CI, but the real gate is spec-suite pass rate (see Critical rules).
   downloads Go and `rustup target add wasm32-unknown-unknown` downloads the guest
   target's rlibs. Say "hermetic inputs", not "no network" — the loose phrasing is
   what made the missing Rust target look like it could not be the CI failure it was.
+- **The `api-regen` bot had NEVER run to completion, and its only channel is an
+  email.** Every scheduled run failed in its second step from the day `api list`
+  grew the legend line under its table: the bot read the pin with
+  `awk '/^\*/ {print $2}'`, which matches the starred row AND that legend, so it
+  wrote two lines into `$GITHUB_OUTPUT` and GitHub answered `Invalid format 'is'`.
+  Fixed 2026-08-16 by `fklua api list --current`, one line with no decoration —
+  **a human-facing table is not a data interface however much it looks like one**,
+  and the presentation change that broke this could not have known what it was
+  editing. Underneath it sat the worse one, which had never fired: the
+  *stop if nothing is new* gate asked `git diff --quiet -- api/`, and **a version
+  this repo has never seen arrives as an UNTRACKED directory, which `git diff`
+  does not report** — so the gate whose whole job is to notice a new release was
+  structurally unable to see one and would have exited GREEN on exactly the week
+  the bot exists for. Third instance of *a skipped gate reads exactly like a
+  pass*, after the `needs:`-skips and the unpipefailed spectest loops.
+  `git status --porcelain` is the fix and is now also where the pulled version's
+  number comes from, replacing "the highest directory on disk". Both are TEXT
+  properties, so `TestTheRegenBotDoesNotReadTheHumanTableOrAskGitDiffForANewDirectory`
+  reads the workflow file; confirmed to fail against both pre-fix lines. Detail:
+  [`agents/versioning.md`](agents/versioning.md), "The regeneration bot".
 - CI (`.github/workflows/ci.yml`): gofmt, vet, **`make lua52f`**, `go test -race` +
   coverage gate, bindings `--check`, lua52f sandbox conformance, spectest at every
   `-opt` level in **both** NaN modes, **and their exit codes gate the job** — the

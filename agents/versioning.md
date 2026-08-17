@@ -507,6 +507,34 @@ Three choices worth knowing:
   once. Nothing is ever built against the network: the JSON lands in the tree
   first, which is the same reason `api pull` is a separate command.
 
+**It had never run to completion, and both reasons were in the shell rather than
+in anything Go builds.** Every scheduled run from the day `api list` grew its
+legend line died in the second step, and the failure arrived as an email rather
+than as a red mark on anything a person passes on the way to work.
+
+- **A human-facing table is not a data interface, and it looks exactly like
+  one.** The bot read the pin with `api list | awk '/^\*/ {print $2}'`, which
+  matches the starred row and also the legend printed under the table — so it
+  wrote two lines into `$GITHUB_OUTPUT` and GitHub answered `Invalid format
+  'is'`. The legend was a presentation change and could not have known it was
+  editing an interface. `api list --current` is the machine-readable half now:
+  one line, no decoration, and the table is free to grow a column or a footnote.
+- **`git diff` cannot see a new version, because a new version arrives as an
+  UNTRACKED directory.** The gate that stops the bot when nothing is new asked
+  `git diff --quiet -- api/`, and git diff does not report untracked files — so
+  the one gate whose whole job is to notice a new release was structurally
+  unable to see one, and would have reported "nothing to do" and exited GREEN on
+  exactly the week the bot exists for. That is this repo's *a skipped gate reads
+  exactly like a pass*, one step further out than the two instances already
+  recorded. It reads `git status --porcelain` now — which is also where the
+  pulled version's number comes from, replacing "the highest directory on disk",
+  so the two cannot disagree and a hand-dispatched older version is no longer
+  diffed under somebody else's number.
+
+Both are TEXT properties and neither is reachable by building anything, so
+`TestTheRegenBotDoesNotReadTheHumanTableOrAskGitDiffForANewDirectory` reads the
+workflow file itself and was confirmed to fail against both pre-fix lines.
+
 ## `fklua docs` — **built**
 
 ```sh

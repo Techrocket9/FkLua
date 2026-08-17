@@ -135,9 +135,31 @@ func readInstalledAPI() ([]byte, error) {
 }
 
 func runAPIList(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("api list takes no arguments")
+	current := false
+	for _, a := range args {
+		switch a {
+		case "--current":
+			current = true
+		default:
+			return fmt.Errorf("unknown argument %q (api list takes --current or nothing)", a)
+		}
 	}
+
+	// --current is the MACHINE-READABLE half, and it exists because the table
+	// below is not one however much it looks like one. The weekly api-regen bot
+	// read the pin out of that table with `awk '/^\*/ {print $2}'`, which
+	// matches the starred row AND the legend line under it -- so it wrote two
+	// lines into $GITHUB_OUTPUT and every scheduled run since the legend was
+	// added died on `Invalid format 'is'`. The legend was a presentation change
+	// and could not have known it was editing a data interface.
+	//
+	// So a caller wanting one fact gets one line with nothing around it, and the
+	// table stays free to grow a column or a footnote.
+	if current {
+		fmt.Println(factorio.DefaultAPIVersion)
+		return nil
+	}
+
 	entries, err := os.ReadDir(apiDir())
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", apiDir(), err)
