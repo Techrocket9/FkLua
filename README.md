@@ -1,28 +1,39 @@
-# FkLua
+# Factorio, kein Lua
 
-FkLua compiles WebAssembly ahead-of-time into Lua 5.2 source and packages the result as a Factorio mod. You write the mod in Go (via TinyGo) or in Rust, compile it to a wasm module (the **guest**), and `fklua mod` turns that module into a directory Factorio loads like any other mod: a generated `control.lua`, the runtime that hosts the guest, and the slice of the Factorio API bindings the guest actually calls. The name is short for "Factorio, kein Lua".
+Factorio, kein Lua, (FkLua for short) is a tool to enable the authorship of [Factorio](https://www.factorio.com/) mods in non-Lua programming languages (currently GoLang and Rust are supported).
+
+FkLua compiles WebAssembly ahead-of-time into Lua 5.2 source and packages the result as a Factorio mod. You write your mod in Go (via TinyGo) or in Rust, compile it to a wasm module (the **guest**), and `fklua mod` turns that module into a package that Factorio loads like any other mod: a generated `control.lua`, the runtime that hosts the guest, and the slice of the Factorio API bindings the guest actually calls.
 
 ```sh
 fklua init my-mod          # a project, a guest, a collector, a manifest
 fklua gen-bindings         # the Factorio API, for your language
-fklua mod my-mod.wasm      # a directory Factorio loads
+fklua mod my-mod.wasm      # a module Factorio loads
 ```
 
-Factorio only loads Lua, and since the 2024 sandbox hardening it only loads Lua *source*: `load()` rejects binary chunks, which ruled out earlier bytecode-emitting compilers. FkLua emits ordinary, readable Lua source that Factorio parses like any hand-written mod. There is no LLVM dependency: WebAssembly is the input format because it arrives already legalized (structured control flow, four value types, explicit linear memory, a published ABI), and anything that emits wasm can target it.
+Factorio only loads Lua *source*; `load()` rejects binary chunks. FkLua emits ordinary, readable Lua source that Factorio parses like any hand-written mod. There is no LLVM dependency: WebAssembly is the input format because it arrives already legalized (structured control flow, four value types, explicit linear memory, a published ABI), and anything that emits wasm can target it.
 
-Both guest languages are supported at parity: the whole Factorio runtime API is bound member for member in Go and in Rust from one API description, with events, `defines`, commands and remote interfaces, and each has a guest-heap garbage collector, save/load persistence, and an IPC library for talking to a process outside the game. Real mods have been built on both, run in real Factorio games, and benchmarked against the hand-written Lua mods they replace.
+Rust and Go are supported at parity: the whole Factorio runtime API is bound member for member in Go and in Rust from one API description, with events, `defines`, commands and remote interfaces, and each has a guest-heap garbage collector, save/load persistence, and an IPC library for talking to a process outside the game. Real mods have been built on both, run in real Factorio games, and benchmarked against hand-written Lua implementations.
+
+---
+
+## The Dream
+
+After proliferation of FkLua mods, Wube adds a WASM sandbox natively to Factorio. WASM mod performance then matches or exceeds the performance of Lua mods.
+
+Eventually, a Lua-interpreter WASM module is used to shim legacy Lua-based mods into the new WASM runtime.
+
+The native Factorio Lua interpreter is retired.
 
 ---
 
 ## Status
 
-FkLua is pre-release: there are no versioned releases yet and the CLI and the guest libraries may change without notice. It is MIT licensed (see [License](#license)). Three downstream projects build on it:
+Two known public projects currently (August 2026) utilize FkLua:
 
 | Project | What it is |
 |---|---|
-| [BetterBeltBalancer](https://github.com/Techrocket9/BetterBeltBalancer) | A Factorio 2.0 mod written in Go and compiled with FkLua. Balancer parts are 1x1 tiles that form one balancer; the mod compiles each balancer into real splitters on a hidden surface, so no per-tick Lua runs. FkLua's first serious downstream user. |
+| [BetterBeltBalancer](https://github.com/Techrocket9/BetterBeltBalancer) | A Factorio 2.0 mod written in Go and compiled with FkLua. Intended to be a drop-in replacement for [Belt Balancer 3](https://mods.factorio.com/mod/belt-balancer-3). |
 | [fklua-ports-samples](https://github.com/Techrocket9/fklua-ports-samples) | Six open-source Factorio mods ported to FkLua guests (three Rust, three Go) as a validation campaign for FkLua's API coverage, with the findings ledgers that campaign produced. A showcase, not maintained. |
-| [Vibetorio](https://github.com/Techrocket9/Vibetorio) | Voice-driven LLM control of Factorio. A macOS companion app with hold-to-talk speech recognition and a local model drives the player's character through a tool API served by a Go/FkLua mod over FkIPC. |
 
 ---
 
@@ -34,7 +45,6 @@ FkLua is pre-release: there are no versioned releases yet and the CLI and the gu
 | **TinyGo 0.41.1** | a Go guest. TinyGo's `wasm-unknown` target, not standard Go (see [Guest languages](#guest-languages)) |
 | **binaryen** (`wasm-opt`) | required by TinyGo, which shells out to it for every wasm target |
 | **Rust 1.97+** with `wasm32-unknown-unknown` | a Rust guest (`rustup target add wasm32-unknown-unknown`) |
-| **Factorio 2.0.x** | only to run what you built, and for this repo's in-game test scripts. Building needs neither the game nor the network: the API descriptions are committed under `api/<version>/`. The stable 2.0 release is the default target; 2.1.x is supported too (see [Factorio versions](#factorio-versions)), and FkIPC needs a 2.1.14 or newer engine |
 
 `brew install tinygo binaryen` covers the middle two on macOS. You need one guest toolchain, not both. `fklua doctor` reports each row as found or missing with the version it found, and exits non-zero only when neither guest toolchain is complete.
 
@@ -69,7 +79,7 @@ speed, err := fkapi.Game.Speed()          // read
 err = fkapi.Game.SetSpeed(speed * 2)      // write
 ```
 
-and `fklua mod` then reports `API 2.0.77: 1 members, pruned from 4257`: the mod ships the one member it calls. Every TinyGo flag above is required, and the scaffolded `main.go` says why; `-opt=2` rather than TinyGo's `-opt=z` default is worth up to 1.7×, because `z` optimises for size, which is not a cost here (Factorio parses 4 MB of Lua in about 106 ms).
+and `fklua mod` then reports `API 2.0.77: 1 members, pruned from 4257`: the mod ships the one member it calls. Every TinyGo flag above is required, and the scaffolded `main.go` says why; `-opt=2` rather than TinyGo's `-opt=z` default is worth up to 1.7×, because `z` optimises for size, which is not a major cost here (Factorio parses 4 MB of Lua in about 106 ms).
 
 ### Rust
 
@@ -187,10 +197,6 @@ tick 30 seen=30 fizz=8 buzz=4 fizzbuzz=2 sum=465 mean=15.50
 
 Both flagship guests are 32-bit: 64-bit integers have no hardware equivalent in a Lua sandbox where every number is a double, so each costs a `(lo, hi)` pair and roughly doubles the price of arithmetic touching it. **Standard Go (the `go` toolchain's own `GOOS=wasip1`) is not supported and will not be**: its `int` and every pointer are 64-bit on wasm, so all address arithmetic pays that pair cost; modules start around 2 MB with a full GC and scheduler; and its runtime blocks on `poll_oneoff`, which a Factorio tick cannot do, so any `time.Sleep` becomes a busy spin that hangs the game. TinyGo's own `wasip1` target is supported.
 
-### Breaking change for existing Rust guests: `LuaStr`
-
-Every generated string position in the Rust bindings (event payload fields, string-returning attributes, struct fields) is `LuaStr`, a byte type, rather than `String`: a Lua string is an arbitrary byte sequence, and the previous `from_utf8_lossy` reader silently rewrote non-UTF-8 bytes and changed the length. Where you read one, call `.as_bytes()` for the bytes or `.as_str()` for a checked `&str`; `.to_string_lossy()` is the old behaviour, now named. `BTreeMap<LuaStr, V>` is looked up with `m.get("colour".as_bytes())`; nothing about the wire changed. Separately, every dynamic-value argument is taken by reference (`&Value`), so a call site passing an owned `Value` needs a `&`. Detail: [`agents/abi.md`](agents/abi.md).
-
 ---
 
 ## Memory, the collector and the save
@@ -199,16 +205,12 @@ The defaults are already chosen: `fklua init` writes `gc = "collected"` and scaf
 
 The guest heap is **collected**: a paced incremental conservative mark-sweep, cut into bounded steps driven from a one-shot `on_tick` that exists only while a collection is in flight, so an idle guest registers nothing and pays nothing. There is no heap cap; collector metadata is about 31 KiB plus about 1% of the heap. Linear memory is **sharded** into 2¹⁹-word Lua tables, which keeps Lua's own collector flat at about 0.5 ms out to 40 MiB instead of scaling with the whole memory, and `memory.grow`'s zero-fill is paced behind a cursor. What bounds a guest is Factorio's own per-MiB bill, priced in [`agents/guests.md`](agents/guests.md) under "the guest heap budget", and wasm32's 4 GiB.
 
-The number behind the default: a **leaking** guest's linear memory doubles on every grow, and every new word is zero-filled, so at a 40 MiB heap the worst grow tick is **974.5 ms leaking against 24.6 ms collected** (measured in game, same guest, same allocation rate). That is one freeze every client in a lockstep game feels at once, and it is about the growth law rather than reclaiming bytes.
-
-### The two decisions you might make later
+### Useful flags to know
 
 | Symptom | The change | What it costs |
 |---|---|---|
 | your saves are large or multiplayer joins are slow, and the guest heap is the reason | `fklua mod --persist=packed`: the live table mirrored into `string.pack` pages, **0.44 B/word** saved against the default's 2.29 B/word, 5.2× smaller | about 40 µs per *dirty* page per guest call. A downstream mod on a large map measured 13.8× smaller saves and 2.6× faster loads |
 | you have measured your own heap over a long session and it does not grow | `gc = "leaking"` in `fklua.toml`, and build without the collector: the expert opt-out for an allocation-disciplined guest, and the only option for wasip1 | it buys back the collector's emitted code (measured downstream: +32.4% of the generated Lua, +13.7% of the zip) and nothing about the growth law above |
-
-Choose `leaking` on a measurement, not on a prediction. `--gc=collected` is checked: a module that does not export the collector's pacing surface is refused. `--persist` has two more modes: `auto` picks by declared heap size (threshold 1 MiB) and prints its choice, and `none` rebuilds memory from the data segments every load (nothing survives; deterministic but stateless). The collector's design is in [`agents/gc.md`](agents/gc.md) and the sharded memory representation in [`agents/sharding.md`](agents/sharding.md).
 
 ### Recompiling
 
@@ -230,18 +232,17 @@ The oracle is `bin/lua52f`, Lua 5.2.1 built from PUC source and patched to Facto
 
 ## Performance
 
-The goal is to write in your language, with its optimizer, and land within a small constant of hand-tuned Lua. Not "faster than Lua", though on bit-manipulation code it is, because the lowerings avoid `bit32` where a human reaching for the obvious library call cannot. `scripts/bench-guests.sh`, `-opt=3`, ratios against hand-written Lua, so below 1.00× means FkLua wins:
+The goal is to write in your language, with its optimizer, and land within a small constant of hand-tuned Lua. `scripts/bench-guests.sh`, `-opt=3`, ratios against hand-written Lua, so below 1.00× means FkLua wins:
 
 | Kernel | Go/Lua | Rust/Lua |
 |---|--:|--:|
-| `pure_prng`: xorshift32, no memory | **0.68×** | **0.67×** |
 | `pure_sum`: u32 array reduction | **1.88×** | **1.73×** |
 | `real_names`: build and hash strings | 4.52× | 5.51× |
 | `real_entities`: struct scan and filter | 5.47× | 5.38× |
 | `pure_dot`: f64 dot product | 8.49× | 8.48× |
 | `real_grid`: flood fill over a 2D grid | 8.57× | 8.17× |
 
-Hand-written Lua is still faster than a compiled guest at everything except `prng`; the gap has narrowed (a loop entry guard took `pure_sum` from 4.41× to 1.88×), but a factor of two is not an inversion. It usually does not decide anything: most mod code is dominated by the C++/Lua API boundary rather than by Lua execution, and a host call is about 12.5 µs, thousands of interpreted instructions, so for ordinary event handlers what matters is how many calls you make. Downstream mods that beat their Lua incumbents by an order of magnitude did it by changing what work happens per tick.
+Hand-written Lua is still faster than a compiled guest. It usually does not decide anything: most mod performance is dominated by the C++/Lua API boundary rather than by Lua execution, and a host call is about 12.5 µs, thousands of interpreted instructions, so for ordinary event handlers what matters is how many calls you make. Downstream mods that beat their Lua incumbents by an order of magnitude did it by changing what work happens per tick.
 
 `--opt=0..3`, default 3. Level 0 disables every pass and is the reference a miscompile is bisected against. What each level does and measured is in [`agents/optimizer.md`](agents/optimizer.md); how to read any performance number here is in [`agents/benchmarks.md`](agents/benchmarks.md).
 
