@@ -52,7 +52,7 @@ Two known public projects currently (August 2026) utilize FkLua:
 
 ## Prior Art
 
-Believe it or not, I'm not the first to build a WASI → Lua compiler for Factorio. phiresky [did it first](https://github.com/phiresky/NetHack-in-Factorio), though I was not aware of his effort when I began work on FkLua.
+Believe it or not, I'm not the first to build a WASM → Lua compiler for Factorio. phiresky [did it first](https://github.com/phiresky/NetHack-in-Factorio), though I was not aware of his effort when I began work on FkLua.
 
 FkLua does not utilize any code or IP of phiresky's.
 
