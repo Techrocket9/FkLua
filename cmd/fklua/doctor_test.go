@@ -18,6 +18,11 @@ import (
 // This is the "mirror checked in one direction" lesson from the 2026-07-30
 // audit, applied before it costs anything: factorio.Hooks matched control.lua
 // for every hook it listed and had been missing one for two milestones.
+//
+// docFactorioVerion is deliberately NOT in the list: the README names no engine
+// version in its prerequisites, because 2.0.x and 2.1.x both work and a pinned
+// row read as a ceiling. doctor still prints "Factorio 2.0.x" as the baseline
+// it probes for, and that quote is doctor's own rather than the README's.
 func TestDoctorQuotesTheVersionsTheReadmeNames(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {
@@ -30,7 +35,6 @@ func TestDoctorQuotesTheVersionsTheReadmeNames(t *testing.T) {
 	readme := string(b)
 	for _, want := range []string{
 		docGoVersion, docTinyGoVersion, docBinaryen, docRustVersion,
-		docFactorioVerion,
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("`fklua doctor` prints %q and README.md does not say it: "+

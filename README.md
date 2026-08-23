@@ -50,6 +50,14 @@ Two known public projects currently (August 2026) utilize FkLua:
 
 ---
 
+## Prior Art
+
+Believe it or not, I'm not the first to build a WASI → Lua compiler for Factorio. phiresky [did it first](https://github.com/phiresky/NetHack-in-Factorio), though I was not aware of his effort when I began work on FkLua.
+
+FkLua does not utilize any code or IP of phiresky's.
+
+---
+
 ## Quickstart
 
 From a checkout of this repository. This is the Go path; Rust follows.
@@ -61,7 +69,7 @@ cd .. && mkdir my-mod && cd my-mod
 fklua init my-mod --guest-module /path/to/fklua
 ```
 
-`init` writes into the **current directory** and creates no `my-mod/` of its own; the name argument is the mod's identity. `--guest-module` points the scaffolded guest at a local FkLua checkout; leave it off and run `go mod tidy` in `guest/go/` once the guest module is fetchable where you are. It writes `fklua.toml` (the mod's identity, dependencies, API pin, guest language and GC mode) and a guest that already builds under `guest/go/`: its own Go module, the collector import in `gc.go`, and `fk_on_init` and `fk_on_tick` wired in `main.go`. Then:
+`init` writes into the **current directory** and creates no `my-mod/` of its own; the name argument is the mod's identity. `--guest-module` points the scaffolded guest at a local FkLua checkout; leave it off and run `go mod tidy` in `guest/go/` once the guest module is fetchable where you are. It writes `fklua.toml` (the mod's identity, dependencies, API pin, guest language and GC mode) and a guest that already builds under `guest/go/`: its own Go module, the collector import in `gc.go`, and `fk_on_init` and `fk_on_tick` wired in `main.go`. What every generated file is for, key by key, is [`docs/generated-files.md`](docs/generated-files.md). Then:
 
 ```sh
 fklua gen-bindings && fklua lock          # the Factorio API lands at guest/go/fkapi/
@@ -91,7 +99,7 @@ fklua gen-bindings && fklua lock
 fklua mod guest/rust/target/wasm32-unknown-unknown/release/my_mod_guest.wasm
 ```
 
-`init` scaffolds `guest/rust/` as a two-member cargo workspace, the generated `fkapi` crate beside your guest, with `panic=abort`, `lto` and `opt-level="s"` already set. `--features fk/fkgc` is the collector: no import and no second flag, because the `fk` crate owns the single `#[global_allocator]` site. If a crate reaches a wasm feature FkLua does not compile (`multivalue`, `reference-types`), `fklua compile` names it; the recipe for turning those off is in [`agents/guests.md`](agents/guests.md).
+`init` scaffolds `guest/rust/` as a two-member cargo workspace, the generated `fkapi` crate beside your guest, with `panic=abort`, `lto` and `opt-level="s"` already set. `--features fk/fkgc` is the collector: no import and no second flag, because the `fk` crate owns the single `#[global_allocator]` site. Yes, a Rust project with a garbage collector; [`docs/memory.md`](docs/memory.md) explains why. If a crate reaches a wasm feature FkLua does not compile (`multivalue`, `reference-types`), `fklua compile` names it; the recipe for turning those off is in [`agents/guests.md`](agents/guests.md).
 
 ---
 
@@ -113,62 +121,28 @@ The scaffold uses the two simplest hooks: `fk_on_init` once per save and `fk_on_
 
 ---
 
-## Verifying a mod headlessly
+## Documentation
 
-Factorio runs headless, so "does it load, and does it do the same thing twice" is a scriptable check. Point `MOD` at what `fklua mod` wrote and `NAME` at your `[mod] name`. The `FACTORIO` path and the `config.ini` source below are the macOS Steam locations; adapt both to your install.
+Documentation for mod authors lives under [`docs/`](docs/):
 
-```sh
-MOD=my-mod_0.1.0; NAME=my-mod
-FACTORIO="$HOME/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents/MacOS/factorio"
+| Page | Covers |
+|---|---|
+| [`docs/generated-files.md`](docs/generated-files.md) | every file `fklua init`, `gen-bindings`, `lock` and `mod` write: which are yours to edit, which are regenerated, and how |
+| [`docs/memory.md`](docs/memory.md) | guest memory, the garbage collector and why Rust has one, the tuning knobs, the leaking opt-out, `--persist`, and migrating a recompiled guest |
+| [`docs/factorio-api.md`](docs/factorio-api.md) | calling the API: handles, events, filters and field masks, commands and remote interfaces, `defines`, and the version axes |
+| [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod |
 
-# A private write-data directory: Factorio locks its user directory, so a run
-# sharing one with an open game dies at startup.
-mkdir -p verify/mods verify/userdir/config
-sed -e "s|^write-data=.*|write-data=$PWD/verify/userdir|" \
-    "$HOME/Library/Application Support/factorio/config/config.ini" \
-    > verify/userdir/config/config.ini
-
-cp -R "$MOD" verify/mods/
-echo "{\"mods\":[{\"name\":\"base\",\"enabled\":true},{\"name\":\"$NAME\",\"enabled\":true}]}" \
-    > verify/mods/mod-list.json
-
-# --create is where _initialize and fk_on_init run.
-"$FACTORIO" -c verify/userdir/config/config.ini --mod-directory verify/mods \
-    --create verify/map.zip --disable-audio > verify/create.log 2>&1
-
-# --benchmark reloads that save and runs it, twice.
-"$FACTORIO" -c verify/userdir/config/config.ini --mod-directory verify/mods \
-    --benchmark verify/map.zip --benchmark-ticks 1200 --benchmark-runs 2 \
-    --disable-audio > verify/run.log 2>&1
-
-grep -E "Checksum for script|$NAME|[Ee]rror" verify/create.log
-grep -E "$NAME|Performed|checksum:" verify/run.log
-```
-
-On the unmodified scaffold, that prints a script checksum, the `fk_on_init` line from the create log, the `fk_on_tick` lines from the run log, and the same `checksum:` twice; two runs disagreeing means a nondeterministic guest, which in a lockstep game is a desync. Two limits: `--benchmark` never saves, so state that must survive a real save needs a headless server and `game.auto_save()` ([`scripts/run-roundtrip.sh`](scripts/run-roundtrip.sh) is that shape), and a headless `--create` has no player and no connected client, so any event that needs one never fires. [`scripts/run-guest.sh`](scripts/run-guest.sh) is this recipe wired to the repo's own example guests.
+The `agents/` directory holds the maintainer design notes; see [Working on FkLua itself](#working-on-fklua-itself).
 
 ---
 
 ## The Factorio API from a guest
 
-The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,255 of 4,257 members, 219 event payload structs (every event the description declares), 1,329 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators, and 240 `<Name>Into(dst, …)` variants that let an array return land in a buffer you already own. Two members are deferred, both a name that collides with another member of the same class. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id: against the default **2.0.77** API pin, 4,255 of 4,257 members, with a payload struct for every event, 1,329 inherited forwarders and 1,137 `defines` accessors. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings; read them from there rather than from this page.
 
-### Factorio versions
+The shape of it: one generic `fk.call` import rather than one per method, so a member Factorio removes degrades to a status instead of failing the module; a mod ships the member and event tables pruned to the ids it provably calls (about 0.6 KB instead of about 840 KB); events are filtered in C++ before the guest is entered, and an expensive payload field can be masked out; commands and remote interfaces dispatch back in by id; and a host call costs about 12.5 µs, so the cost model is calls, not bytes.
 
-There are two version axes and they are worth keeping apart. The **API pin** is the `runtime-api.json` version the bindings and the packaged member table come from; the **engine** is the Factorio actually running, which a guest can ask about with `helpers.game_version`. They meet in exactly one place: the packaged `info.json`'s `factorio_version`, which defaults to the pin's `major.minor` (a 2.0 engine does not load a mod declaring 2.1, and a 2.1 engine does not load one declaring 2.0) and can be overridden with `[mod] factorio_version` in `fklua.toml` or `--factorio-version`.
-
-The default pin is the general-availability release, **2.0.77**, because a default is what a mod author who has pinned nothing ships to players, and players are on stable. Everything in this repository builds and runs against a stock 2.0.x install; the in-game test scripts read the installed engine's version and package for it. Two capabilities need more: **2.1.x** API surface is one line away (`api = "2.1.14"` in `fklua.toml`, or `--api=2.1.14`, then `fklua gen-bindings && fklua lock`; every supported description is committed, and at 2.1.14 the bindings cover 4,840 of 4,842 members with 224 events), and **FkIPC** requires a 2.1.14 or newer engine and is inert below it (see [FkIPC](guest/go/fkipc/README.md)). On Steam, 2.1.x is the `2.1.14` entry under the game's Betas tab; the scripts pick it up through `FACTORIO_BIN` or the default Steam path. The two migrations this project has done between pins are written up in [`agents/versioning.md`](agents/versioning.md).
-
-- **One generic `fk.call(handle, member, argp, retp)` import**, not one per method. A method Factorio removes in a point release would otherwise be an unresolved import, which fails the whole module at instantiation; here it degrades to one call returning `ERR_NO_MEMBER`.
-- **A mod ships the members it calls, not the API.** `fklua mod` scans the compiled guest for the constant ids reaching `fk.call`/`fk.subscribe` and prunes the tables: the one-member example above ships a 646-byte member table where the full one is about 840 KB. An id the scan cannot prove constant ships the whole table (bigger, never broken), and the build output says so.
-- **Handles come in two spaces**, split at `0x40000000`. Everything the host returns is transient and released when the event that produced it returns; `fk_retain` promotes what must outlive the event into `storage`, across saves.
-- **Events are filtered in C++ before your handler runs.** A filtered subscription carries Factorio's own filter list, so an `on_entity_died` for a biter never enters the guest.
-- **An expensive event field can be declined.** `on_undo_applied` carries an unbounded array of blueprint entities; a guest that wants one `uint32` out of it can mask the rest. Measured on that subscription with 200 actions: 7.49 ms → 2.7 µs per dispatch.
-- **Commands and remote interfaces reach a guest.** A wasm guest has no callable Lua value, so the host synthesises the closure, hands it to Factorio, and dispatches back in by an id the guest chose: `fk.register` in, `fk_on_call` out, `remote.call` in both directions.
-- **A host call costs about 12.5 µs**, cross-confirmed over 2,487 real calls in game. The cost model is calls, not bytes: batch at the boundary, not inside it.
-- **A new Factorio version is a data drop, not a porting job.** `fklua api pull`, `api diff` and `api check GUEST.wasm --to <version>` say what moved and whether anything your mod calls broke; adding the 2.1.12 description (482 new members) needed no generator change.
-
-Full detail, including what is not built: [`agents/abi.md`](agents/abi.md).
+There are two version axes worth keeping apart: the **API pin** (which `runtime-api.json` the bindings and the packaged tables come from; default 2.0.77, changed in one `fklua.toml` line) and the **engine** (whichever Factorio is running). How they meet in `info.json`, what 2.1.x adds, handles, events, masks, `defines`, and what `api pull`/`diff`/`check` do when a new Factorio version lands: [`docs/factorio-api.md`](docs/factorio-api.md).
 
 ---
 
@@ -203,20 +177,22 @@ Both flagship guests are 32-bit: 64-bit integers have no hardware equivalent in 
 
 The defaults are already chosen: `fklua init` writes `gc = "collected"` and scaffolds a guest that carries the collector, and `fklua mod` defaults to `--persist=table`. For a first mod there is nothing here to decide.
 
-The guest heap is **collected**: a paced incremental conservative mark-sweep, cut into bounded steps driven from a one-shot `on_tick` that exists only while a collection is in flight, so an idle guest registers nothing and pays nothing. There is no heap cap; collector metadata is about 31 KiB plus about 1% of the heap. Linear memory is **sharded** into 2¹⁹-word Lua tables, which keeps Lua's own collector flat at about 0.5 ms out to 40 MiB instead of scaling with the whole memory, and `memory.grow`'s zero-fill is paced behind a cursor. What bounds a guest is Factorio's own per-MiB bill, priced in [`agents/guests.md`](agents/guests.md) under "the guest heap budget", and wasm32's 4 GiB.
+If a garbage collector in a **Rust** project raises an eyebrow: it is there because of where the heap lives, not because of the language. Guest memory is Lua tables inside Factorio's save, identical on every client of a lockstep game and billed per MiB per tick, and the allocator's `dealloc` is deliberately a no-op, so `Drop` never returns memory; some blocks (payloads the host writes into guest memory) have no owner to free them at all. Reclamation is tracing at safe points or nothing, in Go and Rust alike.
 
-### Useful flags to know
+The collector is a paced incremental mark-sweep cut into bounded steps driven from a one-shot `on_tick` that exists only while a collection is in flight, so an idle guest registers nothing and pays nothing. There is no heap cap, and a guest that outruns its budget grows instead of stalling. Two decisions do exist, each worth making on a measurement:
 
 | Symptom | The change | What it costs |
 |---|---|---|
 | your saves are large or multiplayer joins are slow, and the guest heap is the reason | `fklua mod --persist=packed`: the live table mirrored into `string.pack` pages, **0.44 B/word** saved against the default's 2.29 B/word, 5.2× smaller | about 40 µs per *dirty* page per guest call. A downstream mod on a large map measured 13.8× smaller saves and 2.6× faster loads |
-| you have measured your own heap over a long session and it does not grow | `gc = "leaking"` in `fklua.toml`, and build without the collector: the expert opt-out for an allocation-disciplined guest, and the only option for wasip1 | it buys back the collector's emitted code (measured downstream: +32.4% of the generated Lua, +13.7% of the zip) and nothing about the growth law above |
+| you have measured your own heap over a long session and it does not grow | `gc = "leaking"` in `fklua.toml`, and build without the collector: the expert opt-out for an allocation-disciplined guest, and the only option for wasip1 | it buys back the collector's emitted code (measured downstream: +32.4% of the generated Lua, +13.7% of the zip) and nothing about the growth law |
 
-### Recompiling
+Everything else, including the tuning knobs, what recompiling does to the heap in your users' saves (`fk_migrate`), and reacting to mod-set changes (`fk_on_configuration_changed`), is in [`docs/memory.md`](docs/memory.md).
 
-Recompiling a guest invalidates the heap in your users' saves, and so does repackaging it against a different `--api` pin, which moves the member, event and define ids the heap was written against; both move the build id a save records. On a mismatch the old heap is discarded and the loss is logged, unless the guest exports `fk_migrate(old_version)`, a notification on a fresh heap, which is what a rebuild-from-the-world needs. `fk_migrate_adopt` is the separate opt-in that hands the old bytes over, and most guests should never export it: linear memory is `.data` and `.rodata` as well as the heap, so a rebuilt guest reading an adopted image reads the previous build's string constants. The round trip is verified inside Factorio: a headless server honours `game.auto_save()`, so [`scripts/run-roundtrip.sh`](scripts/run-roundtrip.sh) makes a real save mid-game and loads it back, including mid-mark and mid-sweep with the collector on and a rebuilt guest that exports `fk_migrate`.
+---
 
-A change to the mod set around your guest, rather than to your guest, is a different signal: export `fk_on_configuration_changed()` (no arguments) and it is dispatched whenever Factorio raises `on_configuration_changed`, after `fk_migrate` on a load that is both. It is replicated, so it may write guest state, and it also runs on the load that adds your mod to an existing save, right after `fk_on_init`. A guest wanting to know what moved reads `script.active_mods` against what it saved.
+## Verifying a mod headlessly
+
+Factorio runs headless, so "does it load, and does it do the same thing twice" is a scriptable check: create a map (which is where `_initialize` and `fk_on_init` run), then `--benchmark` it twice and compare script checksums; two runs disagreeing means a nondeterministic guest, which in a lockstep game is a desync. The full recipe, generic over any mod, is [`docs/verifying.md`](docs/verifying.md).
 
 ---
 

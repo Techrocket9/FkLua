@@ -25,8 +25,9 @@ script-output/
 # Rust guest build output.
 guest/rust/target/
 
-# Generated API reference; regenerate with `fklua docs`.
-docs/
+# Generated API reference; regenerate with `fklua docs`. The hand-written
+# pages under docs/ are committed; only the generated output is ignored.
+docs/api-*.md
 bench/guests/rust/target/
 
 # Audit scratch — reports and throwaway analysis, never committed.
