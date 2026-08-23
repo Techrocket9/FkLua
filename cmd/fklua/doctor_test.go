@@ -19,10 +19,10 @@ import (
 // audit, applied before it costs anything: factorio.Hooks matched control.lua
 // for every hook it listed and had been missing one for two milestones.
 //
-// docFactorioVerion is deliberately NOT in the list: the README names no engine
-// version in its prerequisites, because 2.0.x and 2.1.x both work and a pinned
-// row read as a ceiling. doctor still prints "Factorio 2.0.x" as the baseline
-// it probes for, and that quote is doctor's own rather than the README's.
+// docFactorioVerion is version-free ("Factorio"), because the README names no
+// engine version: 2.0.x and 2.1.x both work and a pinned row would read as a
+// ceiling. It stays in this list so that re-pinning the constant without the
+// README saying the version again fails here rather than drifting.
 func TestDoctorQuotesTheVersionsTheReadmeNames(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {
@@ -35,6 +35,7 @@ func TestDoctorQuotesTheVersionsTheReadmeNames(t *testing.T) {
 	readme := string(b)
 	for _, want := range []string{
 		docGoVersion, docTinyGoVersion, docBinaryen, docRustVersion,
+		docFactorioVerion,
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("`fklua doctor` prints %q and README.md does not say it: "+

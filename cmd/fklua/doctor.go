@@ -25,11 +25,13 @@ import (
 // disagree is the "mirror checked in one direction" failure this repo has
 // already had once, and the direction that drifts is always the unchecked one.
 const (
-	docGoVersion      = "Go 1.26+"
-	docTinyGoVersion  = "TinyGo 0.41.1"
-	docBinaryen       = "binaryen"
-	docRustVersion    = "Rust 1.97+"
-	docFactorioVerion = "Factorio 2.0.x"
+	docGoVersion     = "Go 1.26+"
+	docTinyGoVersion = "TinyGo 0.41.1"
+	docBinaryen      = "binaryen"
+	docRustVersion   = "Rust 1.97+"
+	// Version-free on purpose: the README names no engine version, because
+	// 2.0.x and 2.1.x both work and a pinned row would read as a ceiling.
+	docFactorioVerion = "Factorio"
 )
 
 // runDoctor reports which of the toolchains the docs name are installed here.
