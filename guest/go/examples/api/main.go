@@ -217,6 +217,33 @@ func onTick(tick uint32) {
 			}
 		}
 
+		// THE INDEX OPERATOR'S WRITE HALF, `t[k] = v`, which is the only way a
+		// mod changes its own runtime-global setting:
+		//
+		//	settings.global["my-setting"] = {value = true}
+		//
+		// Two calls, and the first is the whole point of the handle route:
+		// GlobalRaw hands back the LuaCustomTable itself rather than
+		// materialising every setting in the game in order to write one.
+		//
+		// THIS MOD DECLARES NO SETTINGS, so what the engine answers is its
+		// refusal -- "LuaCustomTable doesn't contain key" -- and that is the leg
+		// worth having in a real game: a Factorio metamethod raising has to come
+		// back as a STATUS, never as an unwind through the wasm frame the call
+		// came from. A mod with a setting of its own gets OK here and the
+		// setting changes, per save.
+		if raw, err := fkapi.Settings.GlobalRaw(); err != nil {
+			fk.Log("settings.global as a handle failed: " + err.Error())
+		} else {
+			err = fkapi.LuaCustomTable{Object: raw}.Set(
+				fkapi.OfString("fklua-no-such-setting"),
+				fkapi.OfMap(fkapi.KeyValue{
+					Key: fkapi.OfString("value"), Val: fkapi.OfBool(true)}),
+			)
+			fk.Log("index-assign: settings.global[undefined] refused " +
+				strconv.FormatBool(err != nil))
+		}
+
 		// A MEMBER RETURNING SEVERAL VALUES, which the generators deferred for
 		// four milestones on naming rules alone -- and this one is the ONLY way
 		// to arm on_object_destroyed, so no Go or Rust guest could subscribe to

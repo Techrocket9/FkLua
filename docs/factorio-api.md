@@ -4,7 +4,7 @@ How the generated bindings reach Factorio's runtime API, what a mod actually shi
 
 ## Coverage
 
-The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,255 of 4,257 members, 219 event payload structs (every event the description declares), 1,329 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators, and 240 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Two members are deferred, both a name that collides with another member of the same class. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,257 of 4,259 members, 219 event payload structs (every event the description declares), 1,329 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators plus the write half of the two that have one, and 240 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Two members are deferred, both a name that collides with another member of the same class. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
 
 ## One import, not thousands
 
@@ -21,6 +21,29 @@ A mod ships the members it calls, not the API. `fklua mod` scans the compiled gu
 Everything the host returns is a handle, and handles come in two spaces split at `0x40000000`. Transient handles are released when the event that produced them returns, which is why storing one across events is an error rather than a leak. `Retain()` promotes a handle into the persistent space, which lives in `storage` and survives saves; `Release()` gives one back when it is no longer needed. The `retain` example shows the round trip across a save.
 
 Handles are why the bindings can offer host-side predicates such as `surface.NameIs("nauvis")`: the question is asked where the string already is, instead of copying it into guest memory to compare.
+
+## Class operators
+
+Some Factorio classes are used through Lua operators rather than named members: `inventory[1]`, `#inventory`, `chunkIterator()`. Those bind as `Get`, `Length` and `Call` (`get`, `length`, `call` in Rust), because an operator has no name for the ABI to resolve.
+
+Reaching one on a `LuaCustomTable` takes two calls, and that is the cheap way round. An attribute such as `force.technologies` is a custom table, so reading it whole materializes every entry across the boundary; `TechnologiesRaw()` hands back the handle instead and `Get(key)` reads the one entry you wanted.
+
+Two of those operators have a write half, `Set(key, value)`, because Factorio documents an assignment through them: a `LuaCustomTable` holding mod settings, and a `LuaFluidBox`. Writing a mod setting is the reason it exists, and it is the only way a mod changes its own runtime-global setting:
+
+```go
+raw, err := fkapi.Settings.GlobalRaw()
+if err != nil {
+    return
+}
+err = fkapi.LuaCustomTable{Object: raw}.Set(
+    fkapi.OfString("my-setting"),
+    fkapi.OfMap(fkapi.KeyValue{Key: fkapi.OfString("value"), Val: fkapi.OfBool(true)}),
+)
+```
+
+The write replaces the whole `ModSetting` table, which is why the value is a map with a `value` key. Factorio accepts it on `settings.global`, `settings.player_default`, `player.mod_settings`, `settings.get_player_settings(player)` and `style.column_alignments`, and refuses it everywhere else: any other custom table answers `ERR_CALL_FAILED` carrying the engine's own "LuaCustomTable is read only", and a key that is not a defined setting answers it with "doesn't contain key". A mod can only change its own settings. The change is per save rather than per installation, it does not reach `mod-settings.dat`, and it raises `on_runtime_mod_setting_changed` before the call returns, so a handler for that event runs inside the write. Factorio refuses the write during `on_init`.
+
+Writing an absent value to a `LuaFluidBox` clears it, which is Factorio's own behaviour for `fluidbox[n] = nil`. New fluid boxes cannot be added or removed this way and the index must be in bounds.
 
 ## Events
 

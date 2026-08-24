@@ -2046,11 +2046,19 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 	fmt.Printf("  %4d of those readable attributes are a LuaCustomTable and get a\n",
 		bound[factorio.MemberGetHandle])
 	fmt.Println("       SECOND, handle-returning member beside the materialising one.")
+	// THE INDEX OPERATORS' WRITE HALF, which is the one member count here the
+	// description cannot be asked for: an operator carries a read_type and never
+	// a write_type, so what `obj[k] = v` exists for is PROSE, read through an
+	// allowlist. On its own line for the reason kind 7 has one -- a kind in no
+	// bucket is a kind nobody adds up.
+	fmt.Printf("  %4d of the index operators have a WRITE half (obj[k] = v), from the\n",
+		bound[factorio.MemberIndexSet])
+	fmt.Println("       allowlist in gen.go: the description declares no write side for one.")
 	// And the sum, stated, because a decomposition nobody adds up is a list.
-	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d is the same number.\n",
+	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d + %d is the same number.\n",
 		len(r.Members), bound[factorio.MemberCall], bound[factorio.MemberGet],
 		bound[factorio.MemberSet], bound[factorio.MemberGetEq], nOps,
-		bound[factorio.MemberGetHandle])
+		bound[factorio.MemberGetHandle], bound[factorio.MemberIndexSet])
 	// The identity the census carries, printed where the numbers are. It closes
 	// exactly, in both languages, and TestTheCensusMemberArithmeticCloses is
 	// what keeps it closing -- it did NOT close until the string-enum constants

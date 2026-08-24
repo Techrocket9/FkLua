@@ -260,6 +260,28 @@ M.SELF = 6        -- obj(...)    the __call operator
 -- where the GET member says K_DICT. The read itself is identical, which is why
 -- the two share a line below.
 M.GETH = 7        -- obj.attr, as a handle
+-- IDXSET is the WRITE half of IDX: `obj[k] = v`, with the key AND the value
+-- both arguments. It is the only way a mod can change its own runtime-global
+-- setting -- `settings.global["name"] = {value = true}` -- which is a gesture
+-- no other kind can express, because SET takes its member name from the
+-- generation-time member table and IDX has nowhere to put a value.
+--
+-- THE DESCRIPTION DOES NOT MODEL IT. An operator carries a `read_type` and
+-- never a `write_type`, so no generator that mirrors the description can emit
+-- this; what the description DOES carry is PROSE, on the operator itself
+-- ("Access, set or clear a fluid box... Writing `nil` removes all fluid") and
+-- on the members that yield a LuaCustomTable ("individual settings can be
+-- changed by overwriting their ModSetting table"). The generator reads that
+-- prose through an explicit allowlist -- see indexWriteHalf in
+-- internal/factorio/gen.go -- so which receivers accept a write is a decision
+-- written down once rather than a shape guessed per class.
+--
+-- WRITABILITY IS PER RECEIVER AND NOT PER CLASS, which is why the refusal is
+-- left to the engine. `settings.global` accepts a write and `settings.startup`
+-- answers "LuaCustomTable is read only"; both are the same LuaCustomTable and
+-- therefore the same member id. That raise comes back as ERR_CALL_FAILED with
+-- the engine's own text in last_error, exactly like every other raise here.
+M.IDXSET = 8      -- obj[k] = v  the __newindex operator
 --
 -- EQ exists so a guest can ask `entity.name == "transport-belt"` WITHOUT the
 -- name ever crossing into guest memory. The comparison is one Lua `==` on a
@@ -288,6 +310,11 @@ M.GETH = 7        -- obj.attr, as a handle
 -- object. So each gets its own branch in M.invoke -- two lines apiece -- and
 -- shares everything before it. `m.name` still travels for these, and it is
 -- documentation and diagnostics only: nothing ever resolves it.
+--
+-- IDXSET is a fourth for the same reason and not for SET's: SET's value is its
+-- only argument and its NAME is in the member table, where IDXSET's key is an
+-- argument too. That is the same sentence that made IDX a kind, one direction
+-- over.
 
 local members = {}
 local lastError = ""
@@ -324,8 +351,13 @@ local function set_member(obj, name, v) obj[name] = v end
 -- is what rawget_member above cannot express and why IDX is a kind. len_of is
 -- `#obj`. There is no call_self: a LuaObject with a __call metamethod is
 -- already a callable value, so pcall takes it directly.
+--
+-- index_set is `obj[k] = v`, the write half, and it is a THIRD function rather
+-- than a reuse of set_member for the same reason index_at is not
+-- rawget_member: the key is an argument here and a member name there.
 local function index_at(obj, k) return obj[k] end
 local function len_of(obj) return #obj end
+local function index_set(obj, k, v) obj[k] = v end
 
 local function report_missing(name)
   if reported[name] then return end
@@ -352,7 +384,7 @@ function M.invoke(h, mid, ...)
   if st ~= M.OK then return st end
 
   -- THE CLASS OPERATORS COME FIRST, BEFORE THE MEMBER READ, and that ordering
-  -- is the whole of what they need. None of the three is `obj[m.name]`, so
+  -- is the whole of what they need. None of the four is `obj[m.name]`, so
   -- falling through to the read below would resolve a key called "index" or
   -- "length" on a LuaObject -- which raises on some classes and returns nil on
   -- the rest, i.e. ERR_NO_MEMBER for a member that is right there.
@@ -370,6 +402,30 @@ function M.invoke(h, mid, ...)
       return M.ERR_CALL_FAILED
     end
     return M.OK, v
+  end
+
+  if m.kind == M.IDXSET then
+    -- `obj[k] = v`, the write half of IDX. Both are bound to names first: `...`
+    -- inside a non-vararg closure is a Lua syntax error rather than a capture
+    -- of the enclosing varargs, which is the same line M.SET below carries.
+    --
+    -- AN ABSENT VALUE IS A REAL nil AND IS THE POINT, not an omission to guard
+    -- against: M.call trims to the last argument PRESENT, so a member whose
+    -- value the description declares optional -- LuaFluidBox's, whose own prose
+    -- says "Writing `nil` removes all fluid from the fluid box" -- arrives here
+    -- with v nil and clears the slot. Nothing to special-case; the general rule
+    -- already says it.
+    --
+    -- NOTHING COMES BACK. An assignment is not an expression in Lua and this
+    -- ABI does not invent one: a caller who wants to know what is there now
+    -- asks IDX, which is a second host call it did not have to make.
+    local k, v = ...
+    local iok, ierr = pcall(index_set, obj, k, v)
+    if not iok then
+      lastError = tostring(ierr)
+      return M.ERR_CALL_FAILED
+    end
+    return M.OK
   end
 
   if m.kind == M.LEN then

@@ -17,10 +17,10 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use fkapi::{
     defines_direction_east, defines_inventory_chest, read_on_player_created, read_on_tick,
-    LuaChunkIterator, LuaEntity, LuaInventory, LuaStr, LuaSurface, Object, Value,
+    LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaStr, LuaSurface, Object, Value,
     EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED, EVENT_ON_PLAYER_MINED_ENTITY,
     EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, SCRIPT,
-    SKIP_ON_BUILT_ENTITY_TAGS,
+    SETTINGS, SKIP_ON_BUILT_ENTITY_TAGS,
 };
 
 static TICKS_SEEN: AtomicU32 = AtomicU32::new(0);
@@ -272,6 +272,43 @@ pub extern "C" fn fk_on_tick(tick: u32) {
                 _ => fk::log("the chest had no chest inventory"),
             },
             _ => fk::log("create_entity(iron-chest) did not produce one"),
+        }
+
+        // THE INDEX OPERATOR'S WRITE HALF, `t[k] = v`, which is the only way a
+        // mod changes its own runtime-global setting:
+        //
+        //     settings.global["my-setting"] = {value = true}
+        //
+        // Two calls, and the first is the whole point of the handle route:
+        // global_raw hands back the LuaCustomTable itself rather than
+        // materialising every setting in the game in order to write one.
+        //
+        // THIS MOD DECLARES NO SETTINGS, so what the engine answers is its
+        // refusal -- "LuaCustomTable doesn't contain key" -- and that is the leg
+        // worth having in a real game: a Factorio metamethod raising has to come
+        // back as a STATUS, never as an unwind through the wasm frame the call
+        // came from. A mod with a setting of its own gets Ok here and the
+        // setting changes, per save.
+        match SETTINGS.global_raw() {
+            Ok(raw) => {
+                let refused = LuaCustomTable(raw)
+                    .set(
+                        &Value::Str(LuaStr::from("fklua-no-such-setting")),
+                        &Value::Map(alloc::vec![(
+                            Value::Str(LuaStr::from("value")),
+                            Value::Bool(true)
+                        )]),
+                    )
+                    .is_err();
+                fk::log(&format!(
+                    "index-assign: settings.global[undefined] refused {}",
+                    refused
+                ));
+            }
+            Err(e) => fk::log(&format!(
+                "settings.global as a handle failed: {}",
+                e.as_str()
+            )),
         }
 
         // A MEMBER RETURNING SEVERAL VALUES, deferred for four milestones on

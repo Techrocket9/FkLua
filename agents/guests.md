@@ -740,7 +740,7 @@ Three choices in the crate worth knowing:
 
 **Each set carries a PIN STAMP, so a guest built against the wrong one is refused rather than shipped.** It is one exported function named `fk_api_pin_<version>` — `//go:wasmexport` here, `#[no_mangle] pub extern "C"` in Rust — and it is why a guest's export list now has an entry no hook corresponds to. Exported rather than called because an export is a root: `-opt=2` followed by `wasm-opt`, and Rust's `lto = true`, delete anything that is merely defined. `fklua mod` compares it against the pin it is packaging at and refuses a mismatch. The arrangement that produces one — a vendored checkout whose committed bindings are at the default while the consumer pins something else, which is what `fkipc` imports — and the `--into` flow that fixes it are in [`agents/versioning.md`](agents/versioning.md), "The pin stamp, and repinning a vendored checkout".
 
-**4255 of 4257 members in each language at the default 2.0.77 pin, with the same 2 deferrals.** Agreeing member-for-member is the point: it says the shared machinery is not Go-shaped.
+**4257 of 4259 members in each language at the default 2.0.77 pin, with the same 2 deferrals.** Agreeing member-for-member is the point: it says the shared machinery is not Go-shaped.
 
 Where Rust says it better, the binding says it:
 
@@ -779,7 +779,7 @@ An absent optional is OMITTED from the table, which is what an absent optional m
 
 It earned that immediately. The imports were emitted as `fk.fk_call` and `fk.fk_subscribe` rather than `fk.call` and `fk.subscribe`, which **a compile gate cannot see**: the crate built perfectly and the module refused to instantiate. `#[link_name]` keeps the Rust identifier readable while the import keeps the name `control.lua` binds.
 
-`TestGeneratedRustBindingsCompile` still earns its place alongside it — it type-checks all 4255 members at the default 2.0.77 pin, where a guest covers only what it calls.
+`TestGeneratedRustBindingsCompile` still earns its place alongside it — it type-checks all 4257 members at the default 2.0.77 pin, where a guest covers only what it calls.
 
 ### Could TinyGo take advantage? Measured: not yet worth it
 

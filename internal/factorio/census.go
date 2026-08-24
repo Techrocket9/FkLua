@@ -103,6 +103,17 @@ type CensusData struct {
 	// (`operators_bound` above), met from inside the generator instead of
 	// outside it.
 	CustomTableHandles int `json:"custom_table_handle_members"`
+	// IndexSetters is the WRITE half of an index operator -- `obj[k] = v`, a
+	// second member over an operator `operators_bound` already counts. See
+	// MemberIndexSet and indexWriteHalf.
+	//
+	// It is a row for the reason the one above is, plus one of its own: this is
+	// the only member count here that comes from an ALLOWLIST rather than from
+	// the description, because an operator carries no write_type for a generator
+	// to read. A pin that adds an index operator moves it by nothing on its own;
+	// a row flipped from false to true moves it by one, which is exactly the
+	// event a version diff should make a reader look at.
+	IndexSetters int `json:"index_setter_members"`
 
 	TableConcepts int `json:"table_shaped_concepts"`
 	StringEnums   int `json:"pure_string_enum_concepts"`
@@ -281,6 +292,9 @@ func TakeCensus(a *API) (CensusData, error) {
 		if m.Kind == MemberGetHandle {
 			c.CustomTableHandles++
 		}
+		if m.Kind == MemberIndexSet {
+			c.IndexSetters++
+		}
 	}
 	for k, v := range r.Reasons {
 		c.HostSkipsBy[k] = v
@@ -407,6 +421,7 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("operators bound", old.OperatorsBound, c.OperatorsBound)
 	cmp("global functions bound", old.GlobalFunctionsBound, c.GlobalFunctionsBound)
 	cmp("LuaCustomTable handle members", old.CustomTableHandles, c.CustomTableHandles)
+	cmp("index-assign members", old.IndexSetters, c.IndexSetters)
 	cmp("table-shaped concepts", old.TableConcepts, c.TableConcepts)
 	cmp("pure string-enum concepts", old.StringEnums, c.StringEnums)
 	cmp("host members bound", old.HostMembers, c.HostMembers)

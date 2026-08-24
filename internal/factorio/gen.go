@@ -146,13 +146,101 @@ const (
 	// `obj[m.name]`, and everything that differs is in the declared return kind,
 	// which write_value has always dispatched on.
 	MemberGetHandle = 7
+
+	// MemberIndexSet is the WRITE half of MemberIndex -- `obj[k] = v`, key and
+	// value both arguments -- and it is a kind for the same sentence IDX is,
+	// read one direction over: MemberSet's value is its only argument and its
+	// NAME comes out of this table, so it has nowhere to put a key.
+	//
+	// It exists because `settings.global["name"] = {value = true}` is the only
+	// way a mod changes its own runtime-global setting, and until this landed
+	// that gesture had no expression in the bindings at all. Filed by
+	// BetterBeltBalancer, which needs it to turn its own setting on when it
+	// adopts a save written before that setting existed.
+	//
+	// WHICH RECEIVERS ACCEPT A WRITE IS AN ALLOWLIST, and indexWriteHalf below
+	// is it, with the evidence per row. A SECOND MEMBER OVER THE SAME OPERATOR
+	// rather than a change to the first, which is MemberGetHandle's precedent
+	// exactly: the read is the right answer for a read, the two have different
+	// signatures, and which one a guest wants is a question about the guest.
+	// Counted in census.json as index_setter_members for the reason kind 7 is --
+	// a kind that reaches no line of the accounting is the F-IDX shape.
+	MemberIndexSet = 8
 )
 
 // IsOperator reports the three kinds that are Lua metamethods rather than named
 // members. They are the kinds whose `name` is documentation: nothing resolves
 // `obj["index"]`, and the ABI dispatches on the kind alone.
+//
+// MemberIndexSet is deliberately NOT among them, though its name is
+// documentation too. This predicate feeds `operators_bound`, which counts how
+// many of the description's declared operators reached the member table, and a
+// setter is a SECOND member over an operator that is already counted -- so
+// including it would make that row read 13 of 11. Kind 7 is outside for the
+// same reason and has a row of its own; so does this.
 func (m Member) IsOperator() bool {
 	return m.Kind == MemberIndex || m.Kind == MemberLen || m.Kind == MemberSelf
+}
+
+// indexWriteHalf says which classes' `index` operator has a write half, and it
+// is an ALLOWLIST because the description declares none.
+//
+// AN OPERATOR CARRIES A `read_type` AND NEVER A `write_type`. That is a fact
+// about the SCHEMA rather than about Factorio: the capability exists and the
+// description records it in PROSE, on the operator itself or on the members
+// that yield the class. So this is the move buildOperator already makes for the
+// index KEY -- derive from what the description does state, write the
+// derivation down once, and let a test enumerate every operator at the pin so
+// that one added later fails here rather than being classified by a rule nobody
+// re-read.
+//
+// A `false` ROW IS AS LOAD-BEARING AS A `true` ONE. The other shape -- emit a
+// setter for every index operator and let the engine refuse the read-only ones
+// -- is correct at runtime and publishes `inventory.Set(1, stack)` as though
+// the API had such a thing. That is this repo's own "a skipped member is
+// skipped, never faked" pointing at a member that would be FAKED rather than
+// skipped, and a reader of the generated bindings reads them as the API's shape.
+//
+// The rows, with what the description says:
+//
+//   - LuaCustomTable -- TRUE. Its own operator prose says only "Access an
+//     element of this custom table", and the members that YIELD one say the
+//     rest: LuaSettings::global, LuaSettings::player_default,
+//     LuaPlayer::mod_settings and LuaSettings::get_player_settings each carry
+//     "individual settings can be changed by overwriting their ModSetting
+//     table" -- the last with the assignment written out as an example -- and
+//     LuaStyle::column_alignments says the same of an Alignment. Measured on
+//     Factorio 2.1.14 by BetterBeltBalancer: the write takes effect from any
+//     script context but on_init, persists through a save, stays per-save
+//     rather than reaching mod-settings.dat, and raises
+//     on_runtime_mod_setting_changed synchronously.
+//   - LuaFluidBox -- TRUE, and the operator says so itself: "Access, SET OR
+//     CLEAR a fluid box... Writing `nil` removes all fluid from the fluid box."
+//     Present at the 2.0.77 GA pin and absent at 2.1, which retired the pair in
+//     the fluid rework, so at that pin the row simply goes unasked.
+//   - LuaGuiElement -- FALSE. "Gets children by name." A child is added with
+//     LuaGuiElement::add and removed with ::destroy; assigning one has no
+//     meaning the description offers.
+//   - LuaInventory -- FALSE, and this is the row most likely to be
+//     re-litigated. `inv[1]` yields a LuaItemStack, which is a VIEW: the way to
+//     fill a slot is `inv[1].set_stack(...)`, which is bound. Nothing in the
+//     description says an inventory slot may be assigned.
+//   - LuaTransportLine -- FALSE, same shape and same reason; items reach a line
+//     through ::insert_at and ::insert_at_back.
+//
+// Being wrong in the TRUE direction costs a member whose calls come back
+// ERR_CALL_FAILED carrying the engine's own message -- which happens anyway,
+// because writability is per RECEIVER and not per class: settings.global takes
+// a write and settings.startup answers "LuaCustomTable is read only", and the
+// two are the same member id. Being wrong in the FALSE direction costs a
+// gesture a guest cannot make at all, which is what this entry is about. So a
+// row moves on evidence, not on symmetry.
+var indexWriteHalf = map[string]bool{
+	"LuaCustomTable":   true,
+	"LuaFluidBox":      true,
+	"LuaGuiElement":    false,
+	"LuaInventory":     false,
+	"LuaTransportLine": false,
 }
 
 // isCustomTable reports whether a type IS a LuaCustomTable at its top level.
@@ -864,6 +952,26 @@ func GenerateMembers(a *API) Report {
 			}
 			mem.HasValid = hasValid
 			r.Members = append(r.Members, mem)
+
+			// AND THE WRITE HALF, for the classes indexWriteHalf names. A
+			// second member over the same operator, like the handle variant of
+			// a LuaCustomTable attribute one loop up, and for the same reason:
+			// the two have different signatures and the read is still the right
+			// answer for a read.
+			//
+			// A class with no entry gets no setter and is NOT skipped -- a skip
+			// is what a member the generator tried and could not express, and
+			// this one it did not try. TestEveryIndexOperatorHasAWriteVerdict is
+			// what stops "no entry" being a way to forget one.
+			if op.Name == "index" && indexWriteHalf[c.Name] {
+				sm, err := buildIndexSetter(m, c.Name, op, hasLength)
+				if err != nil {
+					skip(c.Name, "operator "+op.Name+" (write)", err)
+					continue
+				}
+				sm.HasValid = hasValid
+				r.Members = append(r.Members, sm)
+			}
 		}
 	}
 
@@ -989,6 +1097,42 @@ func OperatorProse(class string, m Member, name string) []string {
 			"the ABI dispatches on the kind. Reading one entry costs one host",
 			"call, where the whole-dictionary attribute costs the whole table.",
 		}
+	case MemberIndexSet:
+		key := "the key"
+		if len(m.Args) > 0 && m.Args[0].Kind == KindU32 {
+			key = "a 1-BASED position"
+		}
+		out := []string{
+			name + " is this class's INDEX-ASSIGN operator: the Lua expression " +
+				lowerFirstWord(class) + "[k] = v, with " + key + " and the value",
+			"both arguments. The API description declares no write side for an",
+			"index operator -- it carries a read_type and nothing else -- so this",
+			"is emitted from an allowlist over what the description says in PROSE.",
+		}
+		// WHICH RECEIVERS ACCEPT IT is per receiver rather than per class, so
+		// the doc has to say it: a caller holding the wrong custom table gets a
+		// status and no other warning.
+		if class == "LuaCustomTable" {
+			out = append(out,
+				"",
+				"WRITABILITY IS THE TABLE'S, NOT THIS CLASS'S. The API says settings.global,",
+				"settings.player_default, player.mod_settings, settings.get_player_settings()",
+				"and style.column_alignments may be written -- by overwriting a whole",
+				"ModSetting table, which here is a tier-2 map with one \"value\" key -- and",
+				"every other custom table in the game is read-only. Writing one of those",
+				"answers ERR_CALL_FAILED carrying the engine's own \"LuaCustomTable is read",
+				"only\", and writing a key that is not a defined setting answers it with",
+				"\"doesn't contain key\". This is the only way a mod changes its own",
+				"runtime-global setting.")
+		}
+		if class == "LuaFluidBox" {
+			out = append(out,
+				"",
+				"Writing an ABSENT value clears the fluid box, which is the description's own",
+				"sentence: \"Writing nil removes all fluid from the fluid box.\" New fluid",
+				"boxes may not be added or removed this way, and the index must be in bounds.")
+		}
+		return out
 	case MemberLen:
 		return []string{
 			name + " is this class's LENGTH operator: the Lua expression #" +
@@ -1048,10 +1192,12 @@ func lowerFirstWord(class string) string {
 // TestOperatorKeyKinds enumerates all five so a pin that adds a sixth fails
 // rather than being classified by a rule nobody re-read.
 //
-// THERE IS NO WRITE HALF and that is the description's doing, not an omission:
-// an operator carries a read_type and never a write_type, so `fluidbox[1] = f`
-// -- which the prose says is legal -- is not a shape the API description
-// models. LuaFluidBox::set_filter and the ordinary members cover what it does.
+// THE WRITE HALF IS AN ALLOWLIST, and until 2026-08-24 there was none at all.
+// An operator carries a read_type and never a write_type, so `fluidbox[1] = f`
+// and `settings.global["x"] = {value = true}` -- both of which the description's
+// own PROSE says are legal -- were not shapes any generator could reach. See
+// indexWriteHalf, which is where that prose is read, and buildIndexSetter,
+// which is the member it produces.
 func buildOperator(m *typeMapper, class string, op Operator, hasLength bool) (Member, error) {
 	if !op.IsAttribute() {
 		// __call. Positional parameters and return values, exactly like a
@@ -1079,18 +1225,53 @@ func buildOperator(m *typeMapper, class string, op Operator, hasLength bool) (Me
 		return Member{Class: class, Name: op.Name, Kind: MemberLen,
 			Rets: []FieldSpec{val}, Optional: op.Optional}, nil
 	case "index":
-		key := FieldSpec{Name: "key", Kind: KindDyn}
-		if hasLength && val.Kind != KindDyn {
-			key.Kind = KindU32
-		}
 		return Member{Class: class, Name: op.Name, Kind: MemberIndex,
-			Args: []FieldSpec{key}, Rets: []FieldSpec{val},
+			Args: []FieldSpec{indexKey(val, hasLength)}, Rets: []FieldSpec{val},
 			Optional: op.Optional}, nil
 	}
 	// A fourth attribute-shaped operator would be a Lua metamethod this ABI has
 	// no expression for, and guessing which one is how a wrong binding ships.
 	return Member{}, fmt.Errorf("attribute-shaped class operator %q, which is "+
 		"neither __index nor __len", op.Name)
+}
+
+// indexKey derives the key FieldSpec from what indexing yields. Its two clauses
+// are buildOperator's own and are written up there; it is a function so that
+// the READ and the WRITE cannot derive the key differently -- a class indexed by
+// position for a get and by a tier-2 value for a set would be two questions
+// about one identity answered twice, which is the shape this repo has been
+// bitten by often enough to stop writing.
+func indexKey(val FieldSpec, hasLength bool) FieldSpec {
+	key := FieldSpec{Name: "key", Kind: KindDyn}
+	if hasLength && val.Kind != KindDyn {
+		key.Kind = KindU32
+	}
+	return key
+}
+
+// buildIndexSetter turns one index operator into the `obj[k] = v` member, for
+// the classes indexWriteHalf says have a write half.
+//
+// THE VALUE TYPE MIRRORS THE READ TYPE, INCLUDING ITS OPTIONALITY, and that is
+// the whole derivation. The description gives an operator exactly one type; a
+// write half that took a different one would be this generator inventing a
+// signature. Optionality carries for a reason rather than for symmetry:
+// LuaFluidBox's index is declared optional and its prose spends a sentence on
+// what an absent value MEANS ("Writing `nil` removes all fluid from the fluid
+// box"), so the presence byte is the clear gesture. M.call trims to the last
+// argument present, so an absent value reaches the engine as `obj[k] = nil`
+// with no special case anywhere.
+//
+// No return values: an assignment is not an expression in Lua, and a caller who
+// wants to know what is there now asks the read operator.
+func buildIndexSetter(m *typeMapper, class string, op Operator, hasLength bool) (Member, error) {
+	val, err := m.mapType(*op.ReadType, 1)
+	if err != nil {
+		return Member{}, err
+	}
+	val.Name, val.Optional = "value", op.Optional
+	return Member{Class: class, Name: op.Name, Kind: MemberIndexSet,
+		Args: []FieldSpec{indexKey(val, hasLength), val}}, nil
 }
 
 func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {

@@ -295,7 +295,7 @@ Both are TEXT properties and neither is reachable by building anything, so `Test
 ## `fklua docs` — **built**
 
 ```sh
-fklua docs --lang go   -o docs/     # 4255 members, ~770 KB of markdown at the 2.0.77 pin
+fklua docs --lang go   -o docs/     # 4257 members, ~770 KB of markdown at the 2.0.77 pin
 fklua docs --lang rust -o docs/
 ```
 

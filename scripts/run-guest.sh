@@ -43,7 +43,7 @@ case "$GUEST" in
          # this pattern because a line nobody prints is a line nobody checks:
          # both ran green in game for two milestones' worth of runs before
          # anyone looked in the raw log to find out.
-         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|multi-return)" ;;
+         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|index-assign|multi-return)" ;;
   # The collected guest. Its job here is the one thing no host-side test can
   # do: prove a mod whose guest COLLECTS ITS OWN HEAP loads and runs in the
   # real game. It logs `intact=32/32` alongside the tick counter, so a

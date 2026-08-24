@@ -76,7 +76,7 @@ If your project vendors an FkLua checkout and pins a different API version than 
 | `fk_abi.lua` | the handle table and marshalling layer the runtime requires |
 | `fk_api_gen.lua` | the member and event tables, pruned to the ids your guest provably calls |
 
-The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4257`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
+The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
 
 A mod with a data stage ships it through `data = "DIR"` under `[mod]` (or `fklua mod --include DIR`); the directory's contents are merged into the package, and a name collision with a generated file is an error at package time rather than a mod that is silently wrong in game. The packaged output itself is disposable: edit the guest or the manifest and run `fklua mod` again.
 

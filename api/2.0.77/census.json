@@ -22,9 +22,10 @@
   "operators_bound": 11,
   "global_functions_bound": 0,
   "custom_table_handle_members": 59,
+  "index_setter_members": 2,
   "table_shaped_concepts": 283,
   "pure_string_enum_concepts": 41,
-  "host_members_bound": 4257,
+  "host_members_bound": 4259,
   "host_members_skipped": 4,
   "host_skips_by_reason": {
     "callback parameter": 3,
@@ -34,7 +35,7 @@
   "fields_omitted_by_reason": {},
   "host_events_bound": 219,
   "event_scratch_bytes": 128,
-  "go_members_bound": 4255,
+  "go_members_bound": 4257,
   "go_members_deferred": 2,
   "go_deferrals_by_reason": {
     "Go name collides with another member of the class": 2
@@ -48,7 +49,7 @@
   "go_define_accessors": 1137,
   "go_event_payloads_deferred": 0,
   "go_event_deferrals_by_reason": {},
-  "rust_members_bound": 4255,
+  "rust_members_bound": 4257,
   "rust_members_deferred": 2,
   "rust_deferrals_by_reason": {
     "Rust name collides with another member of the class": 2

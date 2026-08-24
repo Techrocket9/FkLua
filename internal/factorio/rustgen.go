@@ -772,6 +772,11 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 		// would lose the name to it -- on LuaInventory, which is the whole of
 		// fluid-memory-storage's F-IDX. See gogen.go, same rename, same reason.
 		name = "get"
+	case m.Kind == MemberIndexSet:
+		// `set`, pairing with the `get` above. Bare for the reason gogen.go
+		// gives: an attribute-write member is `set_` plus a name and so cannot
+		// be this, and nothing else on these classes is called `set`.
+		name = "set"
 	case m.Kind == MemberLen:
 		name = "length"
 	case m.Kind == MemberSelf:

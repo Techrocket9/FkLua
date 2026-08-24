@@ -900,6 +900,17 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 		// for anyway. TestOperatorsBindOnEveryClassThatHasOne fails loudly if a
 		// future pin puts something else in the way.
 		name = "Get"
+	case m.Kind == MemberIndexSet:
+		// `Set`, pairing with the `Get` above, and BARE rather than suffixed:
+		// a class declares at most one index operator, so there is nothing to
+		// disambiguate against. The only thing it can collide with is an
+		// attribute-write member on the same class, and those are `Set` plus a
+		// name and so never bare -- or a method literally called `set`, which no
+		// pinned description puts on a class with a writable index operator.
+		// `seen` would defer this one if it did, and
+		// TestTheWritableIndexOperatorsGetASetter fails rather than letting the
+		// setter quietly vanish the way the operators themselves once did.
+		name = "Set"
 	case m.Kind == MemberLen:
 		name = "Length"
 	case m.Kind == MemberSelf:

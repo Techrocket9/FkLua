@@ -86,9 +86,9 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	}
 	sum := byKind[MemberCall] + byKind[MemberGet] + byKind[MemberSet] +
 		byKind[MemberGetEq] + byKind[MemberIndex] + byKind[MemberLen] +
-		byKind[MemberSelf] + byKind[MemberGetHandle]
+		byKind[MemberSelf] + byKind[MemberGetHandle] + byKind[MemberIndexSet]
 	if sum != host {
-		t.Errorf("the seven accounted kinds sum to %d against %d members: a kind "+
+		t.Errorf("the eight accounted kinds sum to %d against %d members: a kind "+
 			"exists that no line of the deferral report mentions", sum, host)
 	}
 
@@ -111,6 +111,10 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	if cen.CustomTableHandles != byKind[MemberGetHandle] {
 		t.Errorf("census.json: custom_table_handle_members %d, generator %d",
 			cen.CustomTableHandles, byKind[MemberGetHandle])
+	}
+	if cen.IndexSetters != byKind[MemberIndexSet] {
+		t.Errorf("census.json: index_setter_members %d, generator %d",
+			cen.IndexSetters, byKind[MemberIndexSet])
 	}
 	// The literals are counted and are counted APART. Zero would mean the row
 	// had quietly become decoration; a non-zero total that no reason accounts
