@@ -94,8 +94,25 @@ jobs:
 
       # Everything below only runs when there is genuinely something new, so a
       # quiet week costs one HTTP request and no PR noise.
+      #
+      # THIS STEP NOW TOUCHES THE PULLED VERSION, which is why it may fail and
+      # why failing must not block the PR. Since 2026-08-24 gen-bindings takes a
+      # census of every description the checkout owns rather than of the pin
+      # alone -- so the version this job just pulled arrives WITH its census
+      # instead of without one, which is what 2.1.12 sat committed and
+      # censusless for. The other half of that is that the generators now have
+      # to read a description no human has looked at yet, and a release they
+      # cannot absorb turns this step red where before it was untouched.
+      #
+      # A red run here is exactly what the Test step's comment below says about
+      # itself: the interesting failure, and the one a human most needs to see.
+      # So it is `continue-on-error` for the same reason, and its outcome joins
+      # the draft condition. The PR then carries a partially regenerated tree,
+      # which is a draft's job.
       - name: Regenerate bindings and census
         if: steps.check.outputs.new == 'true'
+        continue-on-error: true
+        id: regen
         run: ./bin/fklua gen-bindings
 
       - name: Classify the change
@@ -129,4 +146,4 @@ jobs:
             PR body; a reviewer reads the Breaking section and nothing else.
           body-path: /tmp/diff.md
           labels: api-upgrade
-          draft: ${{ steps.tests.outcome == 'failure' }}
+          draft: ${{ steps.tests.outcome == 'failure' || steps.regen.outcome == 'failure' }}

@@ -118,3 +118,68 @@ func TestTheRegenBotDoesNotReadTheHumanTableOrAskGitDiffForANewDirectory(t *test
 		}
 	}
 }
+
+// A RELEASE THE GENERATORS CANNOT ABSORB MUST STILL PRODUCE A PR, and since
+// 2026-08-24 the regenerate step is a place that can fail.
+//
+// gen-bindings takes a census of every description the checkout owns, so the
+// version this job has just pulled is one of its inputs -- which is the point
+// (a pulled version now arrives WITH a census, where 2.1.12 sat committed
+// without one for two pins) and is also a new way for the step to go red. The
+// Test step below it has been `continue-on-error` from the start for exactly
+// this reasoning: a red run means the generators met a description they could
+// not handle, which is the interesting failure and the one a human most needs
+// to see, so the PR carries it rather than being blocked by it. Leaving the
+// regenerate step able to abort the job would put the most interesting release
+// of the year in an email nobody reads.
+//
+// It is a text property for the same reason the two above are: nothing that can
+// be built reaches a workflow's failure semantics.
+func TestTheRegenBotCannotBeBlockedByARegenerationItCannotDo(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Skipf("not in a checkout: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "api-regen.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+
+	// The step that runs the generators over every committed description.
+	lines := strings.Split(text, "\n")
+	regen := -1
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if strings.Contains(line, "run:") && strings.Contains(line, "gen-bindings") {
+			regen = i
+		}
+	}
+	if regen < 0 {
+		t.Fatal("api-regen.yml no longer regenerates anything; the census of the " +
+			"version it pulls is what that step is now also for")
+	}
+
+	// Its own step block, back to the previous `- name:`.
+	start := 0
+	for i := regen; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "- name:") {
+			start = i
+			break
+		}
+	}
+	block := strings.Join(lines[start:regen+1], "\n")
+	if !strings.Contains(block, "continue-on-error: true") {
+		t.Errorf("api-regen.yml:%d the regenerate step can abort the job. It reads "+
+			"the freshly pulled description now, so a release the generators cannot "+
+			"absorb would produce no PR at all -- which is the week the bot exists "+
+			"for:\n%s", start+1, block)
+	}
+	if !strings.Contains(text, "steps.regen.outcome == 'failure'") {
+		t.Error("api-regen.yml opens a NON-draft PR after a regeneration that " +
+			"failed; the draft condition must carry steps.regen.outcome the way " +
+			"it carries steps.tests.outcome")
+	}
+}

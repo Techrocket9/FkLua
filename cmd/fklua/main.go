@@ -1787,11 +1787,11 @@ func runGenBindings(args []string) error {
 	// `api/<version>/`, and --into writes into a checkout that is being repinned
 	// FROM somewhere else -- writing one there would file this project's numbers
 	// under somebody else's tree, which is the same "building a mod must never
-	// write into the compiler" rule writeCensus already enforces one level up.
+	// write into the compiler" rule censusPass already enforces one level up.
 	if into != "" {
 		return nil
 	}
-	return writeCensus(a, check)
+	return censusPass(version, check)
 }
 
 // langArg reads --lang in BOTH spellings and reports the index to continue from.
@@ -1863,69 +1863,176 @@ func langList(langs map[string]bool) string {
 	return strings.Join(names, ", ")
 }
 
-// writeCensus rewrites -- or checks -- the committed census beside the API
-// description it counts.
+// censusPass rewrites -- or checks -- the committed census beside EVERY API
+// description this working directory owns, whatever pin was invoked.
 //
 // It rides along with gen-bindings on purpose. The two are the same act: a
 // version bump regenerates the bindings and moves the numbers, and splitting
-// them into two commands is how one of them gets forgotten.
+// them into two commands is how one of them gets forgotten. That is also why
+// there is no `fklua census` subcommand: a second command writing the same file
+// is the split this file's own header argues against.
 //
-// BUT IT IS WRITTEN ONLY WHERE ITS INPUT LIVES. The bindings resolve against
-// the working directory and the census used to resolve against the EXECUTABLE,
-// so `fklua gen-bindings` inside a mod project rewrote api/<version>/census.json
-// in whichever FkLua checkout built the binary -- invisible for exactly as long
-// as that census was current. One command, one root: if this working directory
-// has no api/<version>/runtime-api.json of its own, then the description being
-// counted belongs to somebody else's tree and the census is not ours to write.
-func writeCensus(a *factorio.API, check bool) error {
+// IT IS WRITTEN ONLY WHERE ITS INPUT LIVES. The bindings resolve against the
+// working directory and the census used to resolve against the EXECUTABLE, so
+// `fklua gen-bindings` inside a mod project rewrote api/<version>/census.json in
+// whichever FkLua checkout built the binary -- invisible for exactly as long as
+// that census was current. One command, one root: a working directory with no
+// api/ of its own owns no description, and the census is not its to write.
+//
+// AND EVERY DESCRIPTION THE ROOT OWNS, not only the invoked pin, which is the
+// 2026-08-24 fix. A census is taken by whatever generation last ran against its
+// description, and only the default pin's ever ran -- so the moment the
+// generators grew a row, every OTHER committed description's census was stale,
+// with no command anywhere that could repair it: regenerating from a mod project
+// is refused by the paragraph above, and regenerating from the checkout wrote
+// the default pin's file and nothing else. A downstream mod moving its pin onto
+// one of those versions then failed `gen-bindings --check` against a file it
+// could not write and upstream could not refresh (BetterBeltBalancer, gap 24;
+// it hit this the day the index-assign member kind added `index_setter_members`,
+// and had to revert the pin move).
+//
+// So ownership is per DESCRIPTION rather than per invocation. The checkout owns
+// three descriptions and leaves all three current; a mod project owns none and
+// leaves all of them alone. Staleness is then not a thing to remember, which is
+// the only form of "remember to re-run it" this repo has ever made stick.
+//
+// The cost is one full generation per extra description on a command that
+// already does two, and it is paid where the descriptions are: about 0.3 s per
+// version in this checkout, nothing at all in a mod project.
+func censusPass(pin string, check bool) error {
+	owned := ownedAPIVersions()
+	if len(owned) == 0 {
+		return censusNotOurs(pin, check)
+	}
+
+	var stale []string
+	for _, v := range owned {
+		path := factorio.CensusPath("api", v)
+		a, err := factorio.LoadAPI(filepath.Join("api", v, "runtime-api.json"))
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		c, err := factorio.TakeCensus(a)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		next, err := c.JSON()
+		if err != nil {
+			return err
+		}
+		old, loadErr := factorio.LoadCensus(path)
+
+		if check {
+			if loadErr != nil {
+				fmt.Fprintf(os.Stderr, "  %s: %v\n", path, loadErr)
+				stale = append(stale, v)
+				continue
+			}
+			lines := c.Diff(old)
+			if len(lines) == 0 {
+				fmt.Printf("%s is up to date\n", path)
+				continue
+			}
+			for _, l := range lines {
+				fmt.Fprintf(os.Stderr, "  %s: %s\n", v, l)
+			}
+			stale = append(stale, v)
+			continue
+		}
+
+		if loadErr == nil {
+			if lines := c.Diff(old); len(lines) > 0 {
+				fmt.Printf("census moved (%s):\n", v)
+				for _, l := range lines {
+					fmt.Printf("  %s\n", l)
+				}
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, next, 0o644); err != nil {
+			return err
+		}
+	}
+	if len(stale) > 0 {
+		// Every stale version in one error, because they go stale TOGETHER --
+		// one generator row moves all of them -- and a message naming the first
+		// would have a reader fix it and run again to meet the second.
+		return fmt.Errorf("the census is out of date for %s; run `fklua gen-bindings` "+
+			"here, which refreshes every census this checkout owns",
+			strings.Join(stale, ", "))
+	}
+	return nil
+}
+
+// ownedAPIVersions lists the descriptions committed under THIS working
+// directory, sorted, so that a pass over them is the same on every machine.
+//
+// A version directory with no runtime-api.json in it is not owned: `api pull`
+// writes the description first, and half a pull is not a thing to take a census
+// of.
+func ownedAPIVersions() []string {
+	ents, err := os.ReadDir("api")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		if e.IsDir() && fileExists(filepath.Join("api", e.Name(), "runtime-api.json")) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// censusNotOurs is what a mod project gets: a notice, never a failure.
+//
+// A STALE CENSUS IN THE COMPILER IS NOT A DEFECT OF THE MOD, and until
+// 2026-08-24 `--check` here failed on one. Nothing downstream reads a census --
+// not `mod`, not `lock`, not either generator -- so it is an FkLua-internal
+// consistency artifact and a mod's own gate has no business failing on it. The
+// failure was also unfixable by construction: the write half of this function
+// declines to write from a mod project, so no invocation in that directory could
+// ever make the check pass (BetterBeltBalancer, gap 24).
+//
+// It is still SAID, at notice level and only when it is really stale, because
+// this is the one place a downstream author learns that the toolchain they are
+// building against is behind its own numbers -- which is how that gap got
+// reported in the first place. It names the checkout and the command, so the
+// report can be made without a round trip.
+func censusNotOurs(pin string, check bool) error {
+	path := factorio.CensusPath(apiDir(), pin)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	root, _ := filepath.Abs(filepath.Dir(filepath.Dir(path)))
+
+	a, err := factorio.LoadAPI(apiPath(pin))
+	if err != nil {
+		return nil // gen-bindings already loaded it; nothing to add here.
+	}
 	c, err := factorio.TakeCensus(a)
 	if err != nil {
-		return err
-	}
-	next, err := c.JSON()
-	if err != nil {
-		return err
-	}
-	path := factorio.CensusPath(apiDir(), a.ApplicationVersion)
-	ours := fileExists(filepath.Join("api", a.ApplicationVersion, "runtime-api.json"))
-	if ours {
-		path = factorio.CensusPath("api", a.ApplicationVersion)
-	}
-	if !check && !ours {
-		abs, _ := filepath.Abs(path)
-		fmt.Printf("not writing the census: %s counts an API description that "+
-			"lives outside this directory, and building a mod does not write "+
-			"into the compiler\n", abs)
 		return nil
 	}
-
 	old, loadErr := factorio.LoadCensus(path)
-	if check {
-		if loadErr != nil {
-			return fmt.Errorf("%s: %w (run `fklua gen-bindings`)", path, loadErr)
-		}
-		if lines := c.Diff(old); len(lines) > 0 {
-			for _, l := range lines {
-				fmt.Fprintf(os.Stderr, "  %s\n", l)
-			}
-			return fmt.Errorf("%s is out of date; run `fklua gen-bindings`", path)
-		}
-		fmt.Printf("%s is up to date\n", path)
+	if loadErr == nil && len(c.Diff(old)) == 0 {
 		return nil
 	}
 
-	if loadErr == nil {
-		if lines := c.Diff(old); len(lines) > 0 {
-			fmt.Printf("census moved:\n")
-			for _, l := range lines {
-				fmt.Printf("  %s\n", l)
-			}
-		}
+	verb := "not writing"
+	if check {
+		verb = "not checking"
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, next, 0o644)
+	fmt.Printf("%s a census: this directory owns no API description, and building "+
+		"a mod does not write into the compiler.\n", verb)
+	fmt.Printf("  NOTICE: %s is behind the generator that just ran. Nothing here "+
+		"reads it and your build is unaffected; it is the compiler's own "+
+		"bookkeeping. Refresh it with `fklua gen-bindings` run in %s.\n", abs, root)
+	return nil
 }
 
 // deferSummary says what is missing AND what would fix the most of it.

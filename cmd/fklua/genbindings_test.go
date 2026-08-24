@@ -161,6 +161,189 @@ func TestGenBindingsStillWritesTheCensusInTheCompilersOwnCheckout(t *testing.T) 
 	}
 }
 
+// ownedAPITree makes a working directory shaped like the COMPILER's checkout:
+// an api/ of its own, holding a description per name given.
+//
+// Every directory symlinks the same description, which is the point rather than
+// a shortcut: what is under test is "one census per directory this root owns",
+// and using one description keeps the fixture independent of which extra
+// versions happen to be committed here while still costing a real generation
+// per directory.
+func ownedAPITree(t *testing.T, versions ...string) string {
+	t.Helper()
+	root := moduleRoot(t)
+	work := t.TempDir()
+	for _, v := range versions {
+		dst := filepath.Join(work, "api", v)
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(
+			filepath.Join(root, "api", factorio.DefaultAPIVersion, "runtime-api.json"),
+			filepath.Join(dst, "runtime-api.json")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return work
+}
+
+// staleCensus writes a census that is a generation behind: real JSON, one count
+// short. That is what the shape being tested actually looks like -- a generator
+// grew a row, and the file beside a description nobody regenerated did not.
+func staleCensus(t *testing.T, root, path string) {
+	t.Helper()
+	c, err := factorio.LoadCensus(factorio.CensusPath(filepath.Join(root, "api"),
+		factorio.DefaultAPIVersion))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.IndexSetters--
+	c.HostMembers--
+	b, err := c.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A CENSUS GOES STALE FOR EVERY VERSION AT ONCE, so the pass covers every
+// version this root owns rather than the one that happens to be pinned.
+//
+// The generators are one code path serving N descriptions, so a row they gain
+// moves every committed version's numbers on the same day. Only the default
+// pin's file was ever rewritten, which left the rest behind with no command
+// anywhere able to repair them: from a mod project the write is refused by
+// design, and from the checkout it wrote the default pin's file and nothing
+// else. BetterBeltBalancer hit exactly that moving its pin to a committed
+// 2.1.14 the day the index-assign member kind landed, and had to revert.
+func TestGenBindingsRefreshesEveryCensusTheCheckoutOwns(t *testing.T) {
+	const other = "9.9.9"
+	root := moduleRoot(t) // before the chdir; it is a relative walk.
+	work := ownedAPITree(t, factorio.DefaultAPIVersion, other)
+	// One version behind, one with no census at all -- which is how a pulled
+	// description arrives, and is the state 2.1.12 was committed in.
+	staleCensus(t, root, factorio.CensusPath(filepath.Join(work, "api"), other))
+	t.Chdir(work)
+
+	if err := runGenBindings([]string{"--lang=go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	want, err := os.ReadFile(factorio.CensusPath(
+		filepath.Join(root, "api"), factorio.DefaultAPIVersion))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{factorio.DefaultAPIVersion, other} {
+		got, err := os.ReadFile(factorio.CensusPath(filepath.Join(work, "api"), v))
+		if err != nil {
+			t.Errorf("%s: the census beside a description this root owns: %v", v, err)
+			continue
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: the census was not refreshed at the invoked pin's expense", v)
+		}
+	}
+
+	// ...and the gate over the same tree now passes, which is the half that
+	// says the repair is complete rather than merely written.
+	if err := runGenBindings([]string{"--lang=go", "--check"}); err != nil {
+		t.Errorf("--check after a regeneration: %v", err)
+	}
+}
+
+// AND THE GATE SEES A SIBLING VERSION, which is where this defect should have
+// been caught and was not. It names every stale version, because they go stale
+// together and a message naming the first would have a reader fix it, re-run,
+// and meet the second.
+func TestTheCensusGateNamesEveryStaleVersion(t *testing.T) {
+	const a, b = "9.9.8", "9.9.9"
+	root := moduleRoot(t) // before the chdir; it is a relative walk.
+	work := ownedAPITree(t, factorio.DefaultAPIVersion, a, b)
+	t.Chdir(work)
+
+	// A tree in which everything is current, and then a generator row appears:
+	// the invoked pin's own census is rewritten by the run that follows, and
+	// the two siblings are left as they were. A gate that only ever looked at
+	// the invoked pin passes this tree.
+	if err := runGenBindings([]string{"--lang=go"}); err != nil {
+		t.Fatal(err)
+	}
+	staleCensus(t, root, factorio.CensusPath(filepath.Join(work, "api"), a))
+	staleCensus(t, root, factorio.CensusPath(filepath.Join(work, "api"), b))
+
+	err := runGenBindings([]string{"--lang=go", "--check"})
+	if err == nil {
+		t.Fatal("--check passed over two stale censuses")
+	}
+	for _, v := range []string{a, b} {
+		if !bytes.Contains([]byte(err.Error()), []byte(v)) {
+			t.Errorf("the refusal does not name %s: %v", v, err)
+		}
+	}
+}
+
+// A STALE CENSUS IN THE COMPILER IS NOT A DEFECT OF THE MOD.
+//
+// This is BetterBeltBalancer's gap 24 from the side it was reported on: a mod
+// pinning a committed non-default version, whose census in the FkLua checkout is
+// a generation behind. `--check` used to fail here and name a command that could
+// not fix it -- the write half refuses to write into the compiler, so no
+// invocation in this directory could ever make the check pass, and the pin move
+// had to be reverted.
+//
+// Nothing downstream reads a census: not `mod`, not `lock`, not either
+// generator. So the mod's own gate has no business failing on one, and what it
+// does instead is say so at notice level -- which is how this got reported.
+func TestAModProjectDoesNotFailOnTheCompilersStaleCensus(t *testing.T) {
+	apiDir := borrowedAPIDir(t)
+	census := factorio.CensusPath(apiDir, factorio.DefaultAPIVersion)
+	staleCensus(t, moduleRoot(t), census)
+	before, err := os.ReadFile(census)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(census)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proj := modProject(t, goOnlyTOML)
+	t.Setenv("FKLUA_API_DIR", apiDir)
+	t.Chdir(proj)
+
+	// The mod's own bindings have to exist for --check to be about anything
+	// else, so generate them first and then gate them.
+	if err := runGenBindings([]string{"--lang=go"}); err != nil {
+		t.Fatalf("generating a mod's bindings against a stale compiler census: %v", err)
+	}
+	if err := runGenBindings([]string{"--lang=go", "--check"}); err != nil {
+		t.Fatalf("--check failed on the COMPILER's census, which this project "+
+			"cannot write and does not read: %v", err)
+	}
+
+	// And neither half touched it, so the notice really is only a notice.
+	after, err := os.ReadFile(census)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("a mod project rewrote the compiler's census.json")
+	}
+	st2, err := os.Stat(census)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st2.ModTime().Equal(st.ModTime()) {
+		t.Error("a mod project WROTE the compiler's census.json (mtime moved)")
+	}
+}
+
 // `fklua init --lang go` writes lang = ["go"] and then prints
 // "Next: `fklua gen-bindings`". Following that advice used to drop an unwanted
 // guest/rust/ into a Go-only project, because gen-bindings defaulted to "all"

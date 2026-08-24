@@ -64,6 +64,8 @@ Every generated binding set also exports a **pin stamp**, one exported function 
 
 If your project vendors an FkLua checkout and pins a different API version than the checkout's committed bindings carry, `fklua gen-bindings --into DIR` regenerates the checkout's bindings at your project's pin, in every language the manifest declares.
 
+Changing `api` in the manifest is the whole of a pin move: `fklua gen-bindings && fklua lock`, both run in your project. Two files that look like they belong to that move do not. `api/<version>/runtime-api.json` is part of the compiler, so it is read from the FkLua installation and never copied into your project; and `api/<version>/census.json` beside it is the compiler's own record of what its generators made of that description, which nothing in a mod build reads. Neither is written from a mod project, and neither can make `gen-bindings --check` fail there. If the census in your FkLua installation is behind the generator that just ran, you get one notice saying so and naming the checkout: it is a fact about the toolchain, worth reporting upstream and harmless to your build.
+
 ## The packaged mod
 
 `fklua mod your-guest.wasm` writes `<name>_<version>/` (or a zip with `--zip`), which Factorio loads like any other mod:

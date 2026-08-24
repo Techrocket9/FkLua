@@ -23,6 +23,16 @@ import (
 //	fklua gen-bindings          # rewrites the bindings AND the census
 //	git diff                    # one data diff saying exactly what moved
 //
+// ONE COMMAND, EVERY DESCRIPTION. That command writes bindings at one pin and a
+// census for every version the checkout owns, which is not symmetry for its own
+// sake: the generators are ONE code path serving N descriptions, so a row they
+// gain moves every committed version's numbers on the same day. Writing only the
+// invoked pin's file left the rest behind with nothing saying so, and a mod
+// project pinning one of those versions then failed `gen-bindings --check` on a
+// file it may not write. See cmd/fklua's censusPass for the whole of it -- and
+// note that it is also why there is no `fklua census` subcommand: a second
+// command writing this file is exactly the split the paragraph above is about.
+//
 // The pins are kept rather than loosened to floors, because a shrinking API is
 // news too: 2.1.12 REMOVED two operators, which an equality check catches and a
 // ">= 9" would not.
