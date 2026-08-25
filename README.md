@@ -117,7 +117,9 @@ The scaffold uses the two simplest hooks: `fk_on_init` once per save and `fk_on_
 | `fkapi.LuaEntity{Object: e.Entity}` | a raw handle out of a payload, wrapped so its methods are callable |
 | `fkapi.DefinesDirectionEast()` | a `defines` value asked for by name, because its number is per Factorio build |
 
-`guest/go/examples/` holds nineteen more, each aimed at one thing: `array` and `dict` for marshalling, `callback` for commands and remote interfaces, `retain` for a handle that outlives its event, `gcsave` for the collector across a save, `migrate` for a rebuilt guest, and [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](guest/go/fkipc/README.md). `guest/rust/examples/` mirrors eight of them line for line.
+`guest/go/examples/` holds twenty more, each aimed at one thing: `array` and `dict` for marshalling, `callback` for commands and remote interfaces, `retain` for a handle that outlives its event, `gcsave` for the collector across a save, `migrate` for a rebuilt guest, [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](guest/go/fkipc/README.md), and [`datastage`](guest/go/examples/datastage/main.go) for a mod's settings and data stages. `guest/rust/examples/` mirrors nine of them line for line.
+
+A mod's **settings and data stages** can be a guest too, as a second wasm module packaged beside the control one. It defines prototypes, reads and patches `data.raw`, and clones a base prototype without marshalling it through the guest, which is what keeps the untouched fields exactly as the source shipped them. There is no runtime API at those stages, so a data module imports `fkdata` and never `fkapi`, and packaging refuses one that does. See [`docs/data-stage.md`](docs/data-stage.md).
 
 ---
 
@@ -130,6 +132,7 @@ Documentation for mod authors lives under [`docs/`](docs/):
 | [`docs/generated-files.md`](docs/generated-files.md) | every file `fklua init`, `gen-bindings`, `lock` and `mod` write: which are yours to edit, which are regenerated, and how |
 | [`docs/memory.md`](docs/memory.md) | guest memory, the garbage collector and why Rust has one, the tuning knobs, the leaking opt-out, `--persist`, and migrating a recompiled guest |
 | [`docs/factorio-api.md`](docs/factorio-api.md) | calling the API: handles, events, filters and field masks, commands and remote interfaces, `defines`, and the version axes |
+| [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` |
 | [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod |
 
 The `agents/` directory holds the maintainer design notes; see [Working on FkLua itself](#working-on-fklua-itself).
