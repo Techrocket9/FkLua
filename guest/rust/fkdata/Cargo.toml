@@ -1,0 +1,20 @@
+[package]
+name = "fkdata"
+version = "0.1.0"
+edition = "2021"
+description = "Guest-side half of Factorio's settings and data stages"
+
+[lib]
+crate-type = ["rlib"]
+
+# THE ALLOCATOR AND THE LOG COME FROM `fk`, and that is not a convenience.
+# `#[global_allocator]` may be declared exactly once in a module graph, and
+# `fk` is where this workspace declares it -- so a data guest depends on `fk`
+# for the same reason every other guest does, and gets fk_alloc / fk_free /
+# fk_scratch_base / fk_scratch_size, which fk_data.lua binds by name.
+#
+# What it must NOT depend on is `fkapi`. A data stage has no runtime API, and
+# `fklua mod` refuses a data module that imports one -- see
+# internal/factorio/stage.go's CheckDataModule.
+[dependencies]
+fk = { path = "../fk" }

@@ -19,6 +19,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "datastage"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkdata",
+]
+
+[[package]]
 name = "demo-circle"
 version = "0.1.0"
 dependencies = [
@@ -45,6 +53,13 @@ dependencies = [
 [[package]]
 name = "fkapi"
 version = "0.1.0"
+
+[[package]]
+name = "fkdata"
+version = "0.1.0"
+dependencies = [
+ "fk",
+]
 
 [[package]]
 name = "fkgc"

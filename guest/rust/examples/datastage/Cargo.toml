@@ -1,0 +1,12 @@
+[package]
+name = "datastage"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "datastage"
+crate-type = ["cdylib"]
+
+[dependencies]
+fk = { path = "../../fk" }
+fkdata = { path = "../../fkdata" }
