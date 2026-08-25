@@ -69,6 +69,8 @@ err = fkapi.Log(fkapi.OfArray(
 
 The empty first element is a localised string's concatenate-the-rest form, and what appears in `factorio-current.log` is the message followed by the engine's own `Duration: 12.368959ms`. For a plain string with no localisation and no object in it, `fk.Log` is one import and no host call.
 
+A duration is a wall clock, so it differs on every machine that runs the same tick. Logging one is safe, because the log file is not part of the game's lockstep state. Letting one influence what the mod does next is not: two clients timing the same work read different numbers, and a decision made from either desyncs a multiplayer game. Time things, log the timings, and never branch on them.
+
 `localised_print` writes to standard output rather than to the log file, for a tool that launched the game as a child process. `table_size` counts the keys of a plain Lua table; it does not work on a `LuaCustomTable`, whose `Length()` operator answers that question without the table crossing at all.
 
 ## When a call fails
