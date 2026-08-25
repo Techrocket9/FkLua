@@ -71,6 +71,20 @@ The empty first element is a localised string's concatenate-the-rest form, and w
 
 `localised_print` writes to standard output rather than to the log file, for a tool that launched the game as a child process. `table_size` counts the keys of a plain Lua table; it does not work on a `LuaCustomTable`, whose `Length()` operator answers that question without the table crossing at all.
 
+## When a call fails
+
+A host call returns a status and never raises into the guest, so a binding that fails hands back an error describing the kind of failure and not the engine's own words. `fk.LastError()` (`fk::last_error()` in Rust) is those words:
+
+```go
+if _, err := something(); err != nil {
+    fk.Log("refused: " + fk.LastError())
+}
+```
+
+It describes the call that just returned. The slot is cleared as each host call begins, so it is empty after a call that succeeded rather than carrying an earlier failure, and it should be read where the error is still in hand. The Rust form returns bytes rather than a string, because a Lua string is an arbitrary byte sequence and the engine promises nothing about encoding.
+
+Log it, do not branch on it. The wording is an engine implementation detail a point release may change, and a mod that behaved differently because of a wording would behave differently on two versions of Factorio. A test asserting the exact text is the honest exception: an engine that stops refusing something should fail a suite rather than quietly widen it.
+
 ## Events
 
 Subscriptions are made from `_initialize` (Go: `func init()`; Rust: `_initialize`), the one place they may go: `control.lua` runs it on every load, while `script.on_init` fires only when a save is created, so a subscription made in `fk_on_init` vanishes on the first reload with no error.

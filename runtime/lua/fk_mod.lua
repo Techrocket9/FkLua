@@ -136,6 +136,37 @@ local imports = {
     -- result. Packed rather than passed as parameters because remote.call is
     -- variadic and this import is not allowed to be.
     remote_call = function(callp, retp) return remote_call(callp, retp) end,
+    -- last_error(ptr, cap) -> len: WHAT THE ENGINE SAID when the last host call
+    -- came back ERR_CALL_FAILED.
+    --
+    -- A status is an i32 and a message is not, so the two cannot travel back
+    -- together. fk_abi.lua has recorded the message since the ABI existed and
+    -- nothing carried it across, so a guest could see that the API refused and
+    -- never why. Downstream asserts the engine's EXACT refusal text as a
+    -- tripwire -- "on_player_mined_entity (ID 76) (76) can't be raised through
+    -- script." -- because the day Factorio allows that raise, a check that only
+    -- read ok=false would go on passing over a path that had silently become
+    -- testable for real.
+    --
+    -- IT RETURNS THE FULL LENGTH AND COPIES AT MOST cap BYTES, which is the
+    -- ordinary two-call shape: a caller with a fixed buffer learns from the
+    -- return whether it saw the whole message and can ask again with room.
+    -- ZERO means the last call did not fail -- M.call clears the slot on the way
+    -- in, so this describes THAT call rather than the session.
+    --
+    -- A pointer the guest does not own traps, exactly as the guest's own
+    -- out-of-bounds store would: fk_wstr checks the whole span before writing a
+    -- byte, which is the rule every marshalled string already obeys.
+    last_error = function(ptr, cap)
+      local s = H.last_error()
+      local n = #s
+      if n == 0 or ptr == nil or ptr == 0 or cap == nil or cap == 0 then
+        return n
+      end
+      if n > cap then s = s:sub(1, cap) end
+      instance.memio.wstr(ptr, s)
+      return n
+    end,
   },
 
   env = {

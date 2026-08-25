@@ -14,8 +14,9 @@
 //
 // # What is here, and what is next door
 //
-// This package is the boundary itself: logging, and the build flags a guest
-// cannot work without. THE FACTORIO API IS NOT HERE -- it lives in
+// This package is the boundary itself: logging, batching, the message behind a
+// failed host call, and the build flags a guest cannot work without. THE
+// FACTORIO API IS NOT HERE -- it lives in
 // [github.com/Techrocket9/fklua/guest/go/fkapi], which is generated from the
 // game's own runtime-api.json and committed. That is where `game`, entities,
 // events and the handle table are. A guest almost always imports both.
@@ -99,6 +100,69 @@ func hostPrint(ptr, length uint32)
 
 //go:wasmimport fk defer
 func hostDefer() uint32
+
+//go:wasmimport fk last_error
+func hostLastError(ptr, capacity uint32) uint32
+
+// errScratch is where LastError asks the host to put the message.
+//
+// Package-level rather than a local, for the reason every block in the
+// generated bindings is: `var b [256]byte` whose address is taken does NOT stay
+// on the guest's stack under TinyGo -- the ptrtoint that makes an address
+// crossable defeats LLVM's promotion -- so a local would be a heap allocation
+// per call, permanent under -gc=leaking. This is linear memory the module
+// already has, and TinyGo removes it from a guest that never calls LastError.
+//
+// 256 bytes because engine refusals are sentences: the longest this repo has met
+// is about seventy characters. A longer one is not truncated; it costs a second
+// host call. See below.
+var errScratch [256]byte
+
+// LastError is what Factorio said when the last host call failed.
+//
+// A status is an i32 and a message is not, so a binding that returns an error
+// can only tell you the KIND of failure -- "the Factorio API raised". This is
+// the sentence it raised WITH, which is the difference between knowing that a
+// call was refused and knowing why:
+//
+//	if err := something(); err != nil {
+//		fk.Log("refused: " + fk.LastError())
+//	}
+//
+// IT DESCRIBES THE CALL THAT JUST RETURNED. The host clears the slot as each
+// host call begins, so this is empty after a call that succeeded rather than
+// carrying some earlier tick's failure -- read it immediately, where the error
+// is still in hand.
+//
+// The bytes are the engine's own and are not promised to be UTF-8; Go's string
+// is a byte sequence, so nothing is rewritten on the way. The message is copied,
+// so what comes back outlives the next host call.
+//
+// It is DIAGNOSTIC. Log it; do not branch on it. The text is an engine
+// implementation detail that a point release may reword, and a mod that behaved
+// differently because of a wording is a mod that behaves differently on two
+// Factorios. A TEST asserting the exact text is the honest exception, and is
+// what this exists for: an engine that stops refusing something should fail a
+// suite rather than quietly widen it.
+func LastError() string {
+	n := hostLastError(uint32(uintptr(unsafe.Pointer(&errScratch[0]))),
+		uint32(len(errScratch)))
+	if n == 0 {
+		return ""
+	}
+	if n <= uint32(len(errScratch)) {
+		return string(errScratch[:n])
+	}
+	// THE RETURN IS THE FULL LENGTH RATHER THAN WHAT WAS COPIED, which is what
+	// makes a fixed buffer safe: a message that did not fit is asked for again
+	// with room, instead of silently arriving short. Two host calls for a
+	// message over 256 bytes and none for the ones a guest actually meets.
+	b := make([]byte, n)
+	if m := hostLastError(uint32(uintptr(unsafe.Pointer(&b[0]))), n); m < n {
+		return string(b[:m])
+	}
+	return string(b)
+}
 
 // Defer asks for the guest's fk_on_deferred export to be called ONCE on the
 // next tick.

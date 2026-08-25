@@ -84,6 +84,63 @@ pub fn print(s: &str) {
 extern "C" {
     #[link_name = "defer"]
     fn fk_defer() -> u32;
+    #[link_name = "last_error"]
+    fn fk_last_error(ptr: u32, cap: u32) -> u32;
+}
+
+/// What Factorio said when the last host call failed.
+///
+/// A status is an `i32` and a message is not, so a binding that returns
+/// `Err(Status)` can only tell you the KIND of failure. This is the sentence the
+/// engine raised WITH, which is the difference between knowing that a call was
+/// refused and knowing why:
+///
+/// ```ignore
+/// if something().is_err() {
+///     fk::log(&format!("refused: {}", String::from_utf8_lossy(&fk::last_error())));
+/// }
+/// ```
+///
+/// IT DESCRIBES THE CALL THAT JUST RETURNED. The host clears the slot as each
+/// host call begins, so this is empty after a call that succeeded rather than
+/// carrying some earlier tick's failure -- read it immediately, where the error
+/// is still in hand. An empty `Vec` means the last call did not fail.
+///
+/// # Why `Vec<u8>` and not `String`
+///
+/// A Lua string is an arbitrary byte sequence and a Rust `String` is not. The
+/// generated bindings learned that the expensive way -- 738 readers were
+/// `from_utf8_lossy`, which rewrites every byte outside UTF-8 and changes the
+/// length while it does it -- so nothing here hands back a type whose invariant
+/// the engine never promised. Call `String::from_utf8_lossy` yourself if a
+/// display string is what you want; the bytes are what arrived.
+///
+/// # It is diagnostic
+///
+/// Log it; do not branch on it. The text is an engine implementation detail that
+/// a point release may reword, and a mod that behaved differently because of a
+/// wording is a mod that behaves differently on two Factorios. A TEST asserting
+/// the exact text is the honest exception, and is what this exists for.
+pub fn last_error() -> alloc::vec::Vec<u8> {
+    // A STACK BUFFER, unlike the Go side's static one: rustc keeps an array
+    // whose address is taken on the stack, where TinyGo's ptrtoint defeats the
+    // promotion and forces a heap allocation. 256 bytes because engine refusals
+    // are sentences; a longer one costs a second call rather than being cut.
+    let mut buf = [0u8; 256];
+    let n = unsafe { fk_last_error(buf.as_mut_ptr() as u32, buf.len() as u32) } as usize;
+    if n == 0 {
+        return alloc::vec::Vec::new();
+    }
+    if n <= buf.len() {
+        return buf[..n].to_vec();
+    }
+    // THE RETURN IS THE FULL LENGTH RATHER THAN WHAT WAS COPIED, which is what
+    // makes a fixed buffer safe: a message that did not fit is asked for again
+    // with room, instead of silently arriving short.
+    let mut big = alloc::vec![0u8; n];
+    let m = unsafe { fk_last_error(big.as_mut_ptr() as u32, n as u32) } as usize;
+    big.truncate(core::cmp::min(m, n));
+    big
 }
 
 /// Asks for this guest's `fk_on_deferred` export to be called **once** on the

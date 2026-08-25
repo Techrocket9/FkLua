@@ -309,6 +309,22 @@ pub extern "C" fn fk_on_tick(tick: u32) {
                     "index-assign: settings.global[undefined] refused {}",
                     refused
                 ));
+                // ...AND WHAT THE ENGINE SAID, which the status alone cannot
+                // carry. A host call returns an i32, so the Err says only that
+                // the API raised; fk::last_error is the sentence it raised
+                // WITH, and here that is Factorio's own "LuaCustomTable doesn't
+                // contain key ...". A downstream suite asserts exactly this kind
+                // of text as a tripwire, so that an engine which STOPS refusing
+                // something fails a run instead of quietly widening it.
+                //
+                // Bytes, not a String: a Lua string is an arbitrary byte
+                // sequence, so the lossy conversion is done HERE and named.
+                if refused {
+                    fk::log(&format!(
+                        "last-error: [{}]",
+                        alloc::string::String::from_utf8_lossy(&fk::last_error())
+                    ));
+                }
             }
             Err(e) => fk::log(&format!(
                 "settings.global as a handle failed: {}",

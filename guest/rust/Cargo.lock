@@ -93,3 +93,11 @@ dependencies = [
  "fk",
  "fkipc",
 ]
+
+[[package]]
+name = "lasterror"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkapi",
+]

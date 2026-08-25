@@ -247,6 +247,16 @@ func onTick(tick uint32) {
 			)
 			fk.Log("index-assign: settings.global[undefined] refused " +
 				strconv.FormatBool(err != nil))
+			// ...AND WHAT THE ENGINE SAID, which the status alone cannot carry.
+			// A host call returns an i32, so `err` says only that the API
+			// raised; fk.LastError is the sentence it raised WITH, and here that
+			// is Factorio's own "LuaCustomTable doesn't contain key ...". A
+			// downstream suite asserts exactly this kind of text as a tripwire,
+			// so that an engine which STOPS refusing something fails a run
+			// instead of quietly widening it.
+			if err != nil {
+				fk.Log("last-error: [" + fk.LastError() + "]")
+			}
 		}
 
 		// A GLOBAL FUNCTION, and the one that made the kind worth building:

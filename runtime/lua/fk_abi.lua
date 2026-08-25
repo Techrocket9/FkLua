@@ -362,6 +362,27 @@ end
 
 -- The message from the last ERR_CALL_FAILED. Fetched separately because a
 -- status is an i32 and a message is not.
+--
+-- IT DESCRIBES THE HOST CALL THAT JUST RETURNED, WHICH IS WHY M.call CLEARS IT
+-- ON THE WAY IN. Without that it would mean "whatever failed last, ever" -- and
+-- a guest reading it after a call that SUCCEEDED would get a stale sentence
+-- about some other member, which reads exactly like a fresh one. Clearing at
+-- the single entry point is one upvalue store per host call and makes the
+-- contract sayable in a line: after a call returns ERR_CALL_FAILED this is THAT
+-- call's message, and after any other outcome it is empty.
+--
+-- The one seam is RE-ENTRANCY: invoke can raise an event synchronously, whose
+-- handler makes host calls of its own, so an inner failure under an outer
+-- SUCCESS leaves the inner message standing. That is the honest answer -- the
+-- inner call really is the last one that failed -- and it costs nothing to a
+-- guest reading this where it is meant to be read.
+--
+-- `fk.last_error` is the import that carries it into guest memory; see
+-- fk_mod.lua. Until that existed the only consumers were this repo's own tests,
+-- so a guest could see ERR_CALL_FAILED and never what the engine said -- which
+-- is the difference between "the API refused" and "the API refused BECAUSE",
+-- and downstream needs the second to assert a refusal is still the refusal it
+-- was.
 function M.last_error() return lastError end
 
 -- Hoisted so pcall receives a plain function value: building a closure per host
@@ -1387,6 +1408,11 @@ end
 -- The import the guest calls. Everything above exists to make this one line
 -- long, and to make each half testable without the other.
 function M.call(h, mid, argp, retp)
+  -- THE MESSAGE SLOT IS CLEARED HERE AND NOWHERE ELSE, which is what lets
+  -- M.last_error mean "the call that just returned" rather than "whatever
+  -- failed last, ever". One upvalue store per host call; see M.last_error for
+  -- the whole contract and for the one re-entrant seam it leaves.
+  lastError = ""
   local m = members[mid]
   if m == nil or m.sig == nil then return M.ERR_NO_MEMBER end
   if m.kind == M.EQ then return call_eq(m, h, mid, argp, retp) end
