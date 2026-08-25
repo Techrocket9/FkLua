@@ -25,10 +25,11 @@ import (
 // than silently changing a count somewhere else.
 //
 // PER VERSION RATHER THAN ONE TABLE, because the operator set is one of the few
-// things that genuinely MOVED between the two descriptions this repo ships, and
-// both of them are pinnable. A single table would have to be the union -- which
-// cannot say that a class is absent, and so could not have caught 2.1 taking
-// LuaFluidBox's pair away, which is the exact event this table was written for.
+// things that genuinely MOVED between the descriptions this repo ships, and
+// every one of them is pinnable. A single table would have to be the union --
+// which cannot say that a class is absent, and so could not have caught 2.1
+// taking LuaFluidBox's pair away, which is the exact event this table was
+// written for.
 // Moving the default pin to a description with no entry here fails with a
 // message saying to add one, which is the right amount of ceremony for a change
 // that also regenerates every binding in the repo.
@@ -51,6 +52,14 @@ var operatorsByVersion = map[string]map[string][]string{
 		"LuaTransportLine":   {"index", "length"},
 	},
 	"2.1.14": {
+		"LuaChunkIterator":   {"call"},
+		"LuaCustomTable":     {"index", "length"},
+		"LuaGuiElement":      {"index"},
+		"LuaInventory":       {"index", "length"},
+		"LuaRandomGenerator": {"call"},
+		"LuaTransportLine":   {"index", "length"},
+	},
+	"2.1.16": {
 		"LuaChunkIterator":   {"call"},
 		"LuaCustomTable":     {"index", "length"},
 		"LuaGuiElement":      {"index"},

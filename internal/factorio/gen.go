@@ -634,9 +634,9 @@ func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
 // and neither means what a bare nil field means -- an array of nothing is a
 // count the guest can still read, and a nil union arm is Lua's way of spelling
 // optionality, which this ABI carries in a presence byte instead. Neither shape
-// occurs in 2.0.77, 2.1.12 or 2.1.14; if one appears it will arrive as a SKIP,
-// loudly, in the census diff, which is the right way for a shape nobody has
-// reasoned about to show up.
+// occurs in any description committed here; if one appears it will arrive as a
+// SKIP, loudly, in the census diff, which is the right way for a shape nobody
+// has reasoned about to show up.
 func (m *typeMapper) nilTyped(t Type) bool {
 	// Bounded rather than cycle-tracked: this walks an alias chain, and a
 	// cyclic one cannot terminate at a literal name anyway.

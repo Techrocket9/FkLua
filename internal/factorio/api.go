@@ -21,8 +21,8 @@ import (
 // TWO VERSION AXES, and confusing them is a real mistake:
 //
 //	APIVersion         the SCHEMA version. 6, and stable across game versions --
-//	                   2.0.77, 2.1.12 and 2.1.14 all report 6, so one generator
-//	                   serves every data set we support.
+//	                   every description committed under api/ reports 6, so one
+//	                   generator serves every data set we support.
 //	ApplicationVersion the GAME version, which is what actually changes.
 
 // API is one parsed runtime-api.json.
@@ -81,7 +81,7 @@ type Operator struct {
 func (o Operator) IsAttribute() bool { return o.ReadType != nil }
 
 // Members is every callable and readable thing on a class. It is the number the
-// project quotes -- 3774 across 156 classes at the 2.1.14 pin -- and operators
+// project quotes -- 3782 across 157 classes at the 2.1.16 pin -- and operators
 // are deliberately excluded from it, matching how Factorio's own documentation
 // counts.
 func (c Class) Members() int { return len(c.Methods) + len(c.Attributes) }
@@ -415,9 +415,9 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 // IT IS THE GENERAL-AVAILABILITY RELEASE, NOT THE NEWEST DESCRIPTION IN api/
 // AND NOT WHAT IS INSTALLED ON THE MACHINE THAT BUILT THIS. A default is what
 // a mod author who has pinned nothing ships to players, and players are on
-// stable. 2.1.x is available to anyone who wants it -- `api = "2.1.14"` in
-// fklua.toml, or `--api=2.1.14` -- and both descriptions are committed
-// precisely so that choice needs neither the game nor the network.
+// stable. 2.1.x is available to anyone who wants it -- `api = "2.1.16"` in
+// fklua.toml, or `--api=2.1.16` -- and every description under api/ is
+// committed precisely so that choice needs neither the game nor the network.
 //
 // THIS IS A BUILD-TIME AXIS AND IT IS NOT THE ENGINE A MOD RUNS ON. The two
 // are independent and conflating them has cost this project a gate already:
@@ -427,7 +427,7 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 //   - The ENGINE is whatever Factorio the player launches. A guest that wants
 //     to know reads it at RUN TIME (helpers.game_version), which is what
 //     fkipc's version gate does -- so a GA-pinned mod gets the full IPC
-//     library on a 2.1.14 engine with no rebuild and no repin.
+//     library on a 2.1.16 engine with no rebuild and no repin.
 //
 // The one place the two axes MEET is info.json's factorio_version, which is a
 // statement about the ENGINE and defaults to this constant's series only

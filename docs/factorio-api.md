@@ -67,7 +67,7 @@ The **API pin** is the `runtime-api.json` version the bindings and the packaged 
 
 The default pin is the general-availability release, **2.0.77**, because a default is what a mod author who has pinned nothing ships to players, and players are on stable. Everything in the FkLua repository builds and runs against a stock 2.0.x install; the in-game test scripts read the installed engine's version and package for it. Two capabilities need more:
 
-- **2.1.x API surface** is one line away: `api = "2.1.14"` in `fklua.toml` (or `--api=2.1.14`), then `fklua gen-bindings && fklua lock`. Every supported description is committed, so changing the pin needs neither the game nor the network; at 2.1.14 the bindings cover 4,841 of 4,843 members with 224 events. On Steam, 2.1.x is the `2.1.14` entry under the game's Betas tab; the in-game test scripts pick the engine up through `FACTORIO_BIN` or the default Steam path.
+- **2.1.x API surface** is one line away: `api = "2.1.16"` in `fklua.toml` (or `--api=2.1.16`), then `fklua gen-bindings && fklua lock`. Every supported description is committed, so changing the pin needs neither the game nor the network; at 2.1.16 the bindings cover 4,854 of 4,856 members with 225 events. On Steam, 2.1.x is the `2.1.16` entry under the game's Betas tab; the in-game test scripts pick the engine up through `FACTORIO_BIN` or the default Steam path.
 - **FkIPC** requires a 2.1.14 or newer engine and is inert below it; see [its README](../guest/go/fkipc/README.md).
 
 ## A new Factorio version

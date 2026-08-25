@@ -34,20 +34,26 @@ func loadTestAPI(t *testing.T) *API {
 // committed census, which are generated from exactly that description, so
 // loadTestAPI following DefaultAPIVersion is the only thing that can be right.
 // A handful want something else -- they assert that the generators can express
-// a particular shape, and that shape occurs in ONE published description. The
-// `nil` concept ColorLookupTable exists in 2.1.12 and 2.1.14 and has never
-// existed in 2.0.77; UtilityConstants' dictionary-of-dictionaries, LuaEntity's
+// a particular shape, and that shape is a 2.1 one. The `nil` concept
+// ColorLookupTable exists in every 2.1.x description and has never existed in
+// 2.0.77; UtilityConstants' dictionary-of-dictionaries, LuaEntity's
 // array-of-arrays and LuaPlayer::get_alerts' three levels are all 2.1 shapes.
 //
 // THOSE TESTS PASSED FOR AN ACCIDENT UNTIL THE PIN MOVED BACK: the default
 // happened to be the description that had the shape. That is a coupling, not a
-// property, and the fix is for a shape test to name its own description -- both
-// are committed precisely so a build needs neither the game nor the network,
-// and the pinning machinery already reads whichever one it is pointed at.
+// property, and the fix is for a shape test to name its own description -- every
+// description is committed precisely so a build needs neither the game nor the
+// network, and the pinning machinery already reads whichever one it is pointed
+// at.
+//
+// IT IS THE NEWEST 2.1 DESCRIPTION COMMITTED, and that is the point rather than
+// an arbitrary pick: a shape these tests assert is expressible is one Factorio
+// could stop publishing, and naming an older description would hide that behind
+// a version nobody ships any more. It moves with `api pull`, not with the pin.
 //
 // A test using this must NOT also compare against api/<pin>/census.json or the
 // committed bindings, for the reason apiPath's comment gives.
-const shapeAPIVersion = "2.1.14"
+const shapeAPIVersion = "2.1.16"
 
 // loadShapeAPI loads a description by name. See shapeAPIVersion.
 func loadShapeAPI(t *testing.T, version string) *API {

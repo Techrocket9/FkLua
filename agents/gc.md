@@ -707,6 +707,8 @@ tick 110 seen=111 live=12320 cycles=2 grows=2 deadlines=2 stalls=1 terms=0 phase
 
 **2 collections over 120 ticks, every retained block intact, two `memory.grow`, and identical guest lines across two runs** — which is the property that matters in lockstep.
 
+**Re-taken on Factorio 2.1.16 on 2026-08-24 and BYTE-IDENTICAL to the transcript above**, every field of every line, after the installed engine moved two patch releases. One sentence rather than a second table: the cadence is a function of the guest and its budget and an engine bump is not an input to it, and this is the only place that pacing is observed in a real game, so a run that had drifted would have said so here first.
+
 **IT SAID "18 COLLECTIONS OVER 110 TICKS" AND THE PACING WORK IS WHY IT MOVED.** The old transcript above it was taken on 2.0.77 before stage C, when a collection was ~4 ticks because the mark terminated as soon as a full re-scan pass completed — and that pass was completing **without covering the heap**, which is the use-after-free stage C fixed. This guest is deliberately over its budget, so its mark cannot converge; what ends one now is the forward-progress escape, which by construction watches for a bounded number of steps first. A collection is ~47 ticks, `run-roundtrip.sh`'s `GC_SAVE_TICKS` were re-derived against exactly that, and its header already carried the arithmetic. The two `deadlines` here are **stall** escapes rather than the backstop — see "One counter, two diagnoses" — and are the expected shape for a guest chosen to outrun its budget. The gate row further down said **6** for the same run, which was a third number for one measurement; it says this one now.
 
 ### Gates

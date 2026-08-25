@@ -175,7 +175,7 @@ print("frozen=" .. tostring(v.frozen_color_lookup))
 // THE ALIAS HOP IS WHY THIS WAS INVISIBLE, so it is pinned on its own.
 //
 // No published version has a field whose declared type is the string "nil": the
-// only `nil` in 2.1.12 and 2.1.14 is one concept DEFINITION, three hundred
+// only `nil` in a 2.1.x description is one concept DEFINITION, three hundred
 // entries away from the single field that carries it. A check that looked at
 // the field's spelling would find nothing and pass forever.
 func TestTheNilTypeIsFollowedThroughItsConceptAlias(t *testing.T) {
@@ -344,7 +344,7 @@ func TestAStructOfNothingButNilFieldsIsStillRefused(t *testing.T) {
 //
 // AGAINST shapeAPIVersion RATHER THAN THE PIN. `nil` occurs exactly once in
 // every published description that has it -- as the concept ColorLookupTable,
-// in 2.1.12 and 2.1.14 -- and NEVER in 2.0.77, so at the GA pin the honest
+// in every 2.1.x one -- and NEVER in 2.0.77, so at the GA pin the honest
 // answer is 0 and this test would be asserting that a mechanism it cannot
 // reach still works. It deliberately does not compare against a committed
 // census.json: it takes its own and reads the row out of it. See
