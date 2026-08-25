@@ -206,6 +206,25 @@ func rustScreamingSnake(s string) string {
 	return b.String()
 }
 
+// rustDedent removes one level of indentation from an emitted member.
+//
+// Every member body here is written for life inside an `impl` block, and the
+// three global functions are not in one. Nothing about correctness turns on it
+// -- rustc reads whitespace as separation and nothing else -- but a generated
+// file this repo asks people to read beside its Go twin should not have three
+// functions floating four spaces to the right of everything else.
+//
+// It removes exactly four leading spaces and only from lines that have them, so
+// a blank line stays blank. There are no raw string literals in generated Rust,
+// which is what makes a whole-block dedent safe rather than merely convenient.
+func rustDedent(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimPrefix(l, "    ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func rustName(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -301,14 +320,23 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 	declared := map[string]map[string]bool{}
 
 	for _, cls := range classes {
-		if cls == "" {
-			continue // global functions are not on a class
+		// GLOBAL FUNCTIONS ARE ON NO CLASS, so there is no handle type and no
+		// `impl` -- they are free functions in this module. This branch replaces
+		// a `continue` that had been correct for as long as this generator has
+		// existed; see MemberGlobalFunc.
+		global := cls == ""
+		typeName := ""
+		if global {
+			w("\n// Factorio's three GLOBAL FUNCTIONS, which belong to no class and are\n")
+			w("// free functions here for that reason. fk_call's handle operand is\n")
+			w("// unread for them and the bindings pass 0.\n\n")
+		} else {
+			typeName = exportName(cls)
+			w("\n/// A handle to a `%s`.\n", cls)
+			w("#[derive(Copy, Clone, PartialEq, Eq, Debug)]\n")
+			w("pub struct %s(pub Object);\n\n", typeName)
+			w("impl %s {\n", typeName)
 		}
-		typeName := exportName(cls)
-		w("\n/// A handle to a `%s`.\n", cls)
-		w("#[derive(Copy, Clone, PartialEq, Eq, Debug)]\n")
-		w("pub struct %s(pub Object);\n\n", typeName)
-		w("impl %s {\n", typeName)
 
 		seen := map[string]bool{}
 		for _, m := range byClass[cls] {
@@ -318,8 +346,20 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 				continue
 			}
 			if seen[name] {
+				// NO structs.taken() CLAUSE HERE, and gogen has one: Rust puts
+				// types and values in SEPARATE NAMESPACES, so `pub fn log`
+				// beside `pub struct Log` is legal and a check for it could
+				// never fire. Go has one package-level namespace and therefore
+				// really can collide, which is why the two loops differ here
+				// rather than by oversight.
 				out.defer1("Rust name collides with another member of the class")
 				continue
+			}
+			if global {
+				// The body below is written for life inside an `impl`, which
+				// this is not. Cosmetic only, and it keeps the generated file
+				// readable beside its Go twin.
+				src = rustDedent(src)
 			}
 			seen[name] = true
 			out.Names[fmt.Sprintf("%s::%s/%d", m.Class, m.Name, m.Kind)] = name
@@ -334,6 +374,12 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 			// container. Same member id and same blocks -- only what the guest
 			// does with the returned (ptr, count) differs. Counted apart from
 			// Emitted, which counts MEMBERS bound.
+			//
+			// Not asked for a global function: none of the three returns a
+			// container, so the variant would report "no" anyway.
+			if global {
+				continue
+			}
 			isrc, iname, isig, iok := rustMemberInto(structs, typeName, m)
 			if iok && !seen[iname] {
 				seen[iname] = true
@@ -342,7 +388,9 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 				bound[cls][iname] = isig
 			}
 		}
-		w("}\n")
+		if !global {
+			w("}\n")
+		}
 		declared[cls] = seen
 	}
 
@@ -928,9 +976,18 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 		w("    /// `game.players` -- `pairs()` yields the NAME. Matching on\n")
 		w("    /// `Value::Number` finds nothing there, silently.\n")
 	}
-	w("    pub fn %s(&self%s%s) -> %s {\n", name,
-		map[bool]string{true: "", false: ", "}[len(params) == 0],
-		strings.Join(params, ", "), ret)
+	// NO `&self` FOR A GLOBAL FUNCTION. `log`, `localised_print` and
+	// `table_size` are on no class, so there is nothing to borrow; the handle
+	// operand below is a literal 0 for the same reason. The four-space indent
+	// stays and the caller dedents the whole block, so this line does not have
+	// to know whether it is inside an `impl`.
+	if m.Kind == MemberGlobalFunc {
+		w("    pub fn %s(%s) -> %s {\n", name, strings.Join(params, ", "), ret)
+	} else {
+		w("    pub fn %s(&self%s%s) -> %s {\n", name,
+			map[bool]string{true: "", false: ", "}[len(params) == 0],
+			strings.Join(params, ", "), ret)
+	}
 	if into {
 		w("        dst.clear();\n")
 	}
@@ -1047,7 +1104,15 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 	if rets.Size > 0 {
 		rp = "r.as_mut_ptr() as u32"
 	}
-	w("        let st = unsafe { fk_call(self.0.0, %d, %s, %s) };\n", m.ID, ap, rp)
+	// THE HANDLE, and 0 for a global function -- which every other kind answers
+	// ERR_BAD_HANDLE and this one never reads, because M.invoke's GFUNC branch
+	// runs before the handle is resolved at all. The constant scan that prunes
+	// the shipped member table reads operand 1, not operand 0.
+	recv := "self.0.0"
+	if m.Kind == MemberGlobalFunc {
+		recv = "0"
+	}
+	w("        let st = unsafe { fk_call(%s, %d, %s, %s) };\n", recv, m.ID, ap, rp)
 	w("        if st != 0 {\n            return Err(Status(st));\n        }\n")
 
 	// ONE DECODE PER RETURN FIELD, into v0, v1, ... An absent optional must not

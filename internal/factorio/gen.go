@@ -166,6 +166,42 @@ const (
 	// Counted in census.json as index_setter_members for the reason kind 7 is --
 	// a kind that reaches no line of the accounting is the F-IDX shape.
 	MemberIndexSet = 8
+
+	// MemberGlobalFunc is a function on NO CLASS -- the description's
+	// `global_functions`, which is `log`, `localised_print` and `table_size` at
+	// every pin this repo owns. Its Member carries an EMPTY Class, which is what
+	// the Member struct's own field comment has said since the type existed and
+	// what both binding generators skipped on ("global functions are not on a
+	// class; not bound yet") for as long as there have been binding generators.
+	//
+	// IT EXISTS BECAUSE `log` IS THE ONLY WAY TO READ A LuaProfiler'S DURATION.
+	// LuaProfiler's complete member set is add, divide, reset, restart, stop,
+	// object_name, object_name_is and valid -- not one of them returns the
+	// number, and the engine renders it only when the profiler is an ELEMENT of
+	// a LocalisedString: `log{"", "took ", p}`. So a guest that cannot call log
+	// cannot time anything and read the answer, which is what BetterBeltBalancer
+	// reported: every timing figure it publishes is regexed out of
+	// factorio-current.log, and porting its harness to a guest left it with no
+	// way to produce the line at all.
+	//
+	// A KIND RATHER THAN AN IMPORT, and the decision is the one MemberGetEq
+	// took. This table is already one entry per (class, member, kind) with the
+	// layout its signature implies computed once at generate time, so a kind
+	// inherits decode_args, the trailing-argument trim, encode_rets and the
+	// member-id scan that prunes the shipped table without a line of its own.
+	// The cheaper ask filed beside this one -- a `fk.log_dyn(ptr)` import --
+	// would have been a seventh host import serving exactly one of the three,
+	// leaving `localised_print` unreachable and `table_size` needing another.
+	//
+	// WHAT IT NEEDS IS LESS, NOT MORE: no handle, no `valid` check, no member
+	// read. fk.call's first operand is unread for this kind and the binding
+	// passes 0; the constant scan reads operand 1 and knows nothing about
+	// kinds, so pruning is untouched by construction.
+	//
+	// This is the row `global_functions_bound` in census.json was written to
+	// hold. A 0 that is WRITTEN DOWN is a decision, and this is the decision
+	// coming due.
+	MemberGlobalFunc = 9
 )
 
 // IsOperator reports the three kinds that are Lua metamethods rather than named
@@ -975,6 +1011,35 @@ func GenerateMembers(a *API) Report {
 		}
 	}
 
+	// THE GLOBAL FUNCTIONS, AFTER EVERY CLASS, and after is a decision rather
+	// than the loop's leftovers. Member ids are dense indices into this slice,
+	// so a member inserted anywhere else renumbers everything below it and the
+	// golden diff becomes 8,000 lines of moved constants with the real change
+	// somewhere in the middle. Appending leaves every existing id where it was:
+	// at the 2.0.77 pin these are 4260, 4261 and 4262, and nothing before them
+	// moved by one.
+	//
+	// Sorted by NAME, like the classes and like every member loop above, so a
+	// regeneration is a no-op. The description's own order is by `order` and is
+	// not the one anything else here reads.
+	//
+	// A GLOBAL FUNCTION IS A METHOD WITH NO RECEIVER, so buildMethod does the
+	// whole job -- the parameter walk, the return walk, the takes_table and
+	// variant-group branches -- and the only thing that differs is the kind and
+	// the empty class. HasValid stays false because there is no object to have a
+	// `valid` attribute.
+	gfns := append([]Method(nil), a.GlobalFunctions...)
+	sort.Slice(gfns, func(i, j int) bool { return gfns[i].Name < gfns[j].Name })
+	for _, gf := range gfns {
+		mem, err := buildMethod(m, "", gf)
+		if err != nil {
+			skip("", gf.Name, err)
+			continue
+		}
+		mem.Kind = MemberGlobalFunc
+		r.Members = append(r.Members, mem)
+	}
+
 	for i := range r.Members {
 		r.Members[i].ID = i + 1 // 1-based, matching the Lua table
 	}
@@ -1085,6 +1150,47 @@ func LiteralIdent(lit string) (string, bool) {
 // resource-marker (RM1) spent a morning on.
 func OperatorProse(class string, m Member, name string) []string {
 	switch m.Kind {
+	case MemberGlobalFunc:
+		out := []string{
+			name + " is Factorio's GLOBAL " + m.Name + "(). It is on no class, so",
+			"it is a top-level binding here rather than a method, and the handle",
+			"the dispatch import takes is ignored for it.",
+		}
+		// THE PROFILER SENTENCE, on `log` alone, because it is the reason this
+		// kind exists and a caller who does not know it has no way to find it:
+		// LuaProfiler exposes no accessor for its own duration, and this is the
+		// only place the engine renders one.
+		if m.Name == "log" {
+			out = append(out,
+				"",
+				"IT TAKES A LocalisedString, WHICH IS WHAT MAKES IT THE ONLY WAY TO READ",
+				"A LuaProfiler. LuaProfiler has no accessor returning its duration --",
+				"the engine renders one only as an ELEMENT of a localised string, so",
+				"log{\"\", \"took \", p} is the whole idiom and what lands in",
+				"factorio-current.log is: ... Duration: 12.368959ms",
+				"",
+				"In tier-2 terms that is an array of OfString(\"\"), OfString(\"took \")",
+				"and OfObject(p) -- an empty first element is LocalisedString's",
+				"\"concatenate the rest\" form. For a plain string with no localisation",
+				"and no profiler in it, fk.Log is one import rather than a host call.")
+		}
+		if m.Name == "localised_print" {
+			out = append(out,
+				"",
+				"It writes to STDOUT rather than to the log file, which is what it is",
+				"for: a tool that launched Factorio as a child process reads it there.",
+				"A headless run's stdout is the terminal, so nothing in a log file",
+				"records it.")
+		}
+		if m.Name == "table_size" {
+			out = append(out,
+				"",
+				"NOT FOR A LuaCustomTable, which the description says outright: use the",
+				"class's own length operator, which answers without the table ever",
+				"crossing. This counts the keys of a plain Lua table, which for a guest",
+				"means a tier-2 value it built or one a callback handed it.")
+		}
+		return out
 	case MemberIndex:
 		key := "the key"
 		if len(m.Args) > 0 && m.Args[0].Kind == KindU32 {

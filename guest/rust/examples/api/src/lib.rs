@@ -17,13 +17,18 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use fkapi::{
     defines_direction_east, defines_inventory_chest, read_on_player_created, read_on_tick,
-    LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaStr, LuaSurface, Object, Value,
-    EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED, EVENT_ON_PLAYER_MINED_ENTITY,
-    EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, SCRIPT,
+    LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaProfiler, LuaStr, LuaSurface,
+    Object, Value, EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED, EVENT_ON_PLAYER_MINED_ENTITY,
+    EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, HELPERS, SCRIPT,
     SETTINGS, SKIP_ON_BUILT_ENTITY_TAGS,
 };
 
 static TICKS_SEEN: AtomicU32 = AtomicU32::new(0);
+
+/// What the profiler leg times. A static sink because the release profile would
+/// otherwise delete a loop whose result nothing reads, and a profiler around no
+/// work reports a duration that says nothing.
+static PROF_SINK: AtomicU32 = AtomicU32::new(0);
 
 #[no_mangle]
 pub extern "C" fn fk_on_event(id: u32, ptr: u32) {
@@ -309,6 +314,56 @@ pub extern "C" fn fk_on_tick(tick: u32) {
                 "settings.global as a handle failed: {}",
                 e.as_str()
             )),
+        }
+
+        // A GLOBAL FUNCTION, and the one that made the kind worth building:
+        // `log()` is the ONLY way to read a LuaProfiler's duration. The class
+        // has add, divide, reset, restart, stop, object_name, object_name_is
+        // and valid -- not one of them returns the number -- and the engine
+        // renders it only when the profiler is an ELEMENT of a LocalisedString.
+        //
+        //     local p = helpers.create_profiler()
+        //     ...work...
+        //     p.stop()
+        //     log{"", "[marker] ", p}
+        //
+        // What lands in factorio-current.log is `... Duration: 12.368959ms`,
+        // and a downstream harness regexes exactly that. There is no other
+        // shape: fk::log takes a &str and a string cannot carry an object.
+        match HELPERS.create_profiler(None) {
+            Ok(p) => {
+                // Something to time. The work is beside the point; that the
+                // ENGINE renders the elapsed figure is the whole leg.
+                let mut sink = 0u32;
+                for i in 0..2000u32 {
+                    sink = sink.wrapping_add(i);
+                }
+                PROF_SINK.store(sink, Ordering::Relaxed);
+                if let Err(e) = LuaProfiler(p).stop() {
+                    fk::log(&format!("profiler stop failed: {}", e.as_str()));
+                }
+                if let Err(e) = fkapi::log(&Value::Array(alloc::vec![
+                    Value::Str(LuaStr::from("")),
+                    Value::Str(LuaStr::from("global-fn: profiler ")),
+                    Value::Obj(p),
+                ])) {
+                    fk::log(&format!("global-fn: log() failed: {}", e.as_str()));
+                }
+                // ...and table_size, the global function with a RETURN. A
+                // three-key table the guest built itself, so the answer is
+                // known.
+                match fkapi::table_size(&Value::Map(alloc::vec![
+                    (Value::Str(LuaStr::from("a")), Value::Number(1.0)),
+                    (Value::Str(LuaStr::from("b")), Value::Number(2.0)),
+                    (Value::Str(LuaStr::from("c")), Value::Number(3.0)),
+                ])) {
+                    Ok(n) => fk::log(&format!("global-fn: table_size = {}", n)),
+                    Err(e) => {
+                        fk::log(&format!("global-fn: table_size failed: {}", e.as_str()))
+                    }
+                }
+            }
+            Err(e) => fk::log(&format!("create_profiler failed: {}", e.as_str())),
         }
 
         // A MEMBER RETURNING SEVERAL VALUES, deferred for four milestones on

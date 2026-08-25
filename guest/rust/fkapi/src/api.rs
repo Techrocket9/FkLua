@@ -787,6 +787,76 @@ fn write_dyn(d: &mut [u8], v: &Value) {
 #[no_mangle]
 pub extern "C" fn fk_api_pin_2_0_77() {}
 
+// Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
+// free functions here for that reason. fk_call's handle operand is
+// unread for them and the bindings pass 0.
+
+/// localised_print is Factorio's GLOBAL localised_print(). It is on no class, so
+/// it is a top-level binding here rather than a method, and the handle
+/// the dispatch import takes is ignored for it.
+/// 
+/// It writes to STDOUT rather than to the log file, which is what it is
+/// for: a tool that launched Factorio as a child process reads it there.
+/// A headless run's stdout is the terminal, so nothing in a log file
+/// records it.
+pub fn localised_print(string: &Value) -> Result<(), Status> {
+    let _mark = AllocMark::new();
+    let mut a = [0u8; 16];
+    write_dyn(&mut a[0..], string);
+    let st = unsafe { fk_call(0, 4260, a.as_ptr() as u32, 0) };
+    if st != 0 {
+        return Err(Status(st));
+    }
+    Ok(())
+}
+
+/// log is Factorio's GLOBAL log(). It is on no class, so
+/// it is a top-level binding here rather than a method, and the handle
+/// the dispatch import takes is ignored for it.
+/// 
+/// IT TAKES A LocalisedString, WHICH IS WHAT MAKES IT THE ONLY WAY TO READ
+/// A LuaProfiler. LuaProfiler has no accessor returning its duration --
+/// the engine renders one only as an ELEMENT of a localised string, so
+/// log{"", "took ", p} is the whole idiom and what lands in
+/// factorio-current.log is: ... Duration: 12.368959ms
+/// 
+/// In tier-2 terms that is an array of OfString(""), OfString("took ")
+/// and OfObject(p) -- an empty first element is LocalisedString's
+/// "concatenate the rest" form. For a plain string with no localisation
+/// and no profiler in it, fk.Log is one import rather than a host call.
+pub fn log(string: &Value) -> Result<(), Status> {
+    let _mark = AllocMark::new();
+    let mut a = [0u8; 16];
+    write_dyn(&mut a[0..], string);
+    let st = unsafe { fk_call(0, 4261, a.as_ptr() as u32, 0) };
+    if st != 0 {
+        return Err(Status(st));
+    }
+    Ok(())
+}
+
+/// table_size is Factorio's GLOBAL table_size(). It is on no class, so
+/// it is a top-level binding here rather than a method, and the handle
+/// the dispatch import takes is ignored for it.
+/// 
+/// NOT FOR A LuaCustomTable, which the description says outright: use the
+/// class's own length operator, which answers without the table ever
+/// crossing. This counts the keys of a plain Lua table, which for a guest
+/// means a tier-2 value it built or one a callback handed it.
+pub fn table_size(table: &Value) -> Result<u32, Status> {
+    let _mark = AllocMark::new();
+    let mut a = [0u8; 16];
+    let mut r = [0u8; 4];
+    write_dyn(&mut a[0..], table);
+    let st = unsafe { fk_call(0, 4262, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+    if st != 0 {
+        return Err(Status(st));
+    }
+    let v0 = u32::from_le_bytes(r[0..4].try_into().unwrap());
+    Ok(v0)
+}
+
+
 /// A handle to a `LuaAISettings`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct LuaAISettings(pub Object);

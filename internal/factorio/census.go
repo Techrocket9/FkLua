@@ -95,9 +95,16 @@ type CensusData struct {
 	// invisible in the one file whose job is to count what there is.
 	OperatorsBound int `json:"operators_bound"`
 	// GlobalFunctionsBound is the same row for the three global functions
-	// (localised_print, log, table_size). It is 0, deliberately -- they are not
-	// on a class and fk.call takes a handle -- and 0 that is WRITTEN DOWN is the
-	// difference between a decision and an omission.
+	// (localised_print, log, table_size), and it is the clearest thing this file
+	// has ever done: it read 0 for as long as there have been binding
+	// generators, deliberately, because they are on no class and fk.call takes a
+	// handle -- and a 0 that is WRITTEN DOWN is a decision somebody can come
+	// back to, which is what happened. It is 3 since MemberGlobalFunc, whose
+	// branch in M.invoke runs before the handle is resolved and never reads it.
+	//
+	// The row stays for the reason OperatorsBound's does: a description that
+	// grew a fourth global function would move this number, and a number that
+	// moves is a line in the version diff rather than a shape nobody looked at.
 	GlobalFunctionsBound int `json:"global_functions_bound"`
 	// CustomTableHandles is the SECOND member emitted over an attribute whose
 	// described type is a LuaCustomTable -- `force.TechnologiesRaw()` beside
@@ -304,6 +311,9 @@ func TakeCensus(a *API) (CensusData, error) {
 		}
 		if m.Kind == MemberIndexSet {
 			c.IndexSetters++
+		}
+		if m.Kind == MemberGlobalFunc {
+			c.GlobalFunctionsBound++
 		}
 	}
 	for k, v := range r.Reasons {

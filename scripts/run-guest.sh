@@ -43,7 +43,7 @@ case "$GUEST" in
          # this pattern because a line nobody prints is a line nobody checks:
          # both ran green in game for two milestones' worth of runs before
          # anyone looked in the raw log to find out.
-         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|index-assign|multi-return)" ;;
+         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|index-assign|global-fn|multi-return)" ;;
   # The collected guest. Its job here is the one thing no host-side test can
   # do: prove a mod whose guest COLLECTS ITS OWN HEAP loads and runs in the
   # real game. It logs `intact=32/32` alongside the tick counter, so a
@@ -198,7 +198,22 @@ if [ "$RUNS" -gt 1 ]; then
   echo "==> determinism across $RUNS runs"
   # Every distinct guest line must appear exactly $RUNS times. A line seen a
   # different number of times means the runs disagreed about it.
+  #
+  # ...EXCEPT AN ENGINE-RENDERED PROFILER DURATION, WHICH IS A WALL CLOCK AND
+  # CANNOT REPEAT. `log{"", "...", p}` on a LuaProfiler is the only way to read
+  # one at all -- the class exposes no accessor for the number -- and what the
+  # engine writes is `Duration: 0.007208ms`, a real elapsed time that differs
+  # between two runs of identical work. Masking the digits is not weakening the
+  # check: the LINE still has to appear $RUNS times, in the same place, with the
+  # same text either side of the figure.
+  #
+  # It is also the guest-author rule stated as a filter. A duration is
+  # peer-local by construction, so a guest may LOG one -- the game log is not
+  # CRC'd, which is why fk.Log is the sanctioned sink for anything per-peer --
+  # and may never BRANCH on one. A guest that did would desync every client, and
+  # this harness would not see it.
   odd=$(grep -oE "$RUN_RE.*" "$TMPDIR/guest-run.log" \
+        | sed -E 's/Duration: [0-9.]+[a-z]*/Duration: <elapsed>/' \
         | sort | uniq -c | awk -v n="$RUNS" '$1 != n')
   if [ -n "$odd" ]; then
     echo "the guest was NOT deterministic across runs:" >&2

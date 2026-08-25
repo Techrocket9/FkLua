@@ -86,9 +86,10 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	}
 	sum := byKind[MemberCall] + byKind[MemberGet] + byKind[MemberSet] +
 		byKind[MemberGetEq] + byKind[MemberIndex] + byKind[MemberLen] +
-		byKind[MemberSelf] + byKind[MemberGetHandle] + byKind[MemberIndexSet]
+		byKind[MemberSelf] + byKind[MemberGetHandle] + byKind[MemberIndexSet] +
+		byKind[MemberGlobalFunc]
 	if sum != host {
-		t.Errorf("the eight accounted kinds sum to %d against %d members: a kind "+
+		t.Errorf("the nine accounted kinds sum to %d against %d members: a kind "+
 			"exists that no line of the deferral report mentions", sum, host)
 	}
 
@@ -115,6 +116,19 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	if cen.IndexSetters != byKind[MemberIndexSet] {
 		t.Errorf("census.json: index_setter_members %d, generator %d",
 			cen.IndexSetters, byKind[MemberIndexSet])
+	}
+	// AND THE ROW THAT USED TO BE A WRITTEN-DOWN ZERO. It is the one census
+	// count with a floor the description itself supplies: every global function
+	// this generator can express reaches the table, so a row that fell BELOW
+	// len(a.GlobalFunctions) would mean one had started deferring silently.
+	if cen.GlobalFunctionsBound != byKind[MemberGlobalFunc] {
+		t.Errorf("census.json: global_functions_bound %d, generator %d",
+			cen.GlobalFunctionsBound, byKind[MemberGlobalFunc])
+	}
+	if cen.GlobalFunctionsBound != len(a.GlobalFunctions) {
+		t.Errorf("global_functions_bound %d of %d described: one is being "+
+			"skipped, and `fklua gen-bindings` names it under the host member "+
+			"table's deferrals", cen.GlobalFunctionsBound, len(a.GlobalFunctions))
 	}
 	// The literals are counted and are counted APART. Zero would mean the row
 	// had quietly become decoration; a non-zero total that no reason accounts

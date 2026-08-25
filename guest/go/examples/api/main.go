@@ -32,6 +32,11 @@ const (
 
 var ticksSeen uint32
 
+// profSink is what the profiler leg below times. A package-level sink because
+// -opt=2 would otherwise delete a loop whose result nothing reads, and a
+// profiler around no work reports a duration that says nothing.
+var profSink int
+
 //go:wasmexport fk_on_event
 func onEvent(id, ptr uint32) {
 	switch id {
@@ -242,6 +247,52 @@ func onTick(tick uint32) {
 			)
 			fk.Log("index-assign: settings.global[undefined] refused " +
 				strconv.FormatBool(err != nil))
+		}
+
+		// A GLOBAL FUNCTION, and the one that made the kind worth building:
+		// `log()` is the ONLY way to read a LuaProfiler's duration. The class
+		// has add, divide, reset, restart, stop, object_name, object_name_is and
+		// valid -- not one of them returns the number -- and the engine renders
+		// it only when the profiler is an ELEMENT of a LocalisedString.
+		//
+		//	local p = helpers.create_profiler()
+		//	...work...
+		//	p.stop()
+		//	log{"", "[marker] ", p}
+		//
+		// What lands in factorio-current.log is `... Duration: 12.368959ms`, and
+		// a downstream harness regexes exactly that. There is no other shape:
+		// fk.Log takes a plain string and a plain string cannot carry an object.
+		if p, err := fkapi.Helpers.CreateProfiler(nil); err != nil {
+			fk.Log("create_profiler failed: " + err.Error())
+		} else {
+			// Something to time. The work is beside the point; that the ENGINE
+			// renders the elapsed figure is the whole leg.
+			for i := 0; i < 2000; i++ {
+				profSink += i
+			}
+			if err := (fkapi.LuaProfiler{Object: p}).Stop(); err != nil {
+				fk.Log("profiler stop failed: " + err.Error())
+			}
+			if err := fkapi.Log(fkapi.OfArray(
+				fkapi.OfString(""),
+				fkapi.OfString("global-fn: profiler "),
+				fkapi.OfObject(p),
+			)); err != nil {
+				fk.Log("global-fn: log() failed: " + err.Error())
+			}
+			// ...and table_size, which is the global function with a RETURN. A
+			// three-key table the guest built itself, so the answer is known.
+			n, err := fkapi.TableSize(fkapi.OfMap(
+				fkapi.KeyValue{Key: fkapi.OfString("a"), Val: fkapi.OfNumber(1)},
+				fkapi.KeyValue{Key: fkapi.OfString("b"), Val: fkapi.OfNumber(2)},
+				fkapi.KeyValue{Key: fkapi.OfString("c"), Val: fkapi.OfNumber(3)},
+			))
+			if err != nil {
+				fk.Log("global-fn: table_size failed: " + err.Error())
+			} else {
+				fk.Log("global-fn: table_size = " + strconv.FormatUint(uint64(n), 10))
+			}
 		}
 
 		// A MEMBER RETURNING SEVERAL VALUES, which the generators deferred for

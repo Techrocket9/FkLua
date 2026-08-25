@@ -282,6 +282,28 @@ M.GETH = 7        -- obj.attr, as a handle
 -- therefore the same member id. That raise comes back as ERR_CALL_FAILED with
 -- the engine's own text in last_error, exactly like every other raise here.
 M.IDXSET = 8      -- obj[k] = v  the __newindex operator
+-- GFUNC is a function on NO CLASS: Factorio's three globals, `log`,
+-- `localised_print` and `table_size`. It is the one kind whose branch runs
+-- BEFORE the handle is resolved, because there is no receiver to resolve -- the
+-- generated binding passes 0 and nothing here reads it.
+--
+-- IT EXISTS BECAUSE `log` IS THE ONLY WAY TO READ A LuaProfiler'S DURATION.
+-- LuaProfiler's complete member set is add, divide, reset, restart, stop,
+-- object_name, object_name_is and valid: not one of them returns the number.
+-- The engine renders it only when the profiler is an ELEMENT OF A
+-- LocalisedString -- `log{"", "took ", p}` -- so a guest that cannot call log
+-- cannot time anything and read the answer. Downstream (BetterBeltBalancer)
+-- regexes exactly that out of factorio-current.log for every timing figure it
+-- publishes, and `global_functions_bound: 0` in census.json is the
+-- written-down zero that came due.
+--
+-- WHERE THE FUNCTION COMES FROM is `genv`, the same lazily-read environment the
+-- fixed 1..9 handle block resolves against, and for the same reason: capturing
+-- at load time would bind whatever existed while control.lua was still running.
+-- A global the running Factorio does not have is ERR_NO_MEMBER through
+-- report_missing, exactly as a removed member of a class is -- which is what
+-- generic dispatch buys and what a per-function import would not.
+M.GFUNC = 9       -- log(...), localised_print(...), table_size(...)
 --
 -- EQ exists so a guest can ask `entity.name == "transport-belt"` WITHOUT the
 -- name ever crossing into guest memory. The comparison is one Lua `==` on a
@@ -315,6 +337,10 @@ M.IDXSET = 8      -- obj[k] = v  the __newindex operator
 -- only argument and its NAME is in the member table, where IDXSET's key is an
 -- argument too. That is the same sentence that made IDX a kind, one direction
 -- over.
+--
+-- GFUNC is a fifth, and it is the one that needs LESS than the others rather
+-- than more: no handle, no `valid` check, no member read. It is placed above
+-- all of them in M.invoke for exactly that reason.
 
 local members = {}
 local lastError = ""
@@ -377,6 +403,34 @@ end
 function M.invoke(h, mid, ...)
   local m = members[mid]
   if m == nil then return M.ERR_NO_MEMBER end
+
+  -- A GLOBAL FUNCTION HAS NO RECEIVER, so this branch comes before the handle
+  -- is resolved rather than after. `h` is not read at all -- the generated
+  -- binding passes 0, which every other kind would answer ERR_BAD_HANDLE.
+  --
+  -- genv rather than a captured upvalue, and `type(f) == "function"` rather
+  -- than a nil test: a Factorio that does not have this global reads as a
+  -- missing member, reported once and answered with a status every time after,
+  -- which is the same degradation a removed class member gets. There is no
+  -- pcall around the READ because `_G` is a plain table with no metamethod --
+  -- the pcall that matters is around the CALL, for the same reason it wraps
+  -- every other one here: a Lua error crossing a wasm frame takes the mod down
+  -- rather than the call.
+  if m.kind == M.GFUNC then
+    local f = genv ~= nil and genv[m.name] or nil
+    if type(f) ~= "function" then
+      report_missing(m.name)
+      return M.ERR_NO_MEMBER
+    end
+    -- Four result slots, matching the CALL kind: table_size returns one and the
+    -- other two return nothing, and sharing the shape costs nothing.
+    local gok, ga, gb, gc, gd = pcall(f, ...)
+    if not gok then
+      lastError = tostring(ga)
+      return M.ERR_CALL_FAILED
+    end
+    return M.OK, ga, gb, gc, gd
+  end
 
   local obj, st = M.get(h)
   if obj == nil then return st end

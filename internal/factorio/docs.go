@@ -37,11 +37,21 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 	b.WriteString("and under the name it was emitted as.\n\n")
 
 	byClass := map[string][]Member{}
+	// GLOBAL FUNCTIONS ARE ON NO CLASS, so they are collected apart and rendered
+	// in a section of their own. They used to be dropped here by the same
+	// `m.Class != ""` guard both binding generators carried -- and the day they
+	// started binding, TestDocsNameExactlyWhatTheBindingsBind is what said so,
+	// which is the property that test exists for.
+	var globals []Member
 	for _, m := range r.Members {
-		if m.Class != "" {
+		switch {
+		case m.Kind == MemberGlobalFunc:
+			globals = append(globals, m)
+		case m.Class != "":
 			byClass[m.Class] = append(byClass[m.Class], m)
 		}
 	}
+	sort.Slice(globals, func(i, j int) bool { return globals[i].Name < globals[j].Name })
 
 	// Contents first: 156 classes is too many to scroll.
 	var classes []string
@@ -54,6 +64,9 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 	fmt.Fprintf(&b, "%d classes, %d members bound of %d.\n\n",
 		len(classes), len(opt.Names), len(r.Members))
 	b.WriteString("## Contents\n\n")
+	if len(globals) > 0 {
+		b.WriteString("- [Global functions](#global-functions)\n")
+	}
 	for _, c := range classes {
 		fmt.Fprintf(&b, "- [%s](#%s)\n", c, strings.ToLower(c))
 	}
@@ -61,6 +74,30 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 	descByClass := map[string]Class{}
 	for _, c := range a.Classes {
 		descByClass[c.Name] = c
+	}
+
+	// THE GLOBAL FUNCTIONS, first and on their own, because they belong to no
+	// class and a reader looking for `log` has no class to look under. Their
+	// prose comes from the description's own global_functions entries rather
+	// than from a class's method list.
+	if len(globals) > 0 {
+		b.WriteString("\n## Global functions\n\n")
+		b.WriteString("On no class. Called without a receiver.\n\n")
+		gdesc := map[string]string{}
+		for _, gf := range a.GlobalFunctions {
+			gdesc[gf.Name] = gf.Description
+		}
+		for _, m := range globals {
+			name, bound := opt.Names[fmt.Sprintf("::%s/%d", m.Name, m.Kind)]
+			if !bound {
+				continue
+			}
+			fmt.Fprintf(&b, "### `%s`\n\n", name)
+			fmt.Fprintf(&b, "`%s` — global function\n\n", m.Name)
+			if d := oneLine(gdesc[m.Name]); d != "" {
+				fmt.Fprintf(&b, "%s\n\n", d)
+			}
+		}
 	}
 
 	for _, cls := range classes {
@@ -128,6 +165,8 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 
 func kindWord(k int) string {
 	switch k {
+	case MemberGlobalFunc:
+		return "global function"
 	case MemberGet:
 		return "attribute (read)"
 	case MemberSet:

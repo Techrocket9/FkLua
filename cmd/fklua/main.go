@@ -2235,9 +2235,15 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 		attrs, reads, writes, bound[factorio.MemberGet], bound[factorio.MemberSet],
 		bound[factorio.MemberGetEq])
 	fmt.Printf("  %4d class operators -> %d members\n", ops, nOps)
-	fmt.Printf("  %4d global functions -> 0 members: they are not on a class and\n",
-		len(a.GlobalFunctions))
-	fmt.Println("       fk.call takes a handle. A decision, not a gap; see agents/abi.md.")
+	// THE GLOBAL FUNCTIONS, which read "-> 0 members: they are not on a class
+	// and fk.call takes a handle" for eight milestones. That was a decision and
+	// it was written down here and in census.json, which is the only reason it
+	// could be re-taken rather than rediscovered. The kind's branch in M.invoke
+	// runs BEFORE the handle is resolved, so "fk.call takes a handle" stopped
+	// being an obstacle the moment somebody asked for one of the three.
+	fmt.Printf("  %4d global functions -> %d members, on no class: the binding is\n",
+		len(a.GlobalFunctions), bound[factorio.MemberGlobalFunc])
+	fmt.Println("       package-level and the handle operand is unread. See agents/abi.md.")
 	// THE HANDLE VARIANTS, WHICH THIS LINE DID NOT MENTION. An attribute typed
 	// LuaCustomTable gets a SECOND member returning the handle, so the four
 	// lines above summed to 4784 against a member table of 4842 and the
@@ -2255,10 +2261,11 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 		bound[factorio.MemberIndexSet])
 	fmt.Println("       allowlist in gen.go: the description declares no write side for one.")
 	// And the sum, stated, because a decomposition nobody adds up is a list.
-	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d + %d is the same number.\n",
+	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d + %d + %d is the same number.\n",
 		len(r.Members), bound[factorio.MemberCall], bound[factorio.MemberGet],
 		bound[factorio.MemberSet], bound[factorio.MemberGetEq], nOps,
-		bound[factorio.MemberGetHandle], bound[factorio.MemberIndexSet])
+		bound[factorio.MemberGetHandle], bound[factorio.MemberIndexSet],
+		bound[factorio.MemberGlobalFunc])
 	// The identity the census carries, printed where the numbers are. It closes
 	// exactly, in both languages, and TestTheCensusMemberArithmeticCloses is
 	// what keeps it closing -- it did NOT close until the string-enum constants

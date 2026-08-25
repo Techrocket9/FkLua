@@ -4,7 +4,7 @@ How the generated bindings reach Factorio's runtime API, what a mod actually shi
 
 ## Coverage
 
-The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,257 of 4,259 members, 219 event payload structs (every event the description declares), 1,329 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators plus the write half of the two that have one, and 240 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Two members are deferred, both a name that collides with another member of the same class. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,260 of 4,262 members, 219 event payload structs (every event the description declares), 1,329 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators plus the write half of the two that have one, the three global functions, and 240 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Two members are deferred, both a name that collides with another member of the same class. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
 
 ## One import, not thousands
 
@@ -44,6 +44,32 @@ err = fkapi.LuaCustomTable{Object: raw}.Set(
 The write replaces the whole `ModSetting` table, which is why the value is a map with a `value` key. Factorio accepts it on `settings.global`, `settings.player_default`, `player.mod_settings`, `settings.get_player_settings(player)` and `style.column_alignments`, and refuses it everywhere else: any other custom table answers `ERR_CALL_FAILED` carrying the engine's own "LuaCustomTable is read only", and a key that is not a defined setting answers it with "doesn't contain key". A mod can only change its own settings. The change is per save rather than per installation, it does not reach `mod-settings.dat`, and it raises `on_runtime_mod_setting_changed` before the call returns, so a handler for that event runs inside the write. Factorio refuses the write during `on_init`.
 
 Writing an absent value to a `LuaFluidBox` clears it, which is Factorio's own behaviour for `fluidbox[n] = nil`. New fluid boxes cannot be added or removed this way and the index must be in bounds.
+
+## Global functions
+
+Three of Factorio's functions belong to no class: `log`, `localised_print` and `table_size`. They bind as package-level functions, `Log`, `LocalisedPrint` and `TableSize` in Go and `log`, `localised_print` and `table_size` in Rust, and each takes one tier-2 value.
+
+`log` is the one worth knowing about, because it is the only way to read a profiler. `LuaProfiler` has no member that returns its duration; the engine renders one only when the profiler is an element of a localised string, and the rendered line lands in the game log:
+
+```go
+p, err := fkapi.Helpers.CreateProfiler(nil)
+if err != nil {
+    return
+}
+work()
+if err := (fkapi.LuaProfiler{Object: p}).Stop(); err != nil {
+    return
+}
+err = fkapi.Log(fkapi.OfArray(
+    fkapi.OfString(""),
+    fkapi.OfString("[mymod] rebuild "),
+    fkapi.OfObject(p),
+))
+```
+
+The empty first element is a localised string's concatenate-the-rest form, and what appears in `factorio-current.log` is the message followed by the engine's own `Duration: 12.368959ms`. For a plain string with no localisation and no object in it, `fk.Log` is one import and no host call.
+
+`localised_print` writes to standard output rather than to the log file, for a tool that launched the game as a child process. `table_size` counts the keys of a plain Lua table; it does not work on a `LuaCustomTable`, whose `Length()` operator answers that question without the table crossing at all.
 
 ## Events
 

@@ -326,12 +326,25 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 	sort.Strings(classes)
 
 	for _, cls := range classes {
-		if cls == "" {
-			continue // global functions are not on a class; not bound yet
+		// GLOBAL FUNCTIONS ARE ON NO CLASS, so there is no type to declare and
+		// the bindings are package-level. This branch replaces a `continue`
+		// whose comment read "not bound yet" and was true for as long as this
+		// generator has existed; see MemberGlobalFunc.
+		//
+		// The typeName that reaches goMember is the EMPTY STRING rather than
+		// exportName(""), which is "X": the empty string is what goMemberVariant
+		// asks about, and an "X" would name three struct types after nothing.
+		global := cls == ""
+		typeName := ""
+		if global {
+			w("\n// Factorio's three GLOBAL FUNCTIONS, which belong to no class and are\n")
+			w("// package-level here for that reason. fk.call's handle operand is\n")
+			w("// unread for them and the bindings pass 0.\n\n")
+		} else {
+			typeName = exportName(cls)
+			w("\n// %s wraps a handle to a %s.\ntype %s struct{ Object }\n\n",
+				typeName, cls, typeName)
 		}
-		typeName := exportName(cls)
-		w("\n// %s wraps a handle to a %s.\ntype %s struct{ Object }\n\n",
-			typeName, cls, typeName)
 
 		// A class can declare a method and an attribute with names that collide
 		// once camel-cased. Emitting both would not compile, so the second is
@@ -343,9 +356,16 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 				out.defer1(why)
 				continue
 			}
-			if seen[name] {
+			if seen[name] || (global && structs.taken(name)) {
 				// A class can declare a method and an attribute whose names
 				// collide once camel-cased; emitting both would not compile.
+				//
+				// A GLOBAL FUNCTION IS PACKAGE-LEVEL, so its neighbours are not
+				// a class's members but every generated TYPE -- hence the second
+				// clause, which is the same question the string-enum constant
+				// loop already asks. No pinned description collides (`Log`,
+				// `LocalisedPrint`, `TableSize` name no concept), and a deferral
+				// with a reason beats a package that does not compile.
 				out.defer1("Go name collides with another member of the class")
 				continue
 			}
@@ -367,6 +387,13 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 			// per-MEMBER and this is a second binding over the same member --
 			// counting it would inflate the coverage figure with functions the
 			// host does not know exist. It is counted separately.
+			//
+			// Not asked for a global function: none of the three returns a
+			// container, so the variant would report "no" anyway, and asking
+			// keeps a shape out of the emitted file that has no caller.
+			if global {
+				continue
+			}
 			isrc, iname, isig, iok := goMemberInto(structs, typeName, m)
 			if iok && !seen[iname] {
 				seen[iname] = true
@@ -1005,7 +1032,15 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 		w("// TagNumber matches nothing there, silently. Read the index off the\n")
 		w("// handle if that is what you want.\n")
 	}
-	w("func (o %s) %s(%s) %s {\n", typeName, name, strings.Join(params, ", "), retType)
+	// NO RECEIVER FOR A GLOBAL FUNCTION. `log`, `localised_print` and
+	// `table_size` are on no class, so there is nothing for a method to hang
+	// off; the handle operand below is a literal 0 for the same reason.
+	if m.Kind == MemberGlobalFunc {
+		w("func %s(%s) %s {\n", name, strings.Join(params, ", "), retType)
+	} else {
+		w("func (o %s) %s(%s) %s {\n", typeName, name,
+			strings.Join(params, ", "), retType)
+	}
 
 	// The values a failed call returns beside the status, one per declared
 	// return. A multi-return member needs one apiece, which is the only place
@@ -1161,7 +1196,16 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 	if rets.Size > 0 {
 		rp = "ptr(&r[0])"
 	}
-	w("\tif st := hostCall(o.h, %d, %s, %s); st != 0 {\n", m.ID, ap, rp)
+	// THE HANDLE, and 0 for a global function -- which every other kind answers
+	// ERR_BAD_HANDLE and this one never reads, because M.invoke's GFUNC branch
+	// runs before the handle is resolved at all. The constant scan that prunes
+	// the shipped member table reads operand 1 and not operand 0, so a literal
+	// here changes nothing about what a mod ships.
+	recv := "o.h"
+	if m.Kind == MemberGlobalFunc {
+		recv = "0"
+	}
+	w("\tif st := hostCall(%s, %d, %s, %s); st != 0 {\n", recv, m.ID, ap, rp)
 	w("\t\treturn %sStatus(st)\n\t}\n", zero)
 	// ONE DECODE PER RETURN FIELD, into v0, v1, ... ONE ABSENT FIELD MUST NOT
 	// RETURN EARLY, which is the whole structural change the multi-return work
