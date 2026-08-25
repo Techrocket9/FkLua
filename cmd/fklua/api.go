@@ -256,44 +256,106 @@ func runAPIDiff(args []string) error {
 }
 
 // runAPICheck answers "does MY mod survive the upgrade" for one compiled guest.
+//
+// THE EXIT CODE IS A CONTRACT, because the callers this feature exists for are
+// scripts. A build harness deciding per guest whether a cross-series package is
+// safe reads a status, not a paragraph:
+//
+//	0  nothing this guest uses breaks between the two versions
+//	1  something does, OR the scan could not see everything the guest reaches
+//	2  the check could not be run at all -- a bad flag, an unreadable module,
+//	   a version this installation does not have
+//
+// 1 and 2 were one code until 2026-08-25, which made "your mod is fine and the
+// pin move is safe" indistinguishable from "you typed the version wrong" to
+// everything except a human reading stderr. 0 and 1 keep exactly the meanings
+// they had, so a CI job gating on non-zero is unaffected.
+//
+// `--json` is the DATA INTERFACE and the table above it is not, however much a
+// table looks like one -- this repo has already paid for that confusion once,
+// in a weekly bot that read `api list`'s legend line as a version. The human
+// report is unchanged and prints in exactly the cases it always did.
 func runAPICheck(args []string) error {
+	res, asJSON, err := checkGuestFromArgs(args)
+	if err != nil {
+		// Operational: nothing was checked, so there is no verdict to report.
+		return &exitError{code: 2, msg: err.Error()}
+	}
+	if asJSON {
+		raw, err := res.JSON()
+		if err != nil {
+			return &exitError{code: 2, msg: err.Error()}
+		}
+		os.Stdout.Write(raw)
+	} else {
+		fmt.Print(res.Report())
+	}
+	if code := res.ExitCode(); code != 0 {
+		return &exitError{code: code}
+	}
+	return nil
+}
+
+// checkGuestFromArgs is everything that can fail operationally, separated so
+// that the exit code above is decided in one place rather than at each return.
+func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
+	var res factorio.CheckResult
 	var wasmPath, to string
+	asJSON := false
 	from := factorio.DefaultAPIVersion
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--to":
 			if i+1 >= len(args) {
-				return fmt.Errorf("--to needs a version")
+				return res, asJSON, fmt.Errorf("--to needs a version")
 			}
 			i++
 			to = args[i]
 		case args[i] == "--from":
 			if i+1 >= len(args) {
-				return fmt.Errorf("--from needs a version")
+				return res, asJSON, fmt.Errorf("--from needs a version")
 			}
 			i++
 			from = args[i]
+		case args[i] == "--json":
+			// A BOOLEAN, WHERE `api diff --json` TAKES A PATH, and the
+			// divergence is deliberate: this one's whole job is to be captured
+			// by the shell that ran it, and a caller made to name a temp file to
+			// read one verdict has been given a worse interface for symmetry's
+			// sake. The cost is that `--json out.json` is a thing somebody will
+			// type out of habit, which is why the positional below is refused
+			// twice rather than silently overwritten -- the E1 shape (one flag
+			// spelled two ways across two commands) is a trap only when getting
+			// it wrong is quiet.
+			asJSON = true
 		case strings.HasPrefix(args[i], "-"):
-			return fmt.Errorf("unknown flag %q", args[i])
+			return res, asJSON, fmt.Errorf("unknown flag %q", args[i])
 		default:
+			if wasmPath != "" {
+				return res, asJSON, fmt.Errorf(
+					"expected one guest module, got %q and %q (note that "+
+						"`api check --json` takes no path: the verdict goes to "+
+						"stdout, unlike `api diff --json PATH`)", wasmPath, args[i])
+			}
 			wasmPath = args[i]
 		}
 	}
 	if wasmPath == "" || to == "" {
-		return fmt.Errorf("usage: fklua api check GUEST.wasm --to <version> [--from <version>]")
+		return res, asJSON, fmt.Errorf(
+			"usage: fklua api check GUEST.wasm --to <version> [--from <version>] [--json]")
 	}
 
 	im, err := loadModule(wasmPath)
 	if err != nil {
-		return err
+		return res, asJSON, err
 	}
 	a, err := factorio.LoadAPI(apiPath(from))
 	if err != nil {
-		return fmt.Errorf("%s: %w (run `fklua api pull %s`)", from, err, from)
+		return res, asJSON, fmt.Errorf("%s: %w (run `fklua api pull %s`)", from, err, from)
 	}
 	b, err := factorio.LoadAPI(apiPath(to))
 	if err != nil {
-		return fmt.Errorf("%s: %w (run `fklua api pull %s`)", to, err, to)
+		return res, asJSON, fmt.Errorf("%s: %w (run `fklua api pull %s`)", to, err, to)
 	}
 
 	report := factorio.GenerateMembers(a)
@@ -302,14 +364,14 @@ func runAPICheck(args []string) error {
 	usedE, eOK := factorio.UsedEvents(im)
 	surface := factorio.SurfaceOf(report, usedM, mOK, usedE, eOK, evs)
 
-	res := factorio.CheckGuest(surface, factorio.DiffAPI(a, b))
-	fmt.Print(res.Report())
-	// Non-zero when something the guest uses breaks, so CI can gate without
-	// parsing. An incomplete scan is also non-zero: unproven is not a pass.
-	if len(res.Hits) > 0 || !surface.Complete {
-		os.Exit(1)
-	}
-	return nil
+	// From and To come out of the DESCRIPTIONS' own application_version rather
+	// than from what was typed, which is what makes echoing them worth anything:
+	// `--from` defaults to this binary's pin, so a harness that passed no
+	// version has no other way to learn which one it got, and the default moving
+	// under it is a real thing that has happened here twice.
+	res = factorio.CheckGuest(surface, factorio.DiffAPI(a, b))
+	res.Guest = wasmPath
+	return res, asJSON, nil
 }
 
 // runDocs renders the per-language API reference.

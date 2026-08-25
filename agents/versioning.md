@@ -104,13 +104,63 @@ The manifest is not new work. `UsedMembers` already recovers exactly which membe
 
 **The surface is more than the member list.** A guest calling a member whose argument is a `MapGenSettings` breaks when `MapGenSettings` gains a field, even though the member itself did not change — so the check also collects every named type reachable from the signatures it uses, recursively through structs, arrays and dictionaries. Without that it would miss the *dominant* shape of the 2.0.77 → 2.1.12 breakage, which is table concepts gaining fields.
 
+### The exit code is a contract, and `--json` is the interface
+
 Exits non-zero when something breaks, so CI can gate without parsing. **It also exits non-zero when the scan was incomplete** — if a member id was not a compile-time constant the check cannot see everything, and unproven is not a pass.
+
+**Since 2026-08-25 there are THREE codes, because "your guest is fine" and "you misspelled the version" were both 1** and nothing but a human reading stderr could tell them apart. `api check` is the one command here that answers a *question* rather than performing a task, so two of its three outcomes are successful runs:
+
+| exit | meaning | `verdict` |
+|---:|---|---|
+| **0** | nothing this guest uses breaks between the two versions | `clean` |
+| **1** | something does | `impacted` |
+| **1** | the scan could not see everything the guest reaches | `unproven` |
+| **2** | the check could not be RUN: a bad flag, an unreadable module, a version this installation does not have | — none; nothing is printed to stdout |
+
+0 and 1 keep exactly the meanings they had, so a job gating on non-zero is unaffected; 2 is carved out of what used to be 1 and reaches only paths that checked nothing. The plumbing is `exitError` in `cmd/fklua/main.go` — a status a subcommand chose deliberately, printed and unwrapped by `reportExit`. It is scoped to `api check`: `api pull|list|diff` still exit 1 on an error, and `api diff --breaking`'s own `os.Exit(1)` is untouched.
+
+**`--json` writes one verdict object to stdout and the human table is not printed at all in that mode.** The split is the recorded lesson from `api list`: *a human-facing table is not a data interface however much it looks like one*, and the weekly bot that read this repo's own legend line as a version is what that cost. The table stays free to grow a sentence; the document does not.
+
+```json
+{
+  "from": "2.0.77",
+  "to": "2.1.16",
+  "guest": "dist/observer.wasm",
+  "verdict": "impacted",
+  "complete": true,
+  "exit_code": 1,
+  "surface": { "members": 12, "events": 3, "concepts": 8 },
+  "breaking_total": 221,
+  "ignored": 220,
+  "findings": [
+    {
+      "what": "LuaAssemblingMachineControlBehavior::include_fuel",
+      "kind": "breaking",
+      "match": "member",
+      "detail": "attribute removed"
+    }
+  ]
+}
+```
+
+Four properties are the contract rather than the rendering, and each has a test that fails when it moves:
+
+- **`from` and `to` are the RESOLVED versions, always**, taken from the descriptions' own `application_version`. `--from` defaults to **this binary's `DefaultAPIVersion`**, which is the gotcha every downstream harness has to know — pass it explicitly — and echoing it is the only way a caller that did not learns which description its answer is about. That constant has moved under this repo twice.
+- **Field names are lowercase_snake and the key SET is pinned**, top level, `surface` and a finding alike. A typed unmarshal is silent about a renamed field, which is exactly the drift a consumer meets in production, so the test reads the keys as raw JSON and requires the set exactly — adding a field is an edit to that list.
+- **`findings` is `[]` and never `null`.** `encoding/json` reads both as an empty slice, so this is a property of the BYTES and is asserted on them.
+- **`match` says why a finding reaches this guest** — `member`, `event`, `concept`, `class` or `schema`. It is the question a reader has after "what moved": a `MapPosition` gaining a field is a type the guest never named, and it is here because a member it calls takes one. The values are a closed set in `internal/factorio/apicheck.go` and nowhere else.
+
+`ExitCode()` is **derived from** `Verdict()` rather than decided beside it, because two functions answering one question is how a table and the code behind it come apart — which is this file's own most-repeated shape.
+
+**`api check --json` is a BOOLEAN where `api diff --json` takes a PATH**, and that is a deliberate divergence rather than an oversight: this one's whole job is to be captured by the shell that ran it, and making a caller name a temp file to read one verdict is a worse interface bought with symmetry. It is the **E1 shape** (one flag spelled two ways across two commands) and E1's own conclusion is that the split is a trap only when getting it wrong is quiet — so `api check` refuses a **second positional argument** now, naming the difference, where it used to silently overwrite the guest path with it. `--json out.json` is the thing somebody types out of habit, and it is an error with an explanation rather than a check of a file that is not a module.
 
 ### The gate is a deliberately broken fixture, plus a control
 
 A check that reports "clean" for every guest passes trivially and is worth nothing — and that is the live failure mode, because most guests really are unaffected by most releases, so a broken implementation looks identical to a working one on real input.
 
 `TestAPICheckCatchesABrokenGuest` builds a guest that calls `LuaAssemblingMachineControlBehavior::include_fuel`, removed in 2.1.12, and asserts it is reported: **1 hit, 199 ignored**. The control is `examples/api`, which must come back clean — without it, a check that reported every breaking change would pass the first half.
+
+**The status and the document are gated separately, in `cmd/fklua/apicheck_test.go`, and without a toolchain.** Both members are DERIVED from the two committed descriptions at test time — the impacted one is a member whose own identity is in the breaking list, the clean one is the first member whose identity, class and every named type in its signature all survive — and the guest is `stampedGuest`'s hand-written `.wat` calling one member by a constant id. An id baked into a test file is one that quietly stops discriminating the next time either description is regenerated. Anti-vacuity is explicit on both sides: the clean case fails if the diff has no breaking change in it at all, and the impacted case fails if `ignored` is 0, which is what a check that reports everything looks like. Confirmed red four ways — the verdict inverted, exit 2 collapsed back into 1 (all six operational cases fire), `findings` emitted as `null`, and one field renamed to lowerCamel.
 
 ## `fklua init` and `fklua lock` — **built**
 

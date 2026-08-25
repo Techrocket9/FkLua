@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,8 +133,7 @@ func main() {
 	switch os.Args[1] {
 	case "api":
 		if err := runAPI(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "fklua api: %v\n", err)
-			os.Exit(1)
+			os.Exit(reportExit("fklua api", err))
 		}
 	case "docs":
 		if err := runDocs(os.Args[2:]); err != nil {
@@ -363,6 +363,38 @@ func writeJSON(path string, results []bench.Result) error {
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// exitError is a status a subcommand chose deliberately, rather than the
+// blanket 1 an error gets.
+//
+// It exists because `api check` answers a QUESTION rather than performing a
+// task: "nothing breaks" and "something breaks" are both successful runs, and
+// only the third case -- the check could not be run -- is a failure in the
+// ordinary sense. A caller that cannot tell those apart has to parse prose to
+// find out whether its build is safe.
+//
+// An empty msg means the command has already said everything it has to say on
+// stdout, so nothing is printed to stderr.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
+
+// reportExit prints whatever an error still has to say and returns the status
+// to leave with. An error that named no code is the usual 1.
+func reportExit(prefix string, err error) int {
+	var ee *exitError
+	if errors.As(err, &ee) {
+		if ee.msg != "" {
+			fmt.Fprintf(os.Stderr, "%s: %s\n", prefix, ee.msg)
+		}
+		return ee.code
+	}
+	fmt.Fprintf(os.Stderr, "%s: %v\n", prefix, err)
+	return 1
 }
 
 func repoRoot() (string, error) {

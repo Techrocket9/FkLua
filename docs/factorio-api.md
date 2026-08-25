@@ -73,3 +73,49 @@ The default pin is the general-availability release, **2.0.77**, because a defau
 ## A new Factorio version
 
 A new version is a data drop, not a porting job. `fklua api pull <version>` fetches and commits its description, `api list` shows what is cached, `api diff` classifies what moved between two versions, and `api check GUEST.wasm --to <version>` says whether anything your compiled mod actually calls changed. Adding the 2.1.12 description (482 new members) needed no generator change. The migration checklists are in [`agents/versioning.md`](../agents/versioning.md).
+
+### Checking one guest from a script
+
+`api check` is built to be gated on, so it has three exit codes:
+
+| Exit | Meaning |
+|---:|---|
+| 0 | nothing this guest uses breaks between the two versions |
+| 1 | something does, or the scan could not see everything the guest reaches |
+| 2 | the check could not be run: a bad flag, an unreadable module, a version this installation does not have |
+
+Codes 0 and 1 are both successful runs. The third is what separates "your mod is fine" from "you typed the version wrong".
+
+`--json` writes one verdict object to standard output instead of the report, so a build script does not have to read prose:
+
+```sh
+fklua api check dist/my-mod.wasm --from 2.0.77 --to 2.1.16 --json
+```
+
+```json
+{
+  "from": "2.0.77",
+  "to": "2.1.16",
+  "guest": "dist/my-mod.wasm",
+  "verdict": "impacted",
+  "complete": true,
+  "exit_code": 1,
+  "surface": { "members": 12, "events": 3, "concepts": 8 },
+  "breaking_total": 221,
+  "ignored": 220,
+  "findings": [
+    {
+      "what": "LuaAssemblingMachineControlBehavior::include_fuel",
+      "kind": "breaking",
+      "match": "member",
+      "detail": "attribute removed"
+    }
+  ]
+}
+```
+
+`verdict` is `clean`, `impacted` or `unproven`, and it is the field to branch on. `unproven` means a member or event id was not a compile-time constant, so the scan could not see everything the guest reaches; it exits 1 because unproven is not a pass, and `complete` carries the same fact for a caller that wants both. `match` on a finding says why that change reaches this guest: `member` and `event` are things the guest calls or subscribes to, `concept` is a named type reachable from a signature it uses, `class` is a class-level change that takes every member on that class with it, and `schema` is the description format itself moving. `findings` is always an array, empty on a clean verdict.
+
+**Pass `--from` explicitly.** It defaults to the FkLua binary's own pin, and that value moves between FkLua releases, so a script that omits it can silently start asking a different question. The document echoes the versions it resolved for exactly that reason.
+
+Every field name in the document is stable. The report printed without `--json` is not: it is presentation and free to change wording, so parse the JSON rather than the report.
