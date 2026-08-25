@@ -42,6 +42,7 @@ Usage:
   fklua mod IN.wasm [-o DIR] [--zip] [--nan=MODE] [--opt=N] [--include DIR]...
             [--persist=table|packed|auto|none] [--fuel=N]
             [--gc=leaking|collected] [--api=VERSION] [--factorio-version X.Y]
+            [--data-module DATA.wasm] [--stage KEY=a,@guest,b]...
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
             [--description D] [--dependency DEP]...
                                      (identity defaults to fklua.toml's [mod])
@@ -94,6 +95,15 @@ what the in-game gates in scripts/ pass. A guest that wants to know which engine
 it is actually running on asks at RUN TIME -- helpers.game_version -- which is
 how fkipc's version floor works, so a GA-pinned mod gets the whole IPC library
 on a newer engine with no rebuild.
+
+` + "`--data-module`" + ` gives the mod a SETTINGS and DATA stage written in Go or
+Rust: a second wasm module, compiled from its own main package, that reaches
+data.raw through the fkdata library. fklua writes a stage file for each hook the
+module exports -- fk_settings, fk_data, fk_data_updates, fk_data_final_fixes --
+and ` + "`--stage KEY=a,@guest,b`" + ` (or ` + "`[stages]`" + ` in fklua.toml) says what
+order that file loads things in while hand-written Lua is still in the chain.
+A data module must not import the generated fkapi bindings: those stages have no
+runtime API, and packaging refuses one that does. See docs/data-stage.md.
 
 ` + "`bench`" + ` measures FkLua-style generated Lua against the Lua a mod author
 would write by hand. ` + "`spectest`" + ` runs the official WebAssembly conformance
@@ -1265,6 +1275,18 @@ func runMod(args []string) error {
 	// be recovered from the value. See the override below.
 	var deps []string
 	depsFromFlag := false
+	// THE DATA STAGE. A second wasm module, compiled from its own main package,
+	// that runs at Factorio's settings and data stages -- see
+	// internal/factorio/stage.go. It travels the way every other manifest-backed
+	// setting here does: the file is the default, the flag is the override, and
+	// "was the flag typed" is a boolean rather than a comparison against a
+	// default, because the empty string is a meaningful value ("no data guest").
+	dataModule := ""
+	dataFromFlag := false
+	// The [stages] chains. Nil until something declares one, because an ABSENT
+	// key and a key declared as an empty list mean different things and a map
+	// that invented entries would erase the difference.
+	var stages map[string][]string
 
 	str := func(i *int, flag string, dst *string) error {
 		if *i+1 >= len(args) {
@@ -1304,6 +1326,27 @@ func runMod(args []string) error {
 			var dir string
 			if err = str(&i, "--include", &dir); err == nil {
 				include = append(include, dir)
+			}
+		case args[i] == "--data-module":
+			err = str(&i, "--data-module", &dataModule)
+			dataFromFlag = err == nil
+		case args[i] == "--stage":
+			// KEY=a,@guest,b. A flag form for a manifest key, and the reason is
+			// the multi-project one rather than symmetry: one checkout that
+			// packages several mods drives them from one Makefile with one
+			// manifest describing the shipped one and flags describing the rest,
+			// which is what a key with no flag would make impossible.
+			var spec string
+			if err = str(&i, "--stage", &spec); err == nil {
+				var key string
+				var chain []string
+				key, chain, err = parseStageFlag(spec)
+				if err == nil {
+					if stages == nil {
+						stages = map[string][]string{}
+					}
+					stages[key] = chain
+				}
 			}
 		case strings.HasPrefix(args[i], "--nan="):
 			nan, err = luagen.ParseNaNMode(strings.TrimPrefix(args[i], "--nan="))
@@ -1448,6 +1491,20 @@ func runMod(args []string) error {
 			apiVersion = proj.API
 			apiPin = pinSource{what: projectFile + ", [fklua] api", file: projectFile}
 		}
+		// And so does the data module, and so does every [stages] key the flags
+		// did not name -- per key rather than wholesale, so `--stage data=...`
+		// overrides one chain without silently discarding the other three.
+		if proj.DataModule != "" && !dataFromFlag {
+			dataModule = proj.DataModule
+		}
+		for key, chain := range proj.Stages {
+			if stages == nil {
+				stages = map[string][]string{}
+			}
+			if _, typed := stages[key]; !typed {
+				stages[key] = chain
+			}
+		}
 	}
 
 	if info.Name == "" {
@@ -1500,12 +1557,50 @@ func runMod(args []string) error {
 		return err
 	}
 
-	pkg := &factorio.Package{Info: info, Chunk: src}
+	pkg := &factorio.Package{Info: info, Chunk: src, Stages: stages}
 	for _, e := range im.Exports {
 		pkg.Exports = append(pkg.Exports, e.Name)
 	}
 	if err := attachAPI(pkg, im, apiVersion, apiPin); err != nil {
 		return err
+	}
+	// THE DATA STAGE. A second module through the same pipeline, and the flags
+	// it is NOT given are as deliberate as the ones it is.
+	//
+	// No --persist: it runs once and dies with the Lua state that built it, so
+	// there is nothing to save. No --gc: same reason, and a collector's pacing
+	// surface is driven from a tick this stage does not have. No --api and no
+	// member table: it calls no runtime API, which is checked rather than
+	// assumed. What it DOES share is the NaN mode and the -opt level, because
+	// those are properties of the emitter rather than of the mod's lifecycle,
+	// and two modules in one mod compiled at two levels would be a confusing
+	// thing to debug.
+	var dataModuleSize int
+	if dataModule != "" {
+		dim, err := loadModule(dataModule)
+		if err != nil {
+			return err
+		}
+		var imports, exports []string
+		for _, im := range dim.Source.Imports {
+			imports = append(imports, im.Module+"."+im.Name)
+		}
+		for _, e := range dim.Exports {
+			exports = append(exports, e.Name)
+		}
+		if err := factorio.CheckDataModule(imports, exports); err != nil {
+			return fmt.Errorf("%s: %w", dataModule, err)
+		}
+		dsrc, err := emitWithDiagnostics(dim, luagen.Options{
+			NaN: nan, Opt: opt, Persist: luagen.PersistNone, GC: luagen.GCLeaking,
+			Roots: factorio.StageExportNames(),
+		})
+		if err != nil {
+			return err
+		}
+		pkg.DataChunk = dsrc
+		pkg.DataExports = exports
+		dataModuleSize = len(dsrc)
 	}
 	// The data stage. Merged into Files() BEFORE either writer runs, so a
 	// directory and a zip carry the same bytes -- copying files over the output
@@ -1545,12 +1640,31 @@ func runMod(args []string) error {
 	if n := len(pkg.Extra); n > 0 {
 		fmt.Printf("  included %d file(s) from %s\n", n, strings.Join(include, ", "))
 	}
+	if dataModule != "" {
+		fmt.Printf("  data module %s (%d bytes of Lua)\n", dataModule, dataModuleSize)
+	}
 
 	// Say what was actually connected. A guest that misspells fk_on_tick
 	// otherwise gets a mod that loads, does nothing, and explains nothing.
 	found, absent := pkg.Wiring()
 	for _, h := range found {
 		fmt.Printf("  wired %-12s -> %s\n", h.Export, h.What)
+	}
+	// The same for the data stage, and a mod with a data module that exports
+	// nothing gets told so: it would otherwise ship a module that is parsed at
+	// no stage and called from nowhere.
+	if dataModule != "" {
+		dfound, dabsent := pkg.DataWiring()
+		for _, h := range dfound {
+			fmt.Printf("  wired %-20s -> %s\n", h.Export, h.File)
+		}
+		if len(dfound) == 0 {
+			fmt.Println("\nThe data module exports no stage hook, so no stage file was")
+			fmt.Println("generated and it will never run. Export one of:")
+			for _, h := range dabsent {
+				fmt.Printf("  %-20s %s\n", h.Export, h.What)
+			}
+		}
 	}
 	if pkg.Inert() {
 		fmt.Println("\nThis guest exports no event hook, so the mod will load and then never")
@@ -1562,6 +1676,35 @@ func runMod(args []string) error {
 		}
 	}
 	return nil
+}
+
+// parseStageFlag reads `--stage KEY=a,@guest,b`.
+//
+// The key is checked against the four stages here rather than left to the
+// packager, so a typo is one message naming the four rather than a stage file
+// that is silently not generated.
+func parseStageFlag(spec string) (string, []string, error) {
+	key, list, ok := strings.Cut(spec, "=")
+	if !ok {
+		return "", nil, fmt.Errorf("--stage takes KEY=a,%s,b -- the stages are %s",
+			factorio.GuestStageEntry, strings.Join(factorio.StageKeys(), ", "))
+	}
+	key = strings.TrimSpace(key)
+	if _, known := factorio.StageHookByKey(key); !known {
+		return "", nil, fmt.Errorf("--stage %s: unknown stage; the stages are %s",
+			key, strings.Join(factorio.StageKeys(), ", "))
+	}
+	// An empty list is legal and means a stage file with no requires, which is
+	// different from not declaring the key at all -- so the slice is non-nil
+	// even when there is nothing in it.
+	chain := []string{}
+	for _, part := range strings.Split(list, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			chain = append(chain, part)
+		}
+	}
+	return key, chain, nil
 }
 
 // hookNames is the set of exports a packaged mod actually wires, which is what

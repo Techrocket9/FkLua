@@ -20,6 +20,9 @@ var modGlue string
 //go:embed lua/fk_abi.lua
 var abi string
 
+//go:embed lua/fk_data.lua
+var dataStage string
+
 // Prelude returns the runtime source that is inlined at the top of every
 // generated chunk.
 //
@@ -44,3 +47,14 @@ func ModGlue() string { return modGlue }
 // code calls into; this is what control.lua uses to hand LuaObjects across the
 // boundary, and it never appears inside a compiled function.
 func ABI() string { return abi }
+
+// DataStage returns the data-stage ABI: the shim a packaged mod requires as
+// fk_data.lua, from the settings.lua / data.lua / data-updates.lua /
+// data-final-fixes.lua files fklua generates.
+//
+// A third hand-written file rather than part of fk_mod.lua, because the two
+// stages share nothing: this one has no `game`, no `script`, no `storage`, no
+// events and no persistence, and the module it instantiates is a different wasm
+// module compiled from a different main package. It requires fk_abi.lua for the
+// tier-2 codec and binds only what that needs.
+func DataStage() string { return dataStage }

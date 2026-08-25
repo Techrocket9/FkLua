@@ -131,6 +131,27 @@ type Package struct {
 	// extraFrom remembers which included directory contributed each key, so a
 	// collision between two of them can name both.
 	extraFrom map[string]string
+
+	// DataChunk is the generated Lua for the DATA-STAGE module, if this mod has
+	// one. A second wasm module compiled from its own main package -- see
+	// stage.go, and agents/datastage.md for why it is a second module rather
+	// than another export of the first.
+	//
+	// EMPTY IS "no data guest", and everything below keys on that: with no data
+	// module and no [stages], Files() returns exactly the five entries it always
+	// did, byte for byte.
+	DataChunk string
+	// DataExports names the data module's exported functions, which is what
+	// decides WHICH stage files are generated. A mod with only a data stage must
+	// not get an empty settings.lua.
+	DataExports []string
+	// Stages is the [stages] chain per stage key: an ordered list of require
+	// paths, one entry of which may be GuestStageEntry.
+	//
+	// A DECLARED key with an empty list is different from an ABSENT one -- it
+	// means a stage file with no requires at all -- so presence is what is read
+	// here, never length.
+	Stages map[string][]string
 }
 
 // Include adds every file under dir to the mod, keeping the tree's shape.
@@ -235,6 +256,35 @@ func (p *Package) Files() (map[string]string, error) {
 		APIFile:             api,
 		GeneratedModuleFile: wrapChunk(p.Chunk),
 	}
+	// THE DATA STAGE, and everything about it is gated on there being one.
+	//
+	// A project with no data module and no [stages] section produces exactly the
+	// five entries above and exactly the bytes it always did. That is not a
+	// courtesy: every mod already built with fklua has a hand-written data stage
+	// carried by --include, and a packager that started emitting files into it
+	// would break them all at once. TestAProjectWithNoDataModuleIsByteIdentical
+	// is the gate, and it costs nothing.
+	generated := ""
+	if p.DataChunk != "" {
+		files[DataStageFile] = luart.DataStage()
+		files[DataModuleFile] = wrapDataChunk(p.DataChunk)
+	}
+	chains, err := p.stageChains()
+	if err != nil {
+		return nil, err
+	}
+	if len(chains) > 0 {
+		var names []string
+		for _, h := range StageHooks {
+			chain, ok := chains[h.File]
+			if !ok {
+				continue
+			}
+			files[h.File] = stageFile(h, chain)
+			names = append(names, h.File)
+		}
+		generated = ", " + strings.Join(names, ", ")
+	}
 	// A COLLISION IS AN ERROR, and neither precedence is defensible. Letting
 	// an included file win produces a mod whose guest never runs; letting the
 	// generated one win produces a mod whose data stage is silently not the one
@@ -251,10 +301,31 @@ func (p *Package) Files() (map[string]string, error) {
 	}
 	if len(clashes) > 0 {
 		sort.Strings(clashes)
+		// A STAGE FILE COLLIDING IS THE MID-MIGRATION CASE AND HAS ITS OWN
+		// REMEDY. A mod moving its data stage into Go lands in phases, and while
+		// it does, the included tree still carries data.lua under exactly the
+		// name this now generates. "Rename it" is the wrong advice there and
+		// [stages] is the right one: it puts the hand-written file back in the
+		// chain, in an order the author states, and the migration finishes by
+		// the lists going empty and the section being deleted.
+		for _, c := range clashes {
+			h, isStage := stageFileNamed(c)
+			if !isStage {
+				continue
+			}
+			return nil, fmt.Errorf("included file %s would overwrite the stage "+
+				"file fklua generates for %s. That is the halfway house of a mod "+
+				"moving its data stage into Go, and [stages] in fklua.toml is the "+
+				"way through it: rename the hand-written file (to stages/%s, say) "+
+				"and name it in the chain beside the guest --\n"+
+				"    [stages]\n    %s = [\"stages.%s\", %q]\n"+
+				"-- then delete the entry when the Lua is gone",
+				c, h.What, c, h.Key, strings.TrimSuffix(c, ".lua"), GuestStageEntry)
+		}
 		return nil, fmt.Errorf("included file %s would overwrite a file fklua "+
 			"generates; rename it or leave it out (fklua writes info.json, "+
-			"control.lua, %s, %s and %s)", strings.Join(clashes, ", "),
-			ABIFile, APIFile, GeneratedModuleFile)
+			"control.lua, %s, %s and %s%s)", strings.Join(clashes, ", "),
+			ABIFile, APIFile, GeneratedModuleFile, generated)
 	}
 	for name, body := range p.Extra {
 		files[name] = body
@@ -275,6 +346,32 @@ func wrapChunk(chunk string) string {
 	b.WriteString("--\n")
 	b.WriteString("-- Returns a factory: call it with the host imports table to instantiate.\n")
 	b.WriteString("-- control.lua does that; see runtime/lua/fk_mod.lua in the FkLua repo.\n")
+	b.WriteString("return function(...)\n")
+	b.WriteString(chunk)
+	if !strings.HasSuffix(chunk, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("end\n")
+	return b.String()
+}
+
+// wrapDataChunk is wrapChunk for the data module, and it exists separately for
+// the one line that differs: the header names the file that instantiates it.
+//
+// The wrapping itself is identical and has to be, because the FACTORY SHAPE is
+// what makes a generated chunk loadable at a data stage at all -- `require`
+// gives a chunk no arguments, and the chunk reads its host imports from `...`,
+// so instantiation stays entirely under the caller's control. That was probed
+// before any of this was designed: a real mod's control module requires,
+// builds and initialises cleanly at the settings, data and final-fixes stages,
+// demanding nothing those stages do not have.
+func wrapDataChunk(chunk string) string {
+	var b strings.Builder
+	b.WriteString("-- Generated by fklua. Do not edit.\n")
+	b.WriteString("--\n")
+	b.WriteString("-- The DATA-STAGE guest module. Returns a factory: call it with the host\n")
+	b.WriteString("-- imports table to instantiate. " + DataStageFile + " does that, once per\n")
+	b.WriteString("-- stage; see runtime/lua/fk_data.lua in the FkLua repo.\n")
 	b.WriteString("return function(...)\n")
 	b.WriteString(chunk)
 	if !strings.HasSuffix(chunk, "\n") {

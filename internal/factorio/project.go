@@ -61,6 +61,28 @@ type Project struct {
 	// the DATA STAGE: data.lua, prototypes/, graphics/, locale/. The default
 	// for `fklua mod --include`, which is the mechanism; see Package.Include.
 	Data string
+	// DataModule is a second wasm module, compiled from its own main package,
+	// that runs at Factorio's SETTINGS and DATA stages. The default for
+	// `fklua mod --data-module`, which is the mechanism.
+	//
+	// EMPTY IS "no data guest", and every project written before this key
+	// existed has no line for it -- so `fklua mod` over one emits exactly what
+	// it emitted before, which is the same backward-compatibility rule `gc`
+	// follows and is gated by a byte-identity test.
+	DataModule string
+	// Stages is the [stages] section: an ordered list of require paths per
+	// stage, one entry of which may be "@guest".
+	//
+	// It is a RAMP whose destination is an empty section. A mod moving its data
+	// stage into Go does it a file at a time, and this is what lets the guest
+	// and the remaining hand-written Lua sit in one stage file in an order the
+	// author states -- which is all data.lua has ever been. When the last
+	// require goes the key goes, and an absent key with the hook exported means
+	// ["@guest"].
+	//
+	// A DECLARED key with an empty list is not the same as an ABSENT one, so
+	// this map is read for presence rather than for length.
+	Stages map[string][]string
 	// Dependencies reach info.json verbatim, in Factorio's own syntax:
 	// "base >= 2.0.0" for a hard dependency, "? other-mod" for an optional
 	// one, "! conflicting-mod" for an incompatibility. Not parsed here --
@@ -123,6 +145,29 @@ func ParseProject(src string) (Project, error) {
 				p.Dependencies = items
 				continue
 			}
+			// [stages] IS THE ONE SECTION WHOSE KEYS ARE ALL LISTS, and the
+			// four names are the four stages Factorio has -- there is no fifth
+			// to grow into, so an unknown key here is a typo rather than a
+			// version this build is too old for.
+			//
+			// An EMPTY list is stored as a non-nil empty slice, because the
+			// difference between "declared as nothing" (a stage file with no
+			// requires) and "not declared" (no stage file at all) is read by
+			// presence in this map and nil would erase it.
+			if section == "stages" {
+				if _, ok := StageHookByKey(key); !ok {
+					return p, fmt.Errorf("line %d: unknown key %q in [stages]; the "+
+						"stages are %s", i+1, key, strings.Join(StageKeys(), ", "))
+				}
+				if p.Stages == nil {
+					p.Stages = map[string][]string{}
+				}
+				if items == nil {
+					items = []string{}
+				}
+				p.Stages[key] = items
+				continue
+			}
 			return p, fmt.Errorf("line %d: unknown list key %q in [%s]", i+1, key, section)
 		}
 		val = strings.Trim(val, `"`)
@@ -146,6 +191,8 @@ func ParseProject(src string) (Project, error) {
 			p.API = val
 		case "fklua.gc":
 			p.GC = val
+		case "fklua.data_module":
+			p.DataModule = val
 		default:
 			return p, fmt.Errorf("line %d: unknown key %q in [%s]", i+1, key, section)
 		}
@@ -233,6 +280,36 @@ func (p Project) TOML() string {
 		b.WriteString("# guest, and the only option for Rust and for wasip1.\n")
 		b.WriteString("# See agents/guests.md, \"the guest heap budget\".\n")
 		fmt.Fprintf(&b, "gc = %q\n", p.GC)
+	}
+	if p.DataModule != "" {
+		b.WriteString("\n# A SECOND wasm module, run at Factorio's settings and data stages.\n")
+		b.WriteString("# It is compiled from its own main package and must not import the\n")
+		b.WriteString("# generated fkapi bindings: those stages have no runtime API.\n")
+		b.WriteString("# fklua generates a stage file for each hook the module exports:\n")
+		b.WriteString("#   fk_settings -> settings.lua           fk_data -> data.lua\n")
+		b.WriteString("#   fk_data_updates -> data-updates.lua   fk_data_final_fixes -> data-final-fixes.lua\n")
+		fmt.Fprintf(&b, "data_module = %q\n", p.DataModule)
+	}
+	if len(p.Stages) > 0 {
+		b.WriteString("\n# The order each stage file loads things in, one entry per require,\n")
+		b.WriteString("# with \"@guest\" standing for this mod's own data-stage hook. A RAMP:\n")
+		b.WriteString("# a key here is only needed while hand-written Lua is still in the\n")
+		b.WriteString("# chain, and the destination is an empty section.\n")
+		b.WriteString("[stages]\n")
+		// STAGE ORDER, NOT MAP ORDER. Go randomizes a map walk, and a manifest
+		// that reordered itself on every write would make every regeneration a
+		// diff.
+		for _, h := range StageHooks {
+			chain, ok := p.Stages[h.Key]
+			if !ok {
+				continue
+			}
+			var qs []string
+			for _, e := range chain {
+				qs = append(qs, fmt.Sprintf("%q", e))
+			}
+			fmt.Fprintf(&b, "%s = [%s]\n", h.Key, strings.Join(qs, ", "))
+		}
 	}
 	return b.String()
 }
