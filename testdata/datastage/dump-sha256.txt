@@ -1,0 +1,24 @@
+# The data-stage acceptance golden, one line per engine:
+#
+#     <engine>  <sha256 of `jq -S .` over data-raw-dump.json>  <the mod set>
+#
+# Written and checked by scripts/run-datastage.sh, which packages
+# guest/{go,rust}/examples/datastage as a mod, runs `factorio --dump-data`, and
+# hashes the normalised dump.
+#
+# WHY NORMALISED. Key order in the dump is INSERTION order, so two mods
+# differing only in the order they call data:extend produce dumps that differ at
+# a byte and describe the same game. `jq -S` sorts every object; measured, that
+# removes an ordering difference completely and preserves a real field-value
+# change.
+#
+# WHY THE MOD SET IS HERE. The dump is a function of every mod that ran, and
+# Factorio's bundled DLC data loads whatever --mod-directory says -- so a
+# machine that owns different DLC produces a different dump for a mod that is
+# perfectly fine. Recorded so a mismatch names its own cause and reads as SKIP
+# rather than as a broken mod.
+#
+# WHY PER ENGINE. base's own prototypes move between series, so a hash taken on
+# one engine says nothing about another. `--dump-data` exists on 2.1 and the
+# mechanics are the same; that arm wants a line of its own, taken there.
+2.0.77  b2f94000d43cedff88af03686774d182883feccba977c27836efcc8cd4e0907c  base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
