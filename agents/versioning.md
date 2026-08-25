@@ -286,6 +286,39 @@ make test                                    # sdk/go and cargo legs included
 
 **7. And when GA itself moves to 2.1.x**, this whole recipe applies and **fkipc needs nothing**. Its floor is on the ENGINE and is read from `helpers.game_version` at run time; it has never been a statement about the pin, and `MinEngineVersion` does not move because a description did.
 
+## Moving the current 2.1.x, which is NOT moving the default pin
+
+**A much smaller migration than the one above, and the one this repo actually performs often**: the default stays at GA and a newer 2.1.x becomes the description the project OFFERS as "2.1.x" and the one a shape test names. Distilled from 2.1.14 → 2.1.16 on 2026-08-24.
+
+Almost nothing that makes a pin move expensive applies. `DefaultAPIVersion` does not change, no committed binding is regenerated, no guest loses its heap, no `info.json` series moves, and no downstream project is affected unless it chose to pin. What moves is a **role**: which committed description a reader is pointed at, and which one the tests that are about a 2.1 SHAPE load.
+
+**1. Pull it, and the census arrives with it.** `fklua api pull --from-install` when the engine is already on that Betas branch, `fklua api pull <version>` otherwise. `gen-bindings` takes a census of every description this checkout owns (step 3 above), so the pair lands together and `--check` gates it.
+
+**2. Move the role and nothing else.** The whole list, as of this migration:
+
+| where | what carries the role |
+|---|---|
+| `docs/factorio-api.md`, the 2.1.x bullet | the `api = "<v>"` offer, the bound/total member counts, the event count, the Steam Betas entry |
+| `CLAUDE.md`, the default-pin paragraph | the same `api = "<v>"` offer |
+| `CLAUDE.md`, the pin-versus-engine paragraph and Operations | which engine is installed, its build number, its class count |
+| `agents/abi.md`, the status header | the newest 2.1's bound-of-total |
+| `agents/versioning.md`, the default-pin bullet | which engine this machine's in-game gates run on |
+| `internal/factorio/api.go` | the `api = "<v>"` offer in `DefaultAPIVersion`'s comment, and `Members()`' example count |
+| `internal/factorio/mod.go` | which engine the in-game gates run on |
+| `internal/factorio/api_test.go` | `shapeAPIVersion` — the NEWEST 2.1, so a shape Factorio stops publishing cannot hide behind a version nobody ships |
+| `internal/factorio/operator_test.go` | one new row in `operatorsByVersion` |
+| `scripts/lib-engine.sh` | the sample `--version` line, and the doc examples of what the derivations print |
+
+**Take every count from the new `census.json`**, never by hand and never carried across from another description. `agents/abi.md`'s packaged-table sizes are the exception and are deliberately not on this list: they name the pin they were measured at, which makes them measurements rather than claims.
+
+**3. HISTORY STAYS HISTORY, and here it bites harder than it does for a pin move**, because most 2.1.x mentions in this repo are measurements — the fkipc probe matrix, the gc tail runs, the graphical single-player tick census, "measured at pin X against bindings at Y", the two pin moves themselves. Every one names the version it was taken at and is correct forever. **The test is the tense**: a sentence saying what something IS moves, a sentence saying what something MEASURED does not.
+
+**4. fkipc's floor does not move**, for the reason step 7 above gives, and neither do the host-side fixtures that stand an engine at it. `MinEngineVersion` is 2.1.14 because that is where the headless `recv_udp` abort was measured to stop; a newer engine clearing it is what the floor is for.
+
+**5. An enumeration of committed descriptions is the thing that actually rots.** Several comments listed "2.0.77, 2.1.12 and 2.1.14" to make a claim about all of them, and a fourth description made every one of those quietly incomplete. Where the claim is really about a series, say the series — "every 2.1.x description", "any description committed here" — so the next pull does not need to find them all again.
+
+**6. The gates are the ordinary ones, plus the game**, because a move like this usually means the ENGINE moved too: `make lint`, `make test`, `gen-bindings --check`, and then `run-guest.sh` in both languages and at `GUEST=api` and `GUEST=gcsave`, `run-roundtrip.sh`, and the IPC gates if the new engine clears the floor.
+
 ## The regeneration bot — **built**
 
 `.github/workflows/api-regen.yml`, weekly. Polls for a release newer than anything committed and, when it finds one, opens a PR carrying the pulled JSON, regenerated bindings for every language, a regenerated census, and the classified diff as the PR body.
