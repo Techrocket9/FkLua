@@ -42,11 +42,20 @@ Usage:
             [--persist=table|packed|auto|none] [--fuel=N]
             [--gc=leaking|collected] [--api=VERSION] [--factorio-version X.Y]
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
-            [--description D]        (identity defaults to fklua.toml's [mod])
+            [--description D] [--dependency DEP]...
+                                     (identity defaults to fklua.toml's [mod])
+      --dependency DEP  repeatable, and the list REPLACES [mod] dependencies
+                        rather than adding to it -- so one manifest can package
+                        several mods with different lists. ` + "`--dependency \"\"`" + `
+                        alone is an empty list, and mixing it with a real value
+                        is refused
   fklua api pull <version> | --from-install
   fklua api list [--current]        (--current: just the pin, one line, for a script)
   fklua api diff <from> <to> [--breaking] [--json PATH]
-  fklua api check GUEST.wasm --to <version>
+  fklua api check GUEST.wasm --to <version> [--from <version>] [--json]
+                        exit 0 nothing this guest uses breaks, 1 something does
+                        or the scan could not see everything, 2 the check could
+                        not be run. --json writes one verdict object to stdout
   fklua init <mod-name> [--lang go,rust] [--api VERSION]
   fklua lock [--check]
   fklua docs [--lang go|rust] [--api VERSION] [-o DIR]
@@ -1218,6 +1227,12 @@ func runMod(args []string) error {
 	// which made `--factorio-version 2.0` against a manifest saying 2.1 lose to
 	// the manifest: the flag was silently discarded for naming the default.
 	fvFromFlag := false
+	// THE DEPENDENCY LIST, AND WHETHER THE COMMAND LINE SAID ANYTHING ABOUT IT.
+	// Same shape as --gc and --factorio-version and for the same reason: an
+	// empty list is a thing an author can mean, so "the flag was given" cannot
+	// be recovered from the value. See the override below.
+	var deps []string
+	depsFromFlag := false
 
 	str := func(i *int, flag string, dst *string) error {
 		if *i+1 >= len(args) {
@@ -1245,6 +1260,12 @@ func runMod(args []string) error {
 		case args[i] == "--factorio-version":
 			err = str(&i, "--factorio-version", &info.FactorioVersion)
 			fvFromFlag = err == nil
+		case args[i] == "--dependency":
+			var d string
+			if err = str(&i, "--dependency", &d); err == nil {
+				deps = append(deps, d)
+				depsFromFlag = true
+			}
 		case args[i] == "--zip":
 			zip = true
 		case args[i] == "--include":
@@ -1290,6 +1311,39 @@ func runMod(args []string) error {
 		return fmt.Errorf("no input module")
 	}
 
+	// --dependency REPLACES [mod] dependencies, it does not add to them.
+	//
+	// Every other identity flag overrides its manifest key, and a list is no
+	// different -- but a list has one shape a scalar does not, and it is the one
+	// that decides the semantics: a mod whose load-bearing property is that it
+	// depends on NOTHING. Factorio sorts mods by their dependency graph, so an
+	// observer that must run before the mod it observes has to declare no
+	// dependency on it, and an APPENDING flag could never say that however many
+	// values it took. Replacement expresses both directions; appending expresses
+	// one. So a repo with one manifest and several packagings drives the whole
+	// list from the command line, and the manifest goes on describing the mod it
+	// is the manifest OF.
+	//
+	// The empty list is spelled `--dependency ""` rather than a second flag,
+	// because two flags disagreeing about one manifest key is this repo's most
+	// repeated failure shape and there is no reason to open another instance of
+	// it. An empty string is not a dependency Factorio's grammar can express, so
+	// nothing legal is displaced -- and mixing it with a real value is a
+	// contradiction rather than a list, so it is refused rather than resolved.
+	if depsFromFlag {
+		for _, d := range deps {
+			if d != "" {
+				continue
+			}
+			if len(deps) > 1 {
+				return fmt.Errorf(`--dependency "" says the list is empty and ` +
+					`cannot be combined with another --dependency`)
+			}
+			deps = nil
+		}
+		info.Dependencies = deps
+	}
+
 	// THE MANIFEST IS THE DEFAULT AND THE FLAG IS THE OVERRIDE, the same rule
 	// gen-bindings follows. `init` writes the identity into fklua.toml and this
 	// command used to take every field as a flag and never read the file, so
@@ -1320,7 +1374,14 @@ func runMod(args []string) error {
 		// Verbatim, in Factorio's own syntax. Not parsed: the game is the
 		// authority on its own grammar, and a half-understanding of it would
 		// reject strings the game accepts.
-		info.Dependencies = proj.Dependencies
+		//
+		// `--dependency` travels like `gc`, `api` and the engine series: the
+		// manifest is the default and the flag is the override, and "the flag
+		// was given" is a boolean because the flag's value can legitimately be
+		// the empty list. See the override above.
+		if !depsFromFlag {
+			info.Dependencies = proj.Dependencies
+		}
 		if proj.Data != "" {
 			include = append(include, proj.Data)
 		}

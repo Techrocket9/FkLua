@@ -25,7 +25,7 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 | `name`, `version`, `title`, `author`, `description` | the mod's identity, in Factorio's terms |
 | `factorio_version` | the engine series the mod declares. Defaults to the API pin's `major.minor`; override it when the pin and the engine you target differ |
 | `data` | a directory copied into the packaged mod: `data.lua`, `prototypes/`, `graphics/`, `locale/`. The default for `fklua mod --include` |
-| `dependencies` | passed to `info.json` verbatim, in Factorio's own syntax: `"base >= 2.0.0"` required, `"? other"` optional, `"! other"` conflicts |
+| `dependencies` | passed to `info.json` verbatim, in Factorio's own syntax: `"base >= 2.0.0"` required, `"? other"` optional, `"! other"` conflicts. `fklua mod --dependency DEP` overrides it |
 
 `[fklua]` configures the toolchain:
 
@@ -81,6 +81,18 @@ Changing `api` in the manifest is the whole of a pin move: `fklua gen-bindings &
 The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
 
 A mod with a data stage ships it through `data = "DIR"` under `[mod]` (or `fklua mod --include DIR`); the directory's contents are merged into the package, and a name collision with a generated file is an error at package time rather than a mod that is silently wrong in game. The packaged output itself is disposable: edit the guest or the manifest and run `fklua mod` again.
+
+### Packaging several mods from one manifest
+
+Every `[mod]` key has a flag, so one project can package more than one mod: point `fklua mod` at a different guest and override the identity on the command line. Dependencies work the same way, with one rule worth stating outright. `--dependency DEP` is repeatable, and the values given **replace** `[mod] dependencies` rather than adding to them:
+
+```sh
+fklua mod observer.wasm --name my-observer --dependency "base >= 2.0.0" --dependency "? quality"
+```
+
+Replacement rather than appending is what lets a packaging declare a *smaller* list than the manifest's, including an empty one. That case is real: Factorio loads mods in dependency order, so a mod that has to run before another must not declare a dependency on it. `--dependency ""` on its own means no dependencies at all, and leaves the key out of `info.json` entirely; combining it with a real value is refused. Giving no `--dependency` at all packages the manifest's list unchanged.
+
+Values are passed through verbatim. Factorio is the authority on its own dependency syntax, so nothing here parses it.
 
 ## A reference to read
 
