@@ -39,8 +39,9 @@ type GuestSurface struct {
 	// group surviving says nothing about whether the constant a guest baked an
 	// id for is still there.
 	Defines []string
-	// Concepts are the named types reachable from those members' signatures --
-	// the argument and return shapes it therefore depends on.
+	// Concepts are the named types reachable from those members' signatures AND
+	// from those events' payloads -- the argument, return and payload shapes it
+	// therefore depends on.
 	Concepts []string
 	// Complete is false when a member, event or define id was not a
 	// compile-time constant, so the scan could not see everything.
@@ -80,8 +81,25 @@ func SurfaceOf(r Report, usedMembers map[int]bool, membersComplete bool,
 		}
 	}
 	for _, e := range evs.Events {
-		if usedEvents[e.ID] {
-			s.Events = append(s.Events, e.Name)
+		if !usedEvents[e.ID] {
+			continue
+		}
+		s.Events = append(s.Events, e.Name)
+		// A PAYLOAD'S NAMED TYPES COUNT FOR THE SAME REASON A SIGNATURE'S DO,
+		// and this loop collected the name alone while the member loop above
+		// collected both. An event's scratch block is laid out from its fields,
+		// so a concept one of them names gaining a field moves every offset
+		// after it in a reader the guest was compiled against -- the event
+		// itself having changed in no way the diff reports against its name.
+		//
+		// It is not redundant with the member loop: at the 2.0.77 pin FIVE
+		// concepts are reachable ONLY through an event payload
+		// (`OldTileAndPosition` across the six tile events,
+		// `PathfinderWaypoint`, `PostSegmentDiedData`, `SelectedPrototypeData`
+		// and `LuaLazyLoadedValue`), so no member a guest could call ever puts
+		// one of them on the surface.
+		for _, f := range e.Fields {
+			collectTypeNames(f, concepts)
 		}
 	}
 	for _, d := range defs.Defines {
@@ -122,7 +140,8 @@ func collectTypeNames(f FieldSpec, into map[string]bool) {
 // Match names WHICH PART OF THE GUEST'S SURFACE a finding touches, and it is
 // carried because "why does this concern me" is the question a reader has after
 // "what moved". A `MapPosition` gaining a field is a member the guest never
-// heard of; it reaches the guest because a member it DOES call takes one.
+// heard of; it reaches the guest because a member it DOES call takes one, or
+// because an event it subscribes to carries one in its payload.
 //
 // The values are a closed set and they are a data interface -- `api check
 // --json` prints them verbatim -- so a new one is a new value here and nowhere
@@ -137,7 +156,8 @@ const (
 	MatchEvent = "event"
 	// MatchDefine is a `defines.*` value the guest reads, by its dotted path.
 	MatchDefine = "define"
-	// MatchConcept is a named type reachable from a signature the guest uses.
+	// MatchConcept is a named type reachable from a signature the guest uses or
+	// from the payload of an event it subscribes to.
 	MatchConcept = "concept"
 	// MatchClass is a class-level change, which takes every member on that
 	// class with it.
