@@ -145,6 +145,10 @@ Three rules follow from that:
 - **No `settings` at the settings stage.** A mod's startup settings are not readable while they are being declared, so `StartupSetting` answers `false` for everything there.
 - **No collector and no persistence.** A data module runs once and dies with the Lua state, so it is compiled `--persist=none` and `-gc=leaking` whatever the control guest uses.
 
+## Keeping your section functions
+
+A data stage is usually a few hundred straight-line prototype definitions, and if you split them across section functions for readability the optimizer will inline those sections back into one. Past a certain size that produces a function Lua cannot parse, because a single jump inside it exceeds what Lua can encode. Packaging catches it and names the function, but the error is easiest to avoid up front: put `//go:noinline` (Go) or `#[inline(never)]` (Rust) on each section function. This is the guest shape most likely to reach that limit; see [Limits a generated guest can reach](lua-limits.md).
+
 ## Determinism
 
 Every mod's data stage runs on every client, and a client whose prototype set differs from the server's is refused at join. So nothing the library hands a guest carries an iteration order it could branch on: `Keys` is sorted, `Mods` is a sorted slice rather than a map, and every dictionary a `Get` returns is sorted by key at every nesting level. Maps a guest sends are sorted on the way out too, so what reaches the engine is a function of what the guest meant rather than of the order it built the table in.

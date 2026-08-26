@@ -91,6 +91,41 @@ This matters beyond code size: the M0 kernels were hand-written in the forwarded
 
 **Non-issues, measured:** `load()` parses **4 MB / 45,220 functions in 106 ms** (~40 MB/s), so generated-chunk size is not a constraint worth designing around. Building a 262,144-entry table (a 1 MiB guest heap) takes 22 ms, and packing it into 16 × 64 KiB strings takes 21 ms — packing is not more expensive than building.
 
+**…but one FUNCTION's size is, and the constraint is a jump.** See the next section: chunk size is free and a single function carrying a jump past ~131k VM instructions is not.
+
+### A function that is too big for one jump
+
+**Lua encodes a jump offset in 18 bits, so no jump may span more than `MAXARG_sBx` = 131,071 VM instructions.** The mechanic, the exact boundary and what the engine says when it fires are in [`agents/sandbox.md`](sandbox.md), "A jump is 18 bits". This section is what the emitter does about it.
+
+`internal/luagen/funclimit.go` refuses such a module at package time, beside `checkChunkLocals` and for the same reason one limit over: without it the chunk compiles here and the *player's* game start reports `control structure too long`, naming neither the file nor the function. It is enforced inside `EmitModuleWith`, so `fklua compile` and `fklua mod` both carry it, and `mod` carries it for the data module as well as the control one.
+
+**The metric is emitted BYTES between a `goto L<n>` and its `::L<n>::`, per function**, and every part of that is a decision:
+
+| decision | why |
+|---|---|
+| per JUMP, not per function | a jumpless function is unbounded — measured at 140,998 instructions, loading |
+| BYTES, not lines | a line is 1 to 49 instructions in this repo's own output; bytes per instruction is 5.6 to 8.0 over spans big enough to matter |
+| read out of the emitted TEXT | a lowering that emits a goto is covered without knowing that file exists |
+| both directions | Lua's test is `abs(offset)` |
+| early-out on `len(src)` | a span cannot exceed the text it sits in, so nothing this repo emits is ever scanned |
+
+**The floor the threshold converts through is measured, not assumed.** Every guest here was compiled at `-opt=0`, 2 and 3 in both languages, each chunk dumped under `bin/lua52f` and walked as Lua 5.2 undump output (`lundump.c`) for its per-function instruction counts and the true `sBx` offset of every jump in it. 2,713 emitted functions, 1,931 carrying a real jump:
+
+| | |
+|---|--:|
+| bytes per instruction of span, over spans ≥ 10,000 instructions | 5.606 – 8.046 |
+| bytes per instruction of span, over spans ≥ 1,000 instructions | min **5.606** |
+| largest `sBx` span the goto/label scan cannot pair | **42 instructions** |
+| widest span in this repo's own guests (`guest/rust ./examples/array`, `-opt=3`) | **248,744 B** |
+
+**Five bytes per instruction ships**, so the threshold is 655,355 bytes. At the measured 5.606 floor that is 116,900 instructions, **10.8% inside Lua's limit**; the repo's own widest span is **38%** of the threshold. The margin leans towards refusing a module that would just have loaded rather than letting the cryptic in-game refusal through, and what it does refuse is the top ~11% of what Lua can represent — a guest in that band is one prototype away from not loading at all.
+
+**What the scan does not pair, and what that is worth.** Three constructs carry an `sBx` jump the emitter never writes as a `goto`: a counted loop's `FORPREP`/`FORLOOP` over the `for` body, the implicit jump over a multi-line `if ... then ... end` (a `br_if` that copies a value, and a loop guard's seed), and a branch-table chain. All three are bounded by construction — a guard seed and a value copy are a handful of statements, and a counted loop is a wasm loop, which is wrapped in a block whose exit branch the scan *does* pair. Measured across those 2,713 functions, the largest `sBx` span in any function whose goto-to-label distance was under 200 bytes is **42 instructions**, three orders of magnitude below the limit.
+
+**The remedy the message gives is `//go:noinline` in Go and `#[inline(never)]` in Rust**, on the boundaries the author already thinks of as sections. Proven on the reproduction: twenty section functions of sixteen prototypes each are inlined into one whose jump crosses 1,556,741 bytes and is refused, and the same source with the pragmas packages. **The size win reported downstream does not generalise, and the message says so**: that guest came out 27% smaller once its six sections stopped being inlined, and this reproduction goes 0.2% the *other* way. Both are real; it is a property of a particular guest's shape rather than a rule, and an error message that promised it would be wrong most of the time.
+
+**Splitting the function in the emitter instead is designed and not built.** See the `function split` row in `CLAUDE.md`'s deliverables table for the shape, the costs and why it is a milestone rather than a follow-up.
+
 ### Every identifier the emitter emits, and why the table is exhaustive
 
 Generated Lua has no symbol table and no shadowing diagnostic. **Two name families sharing a spelling is a miscompile, not an eyesore**: whichever is declared in the narrower scope silently wins every reference in it, and nothing — not the emitter, not Lua, not the conformance suite — says a word.

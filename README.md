@@ -133,6 +133,7 @@ Documentation for mod authors lives under [`docs/`](docs/):
 | [`docs/memory.md`](docs/memory.md) | guest memory, the garbage collector and why Rust has one, the tuning knobs, the leaking opt-out, `--persist`, and migrating a recompiled guest |
 | [`docs/factorio-api.md`](docs/factorio-api.md) | calling the API: handles, events, filters and field masks, commands and remote interfaces, `defines`, and the version axes |
 | [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` |
+| [`docs/lua-limits.md`](docs/lua-limits.md) | the two Lua limits a generated guest can reach, what each packaging error means, and the `//go:noinline` / `#[inline(never)]` remedy |
 | [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod |
 
 The `agents/` directory holds the maintainer design notes; see [Working on FkLua itself](#working-on-fklua-itself).

@@ -15,6 +15,7 @@ These silently produce broken code if you forget them. Reference:
 | **`load()` rejects binary chunks** | Emit source, never bytecode. Killed the Phobos compiler. |
 | No bitwise operators | `bit32.*` function calls only — but see "prefer arithmetic" below |
 | **200 locals per function** | 255 registers including temporaries; target ≤180 declared. **Verified**: 199 ok, 200 ok, 201 rejected. A chunk is a function, so it is capped too — see the chunk-local budget in [`agents/codegen.md`](codegen.md). |
+| **A jump spans at most 131,071 VM instructions** | `MAXARG_sBx`. Past it the parser refuses the whole chunk with `control structure too long`, naming nothing at all. **Verified**: 131,071 loads, 131,072 is rejected. See "A jump is 18 bits" below. |
 | `LUAI_MAXCCALLS` = 200 parser nesting | Why control flow is flat `goto`, not nested `while`/`break` |
 | **Functions error on save in `storage`** | Generated functions are rebuilt by `require`, never persisted |
 | Unregistered metatables are stripped on save | Never put a metatable on `MEM` without `script.register_metatable` |
@@ -48,6 +49,32 @@ Two consequences, the second of which has already cost this project a wrong expl
 - **A guest's linear memory should stay under 4 MiB** — one word per slot, so 4 MiB is exactly the wall. See [`agents/gc.md`](gc.md), "The 4 MiB wall", and the heap budget in [`agents/guests.md`](guests.md). **The wall is bracketed to 4,096 words**: 1,048,576 words is still an array at 108 ns per access and 1,052,672 is not, at 3,820 — see [`agents/sharding.md`](sharding.md), which is also where the representation that removes it is designed.
 - **The oracle is ~2.5× fast on ANY table access, not only a large one.** The identical emitted access loop over the identical 524,288-word table is 31.0 ns under `bin/lua52f` and 56–73 ns in game, with the loop machinery itself at 1.04–1.10× — so the table read alone is **4–6×**. That constant is what carries a host-side timing into the game, and until it was measured several published numbers assumed it was 1. [`agents/sharding.md`](sharding.md) §2.
 - **No host-side measurement of a large table transfers, in either direction.** `agents/gc.md` derived a "~19 rehashes" account of the 2.8-second grow from the vendored `ltable.c`; the vendored `ltable.c` is not what Factorio ships, and every fix that account implies was measured in game and changes nothing. Reason about a big table from the game — not from the oracle, and not from `third_party/lua-5.2.1`.
+
+---
+
+## A jump is 18 bits — the wall a big generated function hits
+
+**Every jump in a Lua function is one VM instruction whose signed offset lives in the `sBx` field, and the field is 18 bits biased.** `SIZE_Bx = SIZE_B + SIZE_C = 9 + 9` (`lopcodes.h`), so `MAXARG_sBx = 2¹⁷ - 1 = 131071`, and `lcode.c`'s `fixjump` refuses to patch anything wider:
+
+```c
+static void fixjump (FuncState *fs, int pc, int dest) {
+  int offset = dest-(pc+1);
+  if (abs(offset) > MAXARG_sBx)
+    luaX_syntaxerror(fs->ls, "control structure too long");
+```
+
+**Verified against `bin/lua52f` at the instruction, in both directions**: a forward `goto` over exactly 131,071 single-instruction statements loads, and 131,072 is refused. `TestTheJumpLimitIsWhereLuaPutsIt` re-checks it on every run, because a constant read out of a header is a constant nobody checked.
+
+Four things about it that are easy to get wrong, and each has already cost something:
+
+- **The unit is VM INSTRUCTIONS. Not lines, not bytes, not statements.** A single emitted line can be one instruction or fifty — a loop guard's seed measures at 49 in this repo's own output.
+- **The limit is on ONE JUMP'S SPAN, not on a function's size.** A function with no jump in it is unbounded, and that is measured rather than argued: the data-guest reproduction built without its bounds checks emits a **140,998-instruction function whose widest jump is zero**, and it loads. Anything that checked function size would refuse it for nothing.
+- **`abs(offset)`, so a long backward branch counts too.** A loop whose body is enormous fails at its back edge.
+- **The diagnostic names nothing.** The message carries the token the parser happened to be holding when the pending gotos were patched, which is whatever follows the label — for a generated guest that is usually `control structure too long near 'trap_unreachable'`. No file, no function, no mod. That is the whole reason [`agents/codegen.md`](codegen.md) has a package-time check for it.
+
+**The failure needs a big function AND a long jump, and an optimizer supplies both.** LLVM at `-opt=2` inlines a program's sections into one function and merges every trapping edge into ONE block at the bottom; the emitter renders that block as a label followed by `trap_unreachable()`, so the first bounds check in the function jumps over the entire body. Reported by a downstream data guest that compiled to a 28,139-line Lua function, and reproduced here from real Go through the real toolchain.
+
+Other Lua limits nearby, none of which binds first: a function's instruction count is capped at `MAX_INT`, its constants at `MAXARG_Bx` = 262,143 before `LOADKX` takes over, and its registers at `MAXARG_A` = 255 (which the 200-local rule already keeps clear of).
 
 ---
 
