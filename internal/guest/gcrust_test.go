@@ -419,12 +419,16 @@ local built = K['torture_build'](20000)
 local ip = K['torture_interior'](12345)
 local op = K['torture_one_past'](777)
 local lg = K['torture_large'](40000)
+local ls = K['torture_last_slot'](0xA5A5A5)
 local before = K['torture_verify']()
 K['torture_collect']()
 print(string.format('built=%d before=%d after=%d interior=%d interior_want=%d large=%d large_want=%d one_past=%d',
   built, before, K['torture_verify'](), K['torture_interior_read'](), ip,
   K['torture_large_read'](), lg, K['torture_one_past_read']()))
 print(string.format('kept=%d believed=%d liveobj=%d', K['torture_kept_bytes'](), st(1), st(5)))
+local lsr = K['torture_last_slot_reused']()
+print(string.format('last_slot=%d last_slot_want=%d last_slot_reused=%d',
+  K['torture_last_slot_read'](), ls, lsr))
 local rp = K['torture_repoint'](31337)
 K['torture_collect']()
 print(string.format('repoint=%d repoint_seen=%d repoint_want=%d',
@@ -453,7 +457,7 @@ func TestTheRustCollectorKeepsWhatIsReachable(t *testing.T) {
 	coll := gcFields(t, rustGCRun(t, h, "gctorture", true, tortureBody))
 
 	for _, k := range []string{"built", "before", "after", "interior", "large",
-		"repoint", "held", "held_after"} {
+		"repoint", "held", "held_after", "last_slot"} {
 		if leak[k] != coll[k] {
 			t.Errorf("%s: the leaking arm says %d, collected says %d -- the "+
 				"collector reclaimed something that was still reachable", k,
@@ -484,6 +488,31 @@ func TestTheRustCollectorKeepsWhatIsReachable(t *testing.T) {
 			"wrong, but it is a CHANGE, and agents/gc.md's wasip1 gate is argued "+
 			"on the other answer", coll["one_past"])
 	}
+	// THE LAST SLOT OF A SMALLEST-CLASS SPAN, the one slot whose index collided
+	// with the "not an object" sentinel in the table mark_candidate resolves a
+	// candidate through. Same defect, same shape, same fix as the Go collector's:
+	// a 4 KiB span holds exactly 256 sixteen-byte objects, so the last one's slot
+	// index is 255 and SLOT_NONE was 255.
+	if coll["last_slot_want"] == 0 {
+		t.Fatal("the probe never got a block into the last slot of a span, so " +
+			"nothing here is a statement about it; the probe is broken, not " +
+			"the collector")
+	}
+	if leak["last_slot_reused"] != 0 {
+		t.Fatalf("the leaking control handed the same block out twice (%d); the "+
+			"probe is broken, not the collector", leak["last_slot_reused"])
+	}
+	if coll["last_slot_reused"] != 0 {
+		t.Errorf("the block in the LAST slot of a smallest-class span was handed " +
+			"to a later allocation while the guest was still holding a " +
+			"reference to it")
+	}
+	if coll["last_slot"] != coll["last_slot_want"] {
+		t.Errorf("the block in the LAST slot of a smallest-class span lost what "+
+			"was written to it: read %d, wrote %d",
+			coll["last_slot"], coll["last_slot_want"])
+	}
+
 	// The store into an object the collector had already marked.
 	if coll["repoint_seen"] != coll["repoint_want"] {
 		t.Errorf("a store into a MARKED object was lost across a collection: the "+
@@ -539,7 +568,8 @@ func TestTheTwoCollectorsAgreeOnTheTortureCorpus(t *testing.T) {
 
 	checksums := []string{"built", "before", "after", "interior", "interior_want",
 		"large", "large_want", "one_past", "repoint", "repoint_seen",
-		"repoint_want", "held", "held_after", "held_bytes"}
+		"repoint_want", "held", "held_after", "held_bytes",
+		"last_slot", "last_slot_want", "last_slot_reused"}
 	for _, k := range checksums {
 		if goOut[k] != rsOut[k] {
 			t.Errorf("%s: the Go collector says %d, the Rust collector says %d. "+

@@ -254,7 +254,25 @@ type gcMeta struct {
 	// section 1 requires interior pointers (a parked goroutine's asyncifysp is
 	// stack+8) and a division per candidate would be a helper call in the
 	// emitted Lua.
-	slotTab [numClasses + 1][spanBytes / granule]uint8
+	//
+	// IT IS uint16 AND IT MUST BE, and the byte it used to be is the sharpest
+	// bug this collector has had. An entry has to represent every real slot
+	// index PLUS a sentinel, and the smallest class is the granule itself --
+	// so a 4 KiB span holds 4096/16 = 256 of them and the last one's index is
+	// 255. slotNone was 255. markCandidate read that entry, saw the sentinel,
+	// concluded "tail waste, not an object", and marked nothing: the last
+	// 16-byte block of every span was invisible to the conservative scan while
+	// remaining perfectly sweepable, so a live one was freed under a reference
+	// that was still standing. One class in twenty-one could reach it -- every
+	// larger class fits at most 128 objects in a span -- which is why it
+	// presented as one object in a heap going missing and nothing else.
+	//
+	// The cost of the width is 5,632 bytes of .bss, which by this document's
+	// own rate (0.2 ms of Factorio worst tick per MiB) is 0.0011 ms. The
+	// alternative that keeps the byte is a second bound to test per candidate,
+	// i.e. a load in markCandidate's hot path, and that is the more expensive
+	// half of the two.
+	slotTab [numClasses + 1][spanBytes / granule]uint16
 
 	// classSlots[c] is how many objects of class c fit in a span.
 	classSlots [numClasses + 1]uint16
@@ -433,7 +451,28 @@ type gcMeta struct {
 	rootWarned bool
 }
 
-const slotNone = 255
+// slotNone is "this offset is the class's tail waste and not an object".
+//
+// IT MUST BE OUTSIDE THE RANGE OF REAL SLOT INDICES, which is the invariant the
+// declaration below enforces rather than states. The largest index any class
+// can produce is (spanBytes/granule)-1, reached by the smallest class, whose
+// objects ARE granules; a sentinel at or below that is a live object the mark
+// phase cannot see.
+const slotNone = 0xFFFF
+
+// maxSlotIndex is the biggest slot index the ladder can produce, from the
+// smallest class -- 255 today.
+const maxSlotIndex = spanBytes/granule - 1
+
+// A negative array length does not compile, so this is the invariant above held
+// by the toolchain rather than by a comment. It occupies nothing.
+//
+// THE `- 1` IS THE INVARIANT AND NOT A ROUNDING. The relation is STRICTLY
+// greater: a sentinel EQUAL to the largest real index is precisely the bug this
+// guard exists to refuse, and `[slotNone - maxSlotIndex]struct{}` is a legal
+// zero-length array in exactly that case. Red-proven by putting 255 back with
+// the guard in place and watching it compile.
+var _ [slotNone - maxSlotIndex - 1]struct{}
 
 var gcm gcMeta
 
@@ -517,7 +556,7 @@ func initialize() {
 			if idx >= slots {
 				gcm.slotTab[c][g] = slotNone
 			} else {
-				gcm.slotTab[c][g] = uint8(idx)
+				gcm.slotTab[c][g] = uint16(idx)
 			}
 		}
 	}

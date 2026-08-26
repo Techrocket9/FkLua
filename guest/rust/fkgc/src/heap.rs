@@ -88,7 +88,22 @@ pub(crate) const CLASS_SIZE: [u32; NUM_CLASSES as usize + 1] = [
     1280, 2048,
 ];
 
-pub(crate) const SLOT_NONE: u8 = 255;
+/// "This offset is the class's tail waste and not an object."
+///
+/// IT MUST BE OUTSIDE THE RANGE OF REAL SLOT INDICES, which the assertion below
+/// enforces rather than states. The largest index any class can produce is
+/// `SPAN_BYTES / GRANULE - 1`, reached by the smallest class, whose objects ARE
+/// granules; a sentinel at or below that is a live object the mark phase cannot
+/// see. It was 255 against a smallest class of exactly 256 slots per span, and
+/// the last block of every such span was therefore unmarkable and still
+/// sweepable -- see the `slot_tab` field for the whole of it.
+pub(crate) const SLOT_NONE: u16 = 0xFFFF;
+
+/// The biggest slot index the ladder can produce, from the smallest class.
+pub(crate) const MAX_SLOT_INDEX: u16 = (SPAN_BYTES / GRANULE - 1) as u16;
+
+// The invariant above, held by the compiler rather than by the comment.
+const _: () = assert!(SLOT_NONE > MAX_SLOT_INDEX);
 
 /// How many bytes may be handed out between collections before
 /// [`crate::collect_if_needed`] says yes. 256 KiB is two orders of magnitude
@@ -136,7 +151,22 @@ pub(crate) struct GcMeta {
     /// to, or [`SLOT_NONE`] if the offset is in the class's tail waste. This is
     /// what resolves an INTERIOR POINTER in O(1) with no division, and a
     /// division per candidate would be a helper call in the emitted Lua.
-    pub slot_tab: [[u8; (SPAN_BYTES / GRANULE) as usize]; NUM_CLASSES as usize + 1],
+    ///
+    /// IT IS `u16` AND IT MUST BE. An entry has to represent every real slot
+    /// index PLUS a sentinel, and the smallest class is the granule itself --
+    /// so a 4 KiB span holds 4096/16 = 256 of them and the last one's index is
+    /// 255. `SLOT_NONE` was 255. `mark_candidate` read that entry, saw the
+    /// sentinel, concluded "tail waste, not an object", and marked nothing: the
+    /// last 16-byte block of every span was invisible to the conservative scan
+    /// while remaining perfectly sweepable, so a live one was freed under a
+    /// reference that was still standing. One class in twenty-one could reach
+    /// it -- every larger class fits at most 128 objects in a span.
+    ///
+    /// The width costs 5,632 bytes of `.bss`, which at agents/gc.md's own rate
+    /// (0.2 ms of Factorio worst tick per MiB) is 0.0011 ms. The alternative
+    /// that keeps the byte is a second bound to test per candidate, i.e. a load
+    /// in `mark_candidate`'s hot path, and that is the more expensive half.
+    pub slot_tab: [[u16; (SPAN_BYTES / GRANULE) as usize]; NUM_CLASSES as usize + 1],
     /// How many objects of class `c` fit in a span.
     pub class_slots: [u16; NUM_CLASSES as usize + 1],
     /// `size_to_class[(n+15)>>4]` is the class serving `n` bytes, for
@@ -310,7 +340,7 @@ impl GcMeta {
         gray: [0; GRAY_CAP],
         gray_top: 0,
         gray_ovf: false,
-        slot_tab: [[0; (SPAN_BYTES / GRANULE) as usize]; NUM_CLASSES as usize + 1],
+        slot_tab: [[0u16; (SPAN_BYTES / GRANULE) as usize]; NUM_CLASSES as usize + 1],
         class_slots: [0; NUM_CLASSES as usize + 1],
         size_to_class: [0; (MAX_SMALL / GRANULE) as usize + 1],
         cur_ptr: [0; NUM_CLASSES as usize + 1],
@@ -500,7 +530,7 @@ pub(crate) fn initialize() {
         let mut gr = 0u32;
         while gr < SPAN_BYTES / GRANULE {
             let idx = (gr * GRANULE) / sz;
-            g.slot_tab[c][gr as usize] = if idx >= slots { SLOT_NONE } else { idx as u8 };
+            g.slot_tab[c][gr as usize] = if idx >= slots { SLOT_NONE } else { idx as u16 };
             gr += 1;
         }
         c += 1;

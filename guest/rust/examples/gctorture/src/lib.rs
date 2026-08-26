@@ -42,6 +42,12 @@ use core::cell::UnsafeCell;
 
 use fk::gc;
 
+/// The allocator's own geometry, named here so the last-slot probe says what it
+/// means rather than carrying two magic numbers. They are fkgc's SPAN_BYTES and
+/// GRANULE and must stay in step with them.
+const SPAN_BYTES: u32 = 4096;
+const GRANULE: u32 = 16;
+
 /// The node the graph is built out of.
 ///
 /// `left` and `right` are RAW pointers and not `Box`, and that is the whole
@@ -81,6 +87,13 @@ struct State {
     garbage_sink: *mut Node,
     held: Vec<Vec<u32>>,
     held_sum: u32,
+    /// The ONLY reference to a block deliberately placed in the LAST slot of a
+    /// span of the SMALLEST size class. See `torture_last_slot`.
+    last_slot: u32,
+    last_slot_id: u32,
+    /// The reuse probe's own allocations, held so that they are distinct blocks
+    /// rather than one block recycled 8,192 times.
+    reuse_hold: Vec<Vec<u32>>,
 }
 
 impl State {
@@ -97,6 +110,9 @@ impl State {
         garbage_sink: core::ptr::null_mut(),
         held: Vec::new(),
         held_sum: 0,
+        last_slot: 0,
+        last_slot_id: 0,
+        reuse_hold: Vec::new(),
     };
 }
 
@@ -390,6 +406,76 @@ pub extern "C" fn torture_one_past_read() -> u32 {
     }
 }
 
+/// The LAST SLOT of a span of the SMALLEST size class, which is the one slot in
+/// the heap whose index collided with the "not an object" sentinel.
+///
+/// The smallest class is the granule itself, so a 4 KiB span holds 4096/16 = 256
+/// of them and the last one is at span offset 4080 with slot index 255.
+/// `SLOT_NONE` was 255, so `mark_candidate` resolved a pointer to that block as
+/// tail waste and marked nothing -- while the sweep, which walks slots by index,
+/// freed it perfectly happily. Every larger class fits at most 128 objects in a
+/// span and could never reach the collision.
+///
+/// Returns the marker, or 0 if no block landed there, which fails the test as
+/// VACUOUS rather than passing it.
+#[no_mangle]
+pub extern "C" fn torture_last_slot(seed: u32) -> u32 {
+    let st = s();
+    let seed = if seed == 0 { 1 } else { seed };
+    // 4,096 tries is sixteen spans' worth of blocks: the run crosses a span
+    // boundary long before that, whatever the heap looked like on entry.
+    for _ in 0..4096 {
+        let mut b: Vec<u32> = Vec::with_capacity(4); // 16 bytes: class 1
+        b.push(seed);
+        let a = b.as_ptr() as u32;
+        core::mem::forget(b);
+        if a & (SPAN_BYTES - 1) != SPAN_BYTES - GRANULE {
+            continue;
+        }
+        st.last_slot = a;
+        st.last_slot_id = seed;
+        return seed;
+    }
+    0
+}
+
+/// Reads that block back through the recorded address.
+#[no_mangle]
+pub extern "C" fn torture_last_slot_read() -> u32 {
+    let st = s();
+    if st.last_slot == 0 {
+        return 0;
+    }
+    unsafe { core::ptr::read(st.last_slot as *const u32) }
+}
+
+/// Asks the ALLOCATOR whether that block is free, which is the only unambiguous
+/// way to ask.
+///
+/// Reading the block back is not enough on its own: a swept block keeps its
+/// bytes until something writes over them, so a collector that freed a live
+/// object still returns the marker to a reader who gets there first. What cannot
+/// be explained away is the same address being handed to a LATER allocation
+/// while a reference to it is still standing.
+#[no_mangle]
+pub extern "C" fn torture_last_slot_reused() -> u32 {
+    let st = s();
+    if st.last_slot == 0 {
+        return 0;
+    }
+    let mut hit = 0u32;
+    for _ in 0..8192 {
+        let mut b: Vec<u32> = Vec::with_capacity(4);
+        b.push(0xDEAD_BEEF);
+        if b.as_ptr() as u32 == st.last_slot {
+            hit = 1;
+        }
+        st.reuse_hold.push(b);
+    }
+    st.reuse_hold = Vec::new();
+    hit
+}
+
 /// One object bigger than any size class, so the span-run path and the resumable
 /// granule-by-granule scan are both exercised.
 #[no_mangle]
@@ -426,6 +512,8 @@ pub extern "C" fn torture_drop_all() -> u32 {
     st.roots = Vec::new();
     st.interior = core::ptr::null();
     st.big = Vec::new();
+    st.last_slot = 0;
+    st.reuse_hold = Vec::new();
     st.kept = 0;
     0
 }

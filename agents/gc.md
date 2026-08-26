@@ -1287,3 +1287,62 @@ phase 242 -> 1 cycles=2      cycle 2: still marking at tick 460
 **What actually kept the leg opt-in was `CHECK_TICK_RS=200`, and the symptom named a different constant.** `cycles` does not reach 2 until tick 242, so at 200 both arms tripped the "only 1 collection ran" gate -- which `continue`s before the phase is looked at, so nothing was ever added to `phases_seen` and the run ended on "no save landed mid-sweep", pointing at `GC_SAVE_TICKS_RS`. *A gate whose failure message names the last assertion rather than the first will point at the wrong constant*, and a save tick is exactly the kind of constant somebody then tunes until it passes.
 
 **And a Rust collection gets LONGER every cycle, so one cycle's numbers do not generalise to the next.** 65 ticks, then 177, then over 218 -- the live set grows (`live=0`, then 19,008, then 47,984) and the mark is charged for it. The "~65 ticks against the Go guest's ~47" figure above is the FIRST cycle only, and the old `CHECK_TICK_RS` comment reasoned from it that 200 ticks was 1.8 cycles when it is 1.0. The cause of the length is measured and is not this guest's: a Rust guest's statics are larger, the root re-scan is charged against the step budget, and at this guest's deliberate 512 a step spends a few hundred granules on roots before it does anything else -- see "What it costs" above.
+
+---
+
+## The last slot of a smallest-class span — one sentinel, one live object per span
+
+**A byte-wide table entry had to represent 256 slot indices AND a sentinel, and the sentinel it was given was 255.** So the last 16-byte object in every 4 KiB span of the smallest size class was invisible to the conservative mark and perfectly visible to the sweep: a live one was freed under a reference that was still standing, in both collectors, at every stage since the size-class ladder was written.
+
+```go
+slotTab [numClasses + 1][spanBytes / granule]uint8   // 256 entries
+const slotNone = 255
+```
+
+`markCandidate` resolves an interior pointer by looking the candidate's granule up in `slotTab[c]`, and a `slotNone` there means *this offset is the class's tail waste and is not an object*. The smallest class IS the granule, so a span holds `4096/16 = 256` of them and the last one's slot index is 255 — the sentinel. Every larger class fits at most 128 objects in a span and can never reach it, which is why **one class in twenty-one** was affected and nothing else was.
+
+The asymmetry is the whole defect: **`markCandidate` reads `slotTab` and the sweep does not.** `rescanSpan` and the sweep walk `classSlots[c]` slots by index, so slot 255 is enumerated, found unmarked, and freed.
+
+### How it presented, which is why it took a field report to find
+
+**A benchmark harness silently stopped measuring one rig of 120.** BetterBeltBalancer's bench setup mod was trial-built collected: it kept 404 test rigs in a package-level slice, each holding a two-element slice of retained handles, and the mega population's `2->2` class delivered 198,016 items against the leaking arm's 199,680 — exactly one rig — with that rig reporting no output at all. Its 8-byte handle array was a class-1 block, it had landed at span offset 4080, and the synchronous `Collect()` at the end of world-building freed it and handed it to a later allocation.
+
+Two independent runs put the lost block at span offset **4080** — `4096 - 16`, the last slot — which is what turned a one-in-404 anomaly into an arithmetic identity. Nothing else in the save moved: the item total, every other class, every timing.
+
+It is the failure shape this document keeps describing and had not yet met at this size: *the memory is still addressable, it is zeroed and handed to somebody else, so the only symptom anywhere is a number that moved.* A guest that used no 16-byte allocation, or whose 16-byte allocations never landed in a span's last slot while being the only reference to something, would never see it — which is every guest in the corpus until one kept several hundred two-element slices alive at once.
+
+### The fix, and why the width rather than a second bound
+
+`slotTab` is `uint16` and `slotNone` is `0xFFFF`, in both collectors. The invariant is now stated where it can be checked:
+
+> **The sentinel must be STRICTLY greater than the largest slot index the ladder can produce**, which is `spanBytes/granule - 1` and is reached by the smallest class.
+
+held by `var _ [slotNone - maxSlotIndex - 1]struct{}` in Go and `const _: () = assert!(SLOT_NONE > MAX_SLOT_INDEX)` in Rust. **The `- 1` is the invariant and not a rounding**: the first cut wrote `[slotNone - maxSlotIndex]struct{}`, which is a legal zero-length array in exactly the case that is the bug, and it compiled cleanly with 255 put back. A guard that cannot fail is not a guard, and this one was red-proven before it was believed.
+
+The width costs **5,632 bytes of `.bss` per collector**, which at this document's own rate — 0.2 ms of Factorio worst tick per MiB — is 0.0011 ms. The alternative that keeps the byte is a separate tail-waste bound (`classSlots[c] * classSize[c]`) tested per candidate, which is a second load in `markCandidate`'s hot path, and that is the more expensive half of the two.
+
+### Gates
+
+| gate | where |
+|---|---|
+| a live block in the LAST slot of a smallest-class span survives a collection | `torture_last_slot` / `_read` / `_reused`, driven by `TestTheCollectorKeepsWhatIsReachable` and `TestTheRustCollectorKeepsWhatIsReachable` |
+| the two collectors agree about it | `TestTheTwoCollectorsAgreeOnTheTortureCorpus`, three new checksum fields |
+| the sentinel cannot be given a colliding value again | the compile-time guards above, in both languages |
+
+**Reading the block back is not enough on its own and the probe says so.** A swept block keeps its bytes until something writes over them, so the first cut of this test PASSED against the unfixed collector — the object had been freed and simply not reused yet. What cannot be explained away is the same address being handed to a LATER allocation while a reference to it is still standing, so `torture_last_slot_reused` allocates 8,192 blocks of the same class and reports whether any of them IS the block the guest is still holding. Both halves are asserted, and the leaking arm is required to answer 0 so the probe cannot pass by being broken.
+
+### Red proofs
+
+| injected | what fired |
+|---|---|
+| Go `slotNone` back to 255, guard in place | `fkgc/heap.go: invalid array length slotNone - maxSlotIndex - 1 (untyped int constant -1)` — it does not build |
+| Rust `SLOT_NONE` back to 255, assert in place | `error[E0080]: evaluation panicked: assertion failed: SLOT_NONE > MAX_SLOT_INDEX` |
+| Go, guard disabled as well | the live block "was handed to a later allocation while the guest was still holding a reference to it", and read back `0xDEADBEEF` where `0xA5A5A5` was written |
+| Rust, assert disabled as well | the same two, plus the mirror table failing on `last_slot` and `last_slot_reused` — the two collectors disagreeing about an object |
+| the first cut of the Go guard (`- 1` absent) | **nothing**, which is why the guard has a red proof of its own |
+
+### What a later stage needs to know
+
+1. **A sentinel in a table indexed by heap geometry is a range question, not a spelling one.** The ladder's smallest class is the granule by construction, so the number of slots in a span is `spanBytes/granule` exactly and the largest index is one below it. Anything that changes `granule`, `spanBytes` or the smallest class moves that bound, and the two guards are what make that a build failure rather than a freed live object.
+2. **The two collectors are a line-for-line port and a defect in one is a defect in the other.** This one was found in Go and was already present in Rust, unmodified. The mirror table is what makes that cheap to establish, and a new probe belongs in `tortureBody` — which both guests are driven with — rather than in one language's own test body.
+3. **A conservative collector's correctness tests must ask the ALLOCATOR, not the memory.** Every "did it survive" probe that reads a block back is weaker than it looks for exactly one collection; the strong form is "was this address handed out again".

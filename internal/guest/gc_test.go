@@ -247,12 +247,16 @@ local built = K['torture_build'](%d)
 local ip = K['torture_interior'](12345)
 local op = K['torture_one_past'](777)
 local lg = K['torture_large'](40000)
+local ls = K['torture_last_slot'](0xA5A5A5)
 local before = K['torture_verify']()
 K['torture_collect']()
-print(string.format('built=%%d before=%%d after=%%d interior=%%d interior_want=%%d large=%%d large_want=%%d one_past=%%d',
+print(string.format('built=%%d before=%%d after=%%d interior=%%d interior_want=%%d large=%%d large_want=%%d one_past=%%d last_slot=%%d last_slot_want=%%d',
   built, before, K['torture_verify'](), K['torture_interior_read'](), ip,
-  K['torture_large_read'](), lg, K['torture_one_past_read']()))
+  K['torture_large_read'](), lg, K['torture_one_past_read'](),
+  K['torture_last_slot_read'](), ls))
 print(string.format('kept=%%d believed=%%d liveobj=%%d', K['torture_kept_bytes'](), st(1), st(5)))
+local lsr = K['torture_last_slot_reused']()
+print(string.format('last_slot_reused=%%d last_slot_after=%%d', lsr, K['torture_last_slot_read']()))
 K['torture_drop_all']()
 K['torture_collect']()
 K['torture_collect']()
@@ -265,7 +269,7 @@ print(string.format('dropped_live=%%d dropped_obj=%%d cycles=%%d', st(1), st(5),
 	// -gc=leaking reclaims nothing, so its checksums are right by
 	// construction. That is what makes it the oracle rather than a second
 	// opinion.
-	for _, k := range []string{"built", "before", "after", "interior", "large"} {
+	for _, k := range []string{"built", "before", "after", "interior", "large", "last_slot"} {
 		if leak[k] != coll[k] {
 			t.Errorf("%s: -gc=leaking says %d, collected says %d -- the collector "+
 				"reclaimed something that was still reachable", k, leak[k], coll[k])
@@ -285,6 +289,47 @@ print(string.format('dropped_live=%%d dropped_obj=%%d cycles=%%d', st(1), st(5),
 	if coll["large"] != coll["large_want"] {
 		t.Errorf("a multi-span object did not survive: read %d, wrote %d",
 			coll["large"], coll["large_want"])
+	}
+
+	// THE LAST SLOT OF A SMALLEST-CLASS SPAN, which is the one slot in the heap
+	// whose index collided with the "not an object" sentinel in the table
+	// markCandidate resolves a candidate through. A 4 KiB span holds exactly
+	// 256 sixteen-byte objects, so the last one's slot index is 255 -- and
+	// slotNone was 255. Every larger class fits at most 128 objects in a span
+	// and could never reach it, which is why one class in twenty-one was
+	// silently uncollectable-by-reference and nothing else was.
+	//
+	// It is asserted before the vacuity check below reads, because a probe that
+	// never landed in the slot returns 0 for BOTH arms and would agree.
+	if coll["last_slot_want"] == 0 {
+		t.Fatal("the probe never got a block into the last slot of a span, so " +
+			"nothing here is a statement about it; the probe is broken, not " +
+			"the collector")
+	}
+	if coll["last_slot"] != coll["last_slot_want"] {
+		t.Errorf("the block in the LAST slot of a smallest-class span was "+
+			"reclaimed with a live reference to it standing: read %d, wrote %d. "+
+			"That slot's index is 255 and the slot table's 'not an object' "+
+			"sentinel must not be a value a real slot can take",
+			coll["last_slot"], coll["last_slot_want"])
+	}
+	// AND THE HALF THAT CANNOT BE EXPLAINED AWAY. A swept block keeps its bytes
+	// until something writes over them, so the read above can agree with the
+	// control while the block is on a free list. Being handed to a later
+	// allocation cannot.
+	if leak["last_slot_reused"] != 0 {
+		t.Fatalf("the -gc=leaking control handed the same block out twice (%d); "+
+			"the probe is broken, not the collector", leak["last_slot_reused"])
+	}
+	if coll["last_slot_reused"] != 0 {
+		t.Errorf("the block in the LAST slot of a smallest-class span was handed " +
+			"to a later allocation while the guest was still holding a " +
+			"reference to it")
+	}
+	if coll["last_slot_after"] != coll["last_slot_want"] {
+		t.Errorf("the block in the LAST slot of a smallest-class span lost what "+
+			"was written to it across a collection and 8,192 later allocations: "+
+			"read %d, wrote %d", coll["last_slot_after"], coll["last_slot_want"])
 	}
 
 	// ONE PAST THE END. This is asserted rather than inherited, which is what

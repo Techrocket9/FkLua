@@ -54,6 +54,14 @@ type node struct {
 
 const nodeBytes = 48 // 4+4+4+4+20, rounded to the 48-byte class
 
+// The allocator's own geometry, named here so the last-slot probe below says
+// what it means rather than carrying two magic numbers. They are fkgc's
+// spanBytes and granule and must stay in step with them.
+const (
+	spanBytes = 4096
+	granule   = 16
+)
+
 var (
 	roots   []*node
 	dropped uint32
@@ -73,6 +81,24 @@ var (
 
 	big     []uint32
 	bigMark uint32
+
+	// lastSlot is the ONLY reference to a block deliberately placed in the
+	// LAST slot of a span of the SMALLEST size class -- 16 bytes, of which a
+	// 4 KiB span holds exactly 256. That slot's index is 255, and 255 was also
+	// the "this offset is tail waste, not an object" sentinel in the table
+	// markCandidate resolves an interior pointer through, so a pointer to it
+	// resolved to "not an object" and the block was never marked. It is the
+	// only class that can reach the collision: every larger class fits at most
+	// 128 objects in a span.
+	//
+	// It is a uintptr for the same reason onePast is not a Go pointer: what is
+	// being measured is what the CONSERVATIVE scan does with the word, and a
+	// Go pointer would also be tracked by the compiler.
+	lastSlot   uintptr
+	lastSlotID uint32
+	// reuseHold keeps the probe's own allocations alive so that they are
+	// distinct blocks rather than one block recycled 8,192 times.
+	reuseHold [][]uint32
 )
 
 // torture_build makes n nodes in a chain of binary fragments, remembering every
@@ -404,6 +430,85 @@ func tortureOnePastRead() uint32 {
 	return 0
 }
 
+// torture_last_slot allocates 16-byte blocks until one lands in the LAST slot
+// of its span, keeps that one and nothing else, and writes a marker into it.
+//
+// The smallest size class is the granule itself, so a span holds 4096/16 = 256
+// of them and the last one is at span offset 4080. Nothing about it is special
+// to the allocator; what was special was the slot TABLE, whose entries are one
+// byte and whose "not an object" sentinel was 255 -- the same value as that
+// slot's own index. A conservative candidate pointing at it read as tail waste
+// and marked nothing, so the block was swept with a live reference to it
+// standing in a package-level global.
+//
+// It returns the marker, or 0 if no block landed there -- which fails the test
+// as VACUOUS rather than passing it, because a probe that never reached the
+// slot proves nothing about it.
+//
+//go:wasmexport torture_last_slot
+func tortureLastSlot(seed uint32) uint32 {
+	if seed == 0 {
+		seed = 1
+	}
+	// 4096 tries is sixteen spans' worth of blocks: the run has to cross a
+	// span boundary long before that, whatever the heap looked like on entry.
+	for i := 0; i < 4096; i++ {
+		b := make([]uint32, 4) // 16 bytes: class 1, one granule, one slot
+		a := uintptr(unsafe.Pointer(&b[0]))
+		if a&(spanBytes-1) != spanBytes-granule {
+			continue
+		}
+		b[0] = seed
+		lastSlot = a
+		lastSlotID = seed
+		return seed
+	}
+	return 0
+}
+
+// torture_last_slot_read reads that block back through the recorded address.
+// It returns what is there, which after a collection must still be the marker.
+//
+//go:wasmexport torture_last_slot_read
+func tortureLastSlotRead() uint32 {
+	if lastSlot == 0 {
+		return 0
+	}
+	return *(*uint32)(unsafe.Pointer(lastSlot))
+}
+
+// torture_last_slot_reused asks the ALLOCATOR whether that block is free, which
+// is the only unambiguous way to ask.
+//
+// Reading the block back is not enough on its own and that is worth stating: a
+// swept block keeps its bytes until something writes over them, so a collector
+// that freed a live object still returns the marker to a reader who gets there
+// first. What cannot be explained away is the same address being handed to a
+// LATER allocation while a reference to it is still standing, so this allocates
+// 16-byte blocks -- the same class -- and reports whether any of them IS the
+// block the guest is still holding.
+//
+// The blocks are held rather than dropped, so the loop asks for 8,192 distinct
+// slots instead of recycling one.
+//
+//go:wasmexport torture_last_slot_reused
+func tortureLastSlotReused() uint32 {
+	if lastSlot == 0 {
+		return 0
+	}
+	hit := uint32(0)
+	for i := 0; i < 8192; i++ {
+		b := make([]uint32, 4)
+		if uintptr(unsafe.Pointer(&b[0])) == lastSlot {
+			hit = 1
+		}
+		b[0] = 0xDEADBEEF
+		reuseHold = append(reuseHold, b)
+	}
+	reuseHold = nil
+	return hit
+}
+
 // torture_large allocates a block far bigger than a span, so it takes a run of
 // them, and writes a pattern through it. Nothing about a multi-span object is
 // shared with the small-object path: a different allocation route, a different
@@ -440,6 +545,8 @@ func tortureDropAll() uint32 {
 	roots = nil
 	interior = nil
 	big = nil
+	lastSlot = 0
+	reuseHold = nil
 	kept = 0
 	return 0
 }
