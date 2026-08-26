@@ -243,10 +243,22 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	b.blank()
 
 	b.line("-- NaN mode: %s", b.opts.NaN)
+	// Where each function's text begins and ends, so that its widest jump can
+	// be measured against Lua's sBx limit once the chunk is a string. Two ints
+	// per function, and the slicing rides on the one String() the chunk already
+	// pays for. See funclimit.go, which is also where the limit being per JUMP
+	// rather than per FUNCTION is measured.
+	type emitted struct {
+		name       string
+		start, end int
+	}
+	spans := make([]emitted, 0, len(m.Funcs))
 	for _, f := range m.Funcs {
+		start := b.sb.Len()
 		if err := emitFunc(b, f); err != nil {
 			return "", err
 		}
+		spans = append(spans, emitted{name: f.Name, start: start, end: b.sb.Len()})
 		b.blank()
 	}
 
@@ -339,6 +351,11 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	src := b.sb.String()
 	if err := checkChunkLocals(src, m); err != nil {
 		return "", err
+	}
+	for _, e := range spans {
+		if err := checkJumpSpan(e.name, src[e.start:e.end]); err != nil {
+			return "", err
+		}
 	}
 	return src, nil
 }
