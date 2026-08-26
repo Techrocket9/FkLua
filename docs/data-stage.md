@@ -69,6 +69,18 @@ api = "2.0.77"
 data_module = "dist/data.wasm"
 ```
 
+## A mod with no control stage at all
+
+The control guest is optional. A mod that is only prototypes is an ordinary Factorio mod, so leave the positional argument out and package the data module on its own:
+
+```sh
+fklua mod --data-module dist/data.wasm --name my-shim --version 1.0.0 --author me
+```
+
+The result ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua` and one file per stage hook, plus whatever `--include` carries. There is no `control.lua`, no `fk_module.lua` and no `fk_api_gen.lua`; `fk_abi.lua` stays because `fk_data.lua` requires it for the codec.
+
+`--persist`, `--gc` and `--fuel` are refused here rather than ignored, because each describes how a control guest is compiled and there is none. A data module is always `--persist=none` and `-gc=leaking` whatever else is asked for. The refusal is on the typed flag only, so a project whose manifest sets `gc` can still package a data-only mod from the command line. Giving neither module is an error.
+
 ## The API
 
 Seven operations. Everything that is a failure raises at the stage, naming the stage and the path, because a broken data stage should stop the load rather than produce a mod that is quietly wrong.

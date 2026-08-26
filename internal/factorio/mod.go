@@ -1,8 +1,10 @@
 // Package factorio packages generated Lua as a mod Factorio will load.
 //
 // A mod is a directory (or zip) whose name is "<name>_<version>", containing an
-// info.json and a control.lua. Everything here is about satisfying that shape
-// exactly: Factorio's loader is unforgiving, and its complaint about a
+// info.json -- and that really is the only file Factorio insists on. A mod with
+// a control.lua is a running program, a mod with only a data stage is a set of
+// prototypes, and both are ordinary. Everything here is about satisfying that
+// shape exactly: Factorio's loader is unforgiving, and its complaint about a
 // malformed mod arrives at game start rather than at package time, which is a
 // bad place to learn about a typo in a version string.
 package factorio
@@ -111,6 +113,12 @@ type Package struct {
 	Info Info
 	// Chunk is the generated Lua for the guest module, exactly as
 	// luagen.EmitModuleWith produced it.
+	//
+	// EMPTY IS "no control guest", the same way an empty DataChunk is "no data
+	// guest", and it is what a DATA-STAGE-ONLY mod sets. Factorio requires
+	// info.json and nothing else -- a prototype-only mod is an ordinary genre,
+	// not a degenerate case -- so a package with no control stage ships no
+	// control.lua, no fk_module.lua and no fk_api_gen.lua. See Files().
 	Chunk string
 	// Exports names the guest's exported functions, used only to report which
 	// event hooks were recognised.
@@ -245,45 +253,56 @@ func (p *Package) Files() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	api := p.APITable
-	if api == "" {
-		api = emptyAPITable
-	}
-	files := map[string]string{
-		"info.json":         string(info) + "\n",
-		"control.lua":       luart.ModGlue(),
-		ABIFile:             luart.ABI(),
-		APIFile:             api,
-		GeneratedModuleFile: wrapChunk(p.Chunk),
+	files := map[string]string{"info.json": string(info) + "\n"}
+	// THE CONTROL STAGE, gated on there being one -- and it is gated the same
+	// way the data stage below is, on its chunk being empty.
+	//
+	// A package WITH a control guest produces exactly the five entries it always
+	// did and exactly the bytes it always did. That is not a courtesy: it is
+	// every mod ever built with fklua, and a packager that started adding or
+	// dropping entries would break them all at once.
+	// TestAProjectWithNoDataModuleIsByteIdentical is the gate, and it costs
+	// nothing.
+	//
+	// A package WITHOUT one is a data-stage-only mod, which Factorio loads
+	// perfectly happily: info.json is the only file it insists on. control.lua,
+	// fk_module.lua and fk_api_gen.lua are the three that describe a running
+	// program, and none of them has anything to say about a mod that is
+	// declarative from end to end.
+	if p.Chunk != "" {
+		api := p.APITable
+		if api == "" {
+			api = emptyAPITable
+		}
+		files["control.lua"] = luart.ModGlue()
+		files[APIFile] = api
+		files[GeneratedModuleFile] = wrapChunk(p.Chunk)
 	}
 	// THE DATA STAGE, and everything about it is gated on there being one.
-	//
-	// A project with no data module and no [stages] section produces exactly the
-	// five entries above and exactly the bytes it always did. That is not a
-	// courtesy: every mod already built with fklua has a hand-written data stage
-	// carried by --include, and a packager that started emitting files into it
-	// would break them all at once. TestAProjectWithNoDataModuleIsByteIdentical
-	// is the gate, and it costs nothing.
-	generated := ""
 	if p.DataChunk != "" {
 		files[DataStageFile] = luart.DataStage()
 		files[DataModuleFile] = wrapDataChunk(p.DataChunk)
+	}
+	// fk_abi.lua IS NOT A CONTROL-STAGE FILE, and reading it as one produces a
+	// mod that will not load. fk_data.lua opens with `require("fk_abi")` -- it
+	// needs the tier-2 codec to hand a prototype table across the boundary, and
+	// nothing else in it belongs to the control stage -- so a data-stage-only
+	// package ships the ABI and a package with neither stage ships nothing.
+	// TestTheDataStageShimRequiresTheABI reads the shim rather than a memorised
+	// list, so the day fk_data.lua stops requiring it, the rule moves with it.
+	if p.Chunk != "" || p.DataChunk != "" {
+		files[ABIFile] = luart.ABI()
 	}
 	chains, err := p.stageChains()
 	if err != nil {
 		return nil, err
 	}
-	if len(chains) > 0 {
-		var names []string
-		for _, h := range StageHooks {
-			chain, ok := chains[h.File]
-			if !ok {
-				continue
-			}
-			files[h.File] = stageFile(h, chain)
-			names = append(names, h.File)
+	for _, h := range StageHooks {
+		chain, ok := chains[h.File]
+		if !ok {
+			continue
 		}
-		generated = ", " + strings.Join(names, ", ")
+		files[h.File] = stageFile(h, chain)
 	}
 	// A COLLISION IS AN ERROR, and neither precedence is defensible. Letting
 	// an included file win produces a mod whose guest never runs; letting the
@@ -322,10 +341,19 @@ func (p *Package) Files() (map[string]string, error) {
 				"-- then delete the entry when the Lua is gone",
 				c, h.What, c, h.Key, strings.TrimSuffix(c, ".lua"), GuestStageEntry)
 		}
+		// THE LIST IS WHAT WAS ACTUALLY WRITTEN, read back out of the map rather
+		// than spelled a second time. It used to be a literal naming five files,
+		// which was true of every package there was and is false of two now: a
+		// data-stage-only mod has no control.lua and no fk_module.lua, and no
+		// spelling of the sentence ever named fk_data.lua at all.
+		var written []string
+		for name := range files {
+			written = append(written, name)
+		}
+		sort.Strings(written)
 		return nil, fmt.Errorf("included file %s would overwrite a file fklua "+
-			"generates; rename it or leave it out (fklua writes info.json, "+
-			"control.lua, %s, %s and %s%s)", strings.Join(clashes, ", "),
-			ABIFile, APIFile, GeneratedModuleFile, generated)
+			"generates; rename it or leave it out (fklua writes %s)",
+			strings.Join(clashes, ", "), strings.Join(written, ", "))
 	}
 	for name, body := range p.Extra {
 		files[name] = body

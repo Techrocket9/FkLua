@@ -121,9 +121,23 @@ export PATH="/opt/homebrew/opt/binaryen/bin:$PATH"
 # proven otherwise; agents/testing.md has the longer version, twice.
 go build -o "$ROOT/bin/fklua" "$ROOT/cmd/fklua"
 
-# The CONTROL guest. A data-stage mod still needs one -- `fklua mod` packages a
-# control module and Factorio wants a control.lua -- and `hello` is the smallest
-# one that is real.
+# The CONTROL guest, and this gate KEEPS ONE ON PURPOSE now that it does not
+# have to.
+#
+# Both halves of the old reason are gone. `fklua mod`'s positional is optional
+# whenever the mod has a data module, and Factorio never wanted a control.lua
+# either: info.json is the only file it insists on, and a data-stage-only mod
+# loads -- measured downstream by a harness that stages one under four different
+# names. So the control guest is no longer a tax here; it is what makes this the
+# WIDER arm. A dump taken with one present proves the data stage runs in the mod
+# shape a real mod has, where a dump taken without one would leave "does a
+# control module change what the data stage sees" untested, and that is the
+# question two modules in one mod exists to answer.
+#
+# `hello` is the smallest control guest that is real. Packaging the same data
+# module WITHOUT it is the natural second arm and is deliberately not taken: it
+# is a second engine run and a second golden for a difference this instrument
+# cannot see, since --dump-data never reaches control.lua at all.
 CONTROL="$TMPDIR/datastage-control.wasm"
 echo "building the control guest..."
 (cd "$ROOT/guest/go" && tinygo build -target=wasm-unknown -scheduler=none \

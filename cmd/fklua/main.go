@@ -39,13 +39,18 @@ const usage = `fklua -- WebAssembly to Lua 5.2 for Factorio
 Usage:
   fklua compile IN.wasm [-o OUT.lua] [--nan=canonical|exact] [--opt=0..3]
             [--persist=MODE] [--gc=leaking|collected]
-  fklua mod IN.wasm [-o DIR] [--zip] [--nan=MODE] [--opt=N] [--include DIR]...
+  fklua mod [IN.wasm] [-o DIR] [--zip] [--nan=MODE] [--opt=N] [--include DIR]...
             [--persist=table|packed|auto|none] [--fuel=N]
             [--gc=leaking|collected] [--api=VERSION] [--factorio-version X.Y]
             [--data-module DATA.wasm] [--stage KEY=a,@guest,b]...
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
             [--description D] [--dependency DEP]...
                                      (identity defaults to fklua.toml's [mod])
+      IN.wasm           the CONTROL guest, and it is optional when this mod has
+                        a data module ([fklua] data_module or --data-module).
+                        A data-stage-only mod ships no control.lua,
+                        fk_module.lua or fk_api_gen.lua, and --persist, --gc and
+                        --fuel are refused there rather than ignored
       --dependency DEP  repeatable, and the list REPLACES [mod] dependencies
                         rather than adding to it -- so one manifest can package
                         several mods with different lists. ` + "`--dependency \"\"`" + `
@@ -1225,6 +1230,11 @@ func runMod(args []string) error {
 	nan := luagen.NaNCanonical
 	opt := analysis.DefaultLevel
 	persist := luagen.PersistTable
+	// WHETHER --persist WAS TYPED, for the reason gcFromFlag exists a few lines
+	// down and for one more: a packaging with no CONTROL module has nothing to
+	// persist, so a typed --persist is a contradiction while an untyped default
+	// is simply never reached. Refused below, beside --gc and --fuel.
+	persistFromFlag := false
 	gc := luagen.GCLeaking
 	// WHETHER --gc WAS TYPED, which is a different question from what it is.
 	// The manifest supplies `gc` and the flag overrides it, so "leaking" has to
@@ -1235,6 +1245,7 @@ func runMod(args []string) error {
 	gcFromFlag := false
 	gcFrom := ""
 	fuel := 0
+	fuelFromFlag := false
 	// WHICH API DESCRIPTION THE PACKAGED TABLES COME FROM, and it has to be the
 	// one the guest's bindings were generated against. Member ids are dense
 	// sorted indices over a version's member set (internal/factorio/gen.go), so
@@ -1354,6 +1365,7 @@ func runMod(args []string) error {
 			opt, err = analysis.ParseLevel(strings.TrimPrefix(args[i], "--opt="))
 		case strings.HasPrefix(args[i], "--persist="):
 			persist, err = luagen.ParsePersistMode(strings.TrimPrefix(args[i], "--persist="))
+			persistFromFlag = err == nil
 		case strings.HasPrefix(args[i], "--gc="):
 			gc, err = luagen.ParseGCMode(strings.TrimPrefix(args[i], "--gc="))
 			gcFromFlag = err == nil
@@ -1370,6 +1382,7 @@ func runMod(args []string) error {
 			if err == nil && fuel < 0 {
 				err = fmt.Errorf("--fuel cannot be negative")
 			}
+			fuelFromFlag = err == nil
 		case strings.HasPrefix(args[i], "-"):
 			err = fmt.Errorf("unknown flag %q", args[i])
 		default:
@@ -1382,9 +1395,13 @@ func runMod(args []string) error {
 			return err
 		}
 	}
-	if in == "" {
-		return fmt.Errorf("no input module")
-	}
+	// THE INPUT MODULE IS CHECKED BELOW THE MANIFEST, and it used to be checked
+	// here. Whether a control module is required at all depends on whether this
+	// mod has a DATA module, and `data_module` is a manifest key as well as a
+	// flag -- so the question cannot be asked until fklua.toml has been read.
+	// The only invocations whose diagnostic moves are ones that were already
+	// wrong twice over: a malformed fklua.toml, or a contradictory --dependency
+	// list, now reports itself before "no input module" does.
 
 	// --dependency REPLACES [mod] dependencies, it does not add to them.
 	//
@@ -1507,6 +1524,57 @@ func runMod(args []string) error {
 		}
 	}
 
+	// A DATA-STAGE-ONLY MOD HAS NO CONTROL MODULE, and Factorio has never
+	// required one: info.json is the only file it insists on, and a mod that is
+	// nothing but prototypes -- a compatibility shim, a stand-in, a mod whose
+	// whole job is data.raw -- is an ordinary genre rather than a degenerate
+	// case. Until this, `fklua mod` demanded a control guest whatever the mod
+	// was, so the shape had to be reached by compiling an empty one: a hundred
+	// kilobytes of Lua that is required at every load and called from nowhere.
+	//
+	// WITH NEITHER MODULE THE MESSAGE IS WHAT IT ALWAYS WAS. The command takes a
+	// module, and being handed none of either kind is the same mistake it was
+	// before a data stage existed.
+	if in == "" && dataModule == "" {
+		return fmt.Errorf("no input module")
+	}
+	// ...AND THE FLAGS THAT DESCRIBE A CONTROL GUEST ARE REFUSED RATHER THAN
+	// IGNORED. A data module is compiled --persist=none and -gc=leaking whatever
+	// else is asked for -- it runs once and dies with the Lua state that built
+	// it, so there is nothing to save and no tick to pace a collector from --
+	// and --fuel guards a loop in a program that is not here. A flag whose value
+	// is silently discarded is this repo's most repeated failure shape, and the
+	// refusal is the same one `checkGC` makes for the same reason.
+	//
+	// THE FLAG, NOT THE MANIFEST KEY, and the distinction is the one gcFromFlag
+	// already exists to draw. `gc = "collected"` in fklua.toml is a statement
+	// about the mod that manifest is the manifest OF; one checkout packaging
+	// several mods drives the rest from flags, and refusing a data-only
+	// packaging because the shipped mod's key is set would make that impossible.
+	// A default that cannot apply is not a contradiction; a typed flag is.
+	if in == "" {
+		var typed []string
+		if gcFromFlag {
+			typed = append(typed, "--gc")
+		}
+		if persistFromFlag {
+			typed = append(typed, "--persist")
+		}
+		if fuelFromFlag {
+			typed = append(typed, "--fuel")
+		}
+		if len(typed) > 0 {
+			verb, noun := "describe", "the flags"
+			if len(typed) == 1 {
+				verb, noun = "describes", "the flag"
+			}
+			return fmt.Errorf("%s %s how a CONTROL guest is compiled and this "+
+				"packaging has no control module. A data module is always "+
+				"--persist=none and -gc=leaking: it runs once and dies with the Lua "+
+				"state that built it. Drop %s, or pass a control module too",
+				andList(typed), verb, noun)
+		}
+	}
 	if info.Name == "" {
 		return fmt.Errorf("--name is required (or [mod] name in %s); Factorio "+
 			"identifies a mod by it", projectFile)
@@ -1526,43 +1594,56 @@ func runMod(args []string) error {
 		outDir = "."
 	}
 
-	// BELOW the pin resolution above, and it has to be: the build stamp is a
-	// fact about the module AND the version this package is built against, so a
-	// stamp taken before the manifest was read would identify the build by a pin
-	// it is not being packaged with. See buildID.
-	im, id, err := loadModuleID(in, apiVersion)
-	if err != nil {
-		return err
-	}
-	// Resolve --persist=auto HERE rather than inside the emitter, so the choice
-	// can be printed. An automatic decision the author cannot see is one they
-	// cannot correct, and this one turns on a proxy (heap size) for something
-	// the compiler cannot know (write locality).
-	if persist == luagen.PersistAuto {
-		heap := heapBytes(im)
-		persist = luagen.ResolvePersist(persist, heap)
-		fmt.Printf("--persist=auto chose %s for a %d KiB heap (threshold %d KiB)\n",
-			persist, heap/1024, luagen.AutoThresholdBytes/1024)
-	}
-	// A mod's control.lua wires only the hooks in factorio.Hooks, so those are
-	// the only entry points its guest code can be reached through. Without this,
-	// diagnostics name TinyGo's exported libm -- fmaximumf and friends -- which
-	// the mod never calls and the author never wrote.
-	if err := checkGC(gc, im, gcFrom); err != nil {
-		return err
-	}
-	src, err := emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
-		GC: gc, Fuel: fuel, Roots: hookNames()})
-	if err != nil {
-		return err
-	}
-
-	pkg := &factorio.Package{Info: info, Chunk: src, Stages: stages}
-	for _, e := range im.Exports {
-		pkg.Exports = append(pkg.Exports, e.Name)
-	}
-	if err := attachAPI(pkg, im, apiVersion, apiPin); err != nil {
-		return err
+	// THE CONTROL GUEST, and every step of it is gated on there being one. An
+	// empty `in` is a data-stage-only mod (see the refusal above), and what
+	// follows is the whole of what a control module costs: a build stamp, the
+	// persist decision, the collector check, the emit, the exported hook list
+	// and the pruned member table. Not one of them has anything to say about a
+	// mod that is declarative from end to end -- and attachAPI in particular
+	// must not be reached, because it is what would demand an fk_api_pin export
+	// from a module that by design carries none.
+	var im *ir.Module
+	var src string
+	pkg := &factorio.Package{Info: info, Stages: stages}
+	if in != "" {
+		// BELOW the pin resolution above, and it has to be: the build stamp is a
+		// fact about the module AND the version this package is built against, so
+		// a stamp taken before the manifest was read would identify the build by a
+		// pin it is not being packaged with. See buildID.
+		var id string
+		im, id, err = loadModuleID(in, apiVersion)
+		if err != nil {
+			return err
+		}
+		// Resolve --persist=auto HERE rather than inside the emitter, so the
+		// choice can be printed. An automatic decision the author cannot see is
+		// one they cannot correct, and this one turns on a proxy (heap size) for
+		// something the compiler cannot know (write locality).
+		if persist == luagen.PersistAuto {
+			heap := heapBytes(im)
+			persist = luagen.ResolvePersist(persist, heap)
+			fmt.Printf("--persist=auto chose %s for a %d KiB heap (threshold %d KiB)\n",
+				persist, heap/1024, luagen.AutoThresholdBytes/1024)
+		}
+		// A mod's control.lua wires only the hooks in factorio.Hooks, so those are
+		// the only entry points its guest code can be reached through. Without
+		// this, diagnostics name TinyGo's exported libm -- fmaximumf and friends
+		// -- which the mod never calls and the author never wrote.
+		if err := checkGC(gc, im, gcFrom); err != nil {
+			return err
+		}
+		src, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
+			GC: gc, Fuel: fuel, Roots: hookNames()})
+		if err != nil {
+			return err
+		}
+		pkg.Chunk = src
+		for _, e := range im.Exports {
+			pkg.Exports = append(pkg.Exports, e.Name)
+		}
+		if err := attachAPI(pkg, im, apiVersion, apiPin); err != nil {
+			return err
+		}
 	}
 	// THE DATA STAGE. A second module through the same pipeline, and the flags
 	// it is NOT given are as deliberate as the ones it is.
@@ -1621,8 +1702,18 @@ func runMod(args []string) error {
 		return err
 	}
 
-	fmt.Printf("wrote %s (%d bytes of Lua, NaN mode: %s, -opt=%s, --persist=%s, --gc=%s)\n",
-		path, len(src), nan, opt, persist, gc)
+	// TWO LINES BECAUSE THERE ARE TWO SHAPES, and the control one is untouched
+	// to the byte -- it is what every build in and outside this repo greps. The
+	// data-only line names neither --persist nor --gc, because a line reporting
+	// a mode nothing was compiled in is how a reader comes to believe a flag did
+	// something; the two are refused above rather than reported here.
+	if in == "" {
+		fmt.Printf("wrote %s (data stage only, no control module; NaN mode: %s, -opt=%s)\n",
+			path, nan, opt)
+	} else {
+		fmt.Printf("wrote %s (%d bytes of Lua, NaN mode: %s, -opt=%s, --persist=%s, --gc=%s)\n",
+			path, len(src), nan, opt, persist, gc)
+	}
 	// SAY WHICH ENGINE THE MOD CLAIMS, beside the `API <version>:` lines that
 	// say which description it was built from. The two are separate axes and
 	// they no longer default to the same series in every project, so the one
@@ -1666,7 +1757,14 @@ func runMod(args []string) error {
 			}
 		}
 	}
-	if pkg.Inert() {
+	// A DATA-ONLY MOD IS NOT INERT, it is declarative, and telling its author to
+	// export an event hook would be advice to write the control guest they
+	// deliberately did not write. `Inert()` reads the control exports and a
+	// package with no control module has none, so the warning has to be gated on
+	// the shape rather than on the answer. What stands in for it is the data
+	// wiring block above: a data module exporting no stage hook IS the mod that
+	// loads and does nothing, and that is what it says.
+	if in != "" && pkg.Inert() {
 		fmt.Println("\nThis guest exports no event hook, so the mod will load and then never")
 		fmt.Println("be called again. Export one of:")
 		for _, h := range absent {
@@ -1676,6 +1774,19 @@ func runMod(args []string) error {
 		}
 	}
 	return nil
+}
+
+// andList writes a list the way a sentence does: "a", "a and b", "a, b and c".
+// `strings.Join(x, " and ")` reads as a chant past two, and this message can
+// carry three.
+func andList(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // parseStageFlag reads `--stage KEY=a,@guest,b`.

@@ -86,6 +86,20 @@ A mod whose settings and data stages are also a guest ships two more files, plus
 | `fk_data_module.lua` | your data guest, compiled to Lua and wrapped as a factory |
 | `settings.lua`, `data.lua`, `data-updates.lua`, `data-final-fixes.lua` | one per stage hook the data module exports, and none for a hook it does not |
 
+### A mod with no control stage
+
+Factorio requires `info.json` and nothing else, so a mod that is only prototypes is an ordinary mod: a compatibility shim, a stand-in, anything whose whole job is `data.raw`. The control guest is optional whenever the mod has a data module, so leave the positional argument out:
+
+```sh
+fklua mod --data-module dist/data.wasm --name my-shim --version 1.0.0 --author me
+```
+
+or, with `data_module` in the manifest, `fklua mod` on its own. Such a package ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua`, one file per stage hook, and whatever `--include` carries. `control.lua`, `fk_module.lua` and `fk_api_gen.lua` are the three files that describe a running program, and none of them appears. `fk_abi.lua` does, because `fk_data.lua` requires it for the codec that carries a prototype table across the boundary.
+
+`--persist`, `--gc` and `--fuel` describe how a control guest is compiled, so passing one here is refused rather than ignored: a data module is always compiled `--persist=none` and `-gc=leaking`, because it runs once and dies with the Lua state that built it. The refusal is on the flag alone. A `gc` key in the manifest is a statement about the mod that manifest describes, so one project can still package a data-only mod from the command line beside a collected one.
+
+Giving neither a control module nor a data module is an error: the command needs something to package.
+
 The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
 
 A mod with a hand-written data stage ships it through `data = "DIR"` under `[mod]` (or `fklua mod --include DIR`); the directory's contents are merged into the package, and a name collision with a generated file is an error at package time rather than a mod that is silently wrong in game. A mod whose data stage is a guest declares `data_module` under `[fklua]` instead, and can run both at once while it moves from one to the other: see [`docs/data-stage.md`](data-stage.md). The packaged output itself is disposable: edit the guest or the manifest and run `fklua mod` again.

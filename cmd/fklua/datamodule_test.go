@@ -224,6 +224,139 @@ func TestADataModuleReachingTheRuntimeAPIIsRefused(t *testing.T) {
 	}
 }
 
+// A DATA-STAGE-ONLY MOD: the control positional left out entirely.
+//
+// This is the downstream shape it was asked for in -- identity entirely from
+// flags, packaged from a directory with no fklua.toml in it -- because that is
+// how a test harness stages a stand-in beside the mod it is standing in for.
+// Before this, reaching it meant compiling an inert control guest and shipping
+// a hundred kilobytes of Lua that is required at every load and called from
+// nowhere.
+func TestModPackagesADataStageOnlyMod(t *testing.T) {
+	out := t.TempDir()
+	if err := runMod([]string{
+		"--data-module", dataGuest(t, "fk_data"),
+		"--name", "stand-in", "--version", "1.0.0", "--author", "someone",
+		"-o", out}); err != nil {
+		t.Fatal(err)
+	}
+	have := modFiles(t, filepath.Join(out, "stand-in_1.0.0"))
+	want := []string{"info.json", factorio.ABIFile, factorio.DataStageFile,
+		factorio.DataModuleFile, "data.lua"}
+	for _, w := range want {
+		if !have[w] {
+			t.Errorf("a data-stage-only mod has no %s", w)
+		}
+	}
+	// The three that describe a running program, and there is none.
+	for _, unwanted := range []string{"control.lua", factorio.GeneratedModuleFile,
+		factorio.APIFile} {
+		if have[unwanted] {
+			t.Errorf("a mod with no control module ships %s", unwanted)
+		}
+	}
+	if len(have) != len(want) {
+		t.Errorf("a data-stage-only mod ships %d files: %v", len(have), have)
+	}
+}
+
+// ...and the same through the manifest, because `data_module` is a key as well
+// as a flag and the positional check has to read the file to know the answer.
+func TestADataStageOnlyModFromTheManifest(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	guestPath := dataGuest(t, "fk_data")
+	// gc = "collected" is in here deliberately. A MANIFEST KEY THAT CANNOT APPLY
+	// IS NOT A CONTRADICTION: one checkout packaging several mods describes the
+	// shipped one in fklua.toml and the rest on the command line, so refusing a
+	// data-only packaging because the shipped mod is collected would make that
+	// impossible. A typed --gc is refused; this is not.
+	if err := os.WriteFile("fklua.toml", []byte(`
+[mod]
+name = "from-manifest"
+version = "0.2.0"
+author = "someone"
+
+[fklua]
+api = "`+factorio.DefaultAPIVersion+`"
+gc = "collected"
+data_module = "`+guestPath+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	if err := runMod([]string{"-o", out}); err != nil {
+		t.Fatal(err)
+	}
+	have := modFiles(t, filepath.Join(out, "from-manifest_0.2.0"))
+	if !have["data.lua"] || have["control.lua"] {
+		t.Errorf("the manifest's data_module did not package data-stage-only: %v", have)
+	}
+}
+
+// WITH NEITHER MODULE THE MESSAGE IS WHAT IT ALWAYS WAS. Being handed no module
+// of either kind is the same mistake it was before a data stage existed, and a
+// command that grew a new shape should not have grown a new way to say that.
+func TestNoModuleOfEitherKindIsStillRefused(t *testing.T) {
+	err := runMod([]string{"--name", "a-mod", "--version", "0.1.0",
+		"--author", "someone", "-o", t.TempDir()})
+	if err == nil {
+		t.Fatal("no module at all should be refused")
+	}
+	if err.Error() != "no input module" {
+		t.Errorf("the message is %q and has always been %q", err, "no input module")
+	}
+}
+
+// The flags that describe a CONTROL guest are refused rather than ignored, one
+// message naming every one that was typed. A flag whose value is silently
+// discarded is this repo's most repeated failure shape.
+func TestControlOnlyFlagsAreRefusedWithoutAControlModule(t *testing.T) {
+	for _, flag := range []string{"--gc=collected", "--persist=packed", "--fuel=1000"} {
+		err := runMod([]string{flag, "--data-module", dataGuest(t, "fk_data"),
+			"--name", "a-mod", "--version", "0.1.0", "--author", "someone",
+			"-o", t.TempDir()})
+		if err == nil {
+			t.Errorf("%s should be refused with no control module, not ignored", flag)
+			continue
+		}
+		name := strings.SplitN(flag, "=", 2)[0]
+		for _, w := range []string{name, "no control module"} {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("the message for %s does not contain %q:\n%v", flag, w, err)
+			}
+		}
+	}
+	// All three at once name all three, so an author fixing one is not sent
+	// round the loop twice.
+	err := runMod([]string{"--gc=collected", "--persist=packed", "--fuel=1000",
+		"--data-module", dataGuest(t, "fk_data"),
+		"--name", "a-mod", "--version", "0.1.0", "--author", "someone",
+		"-o", t.TempDir()})
+	if err == nil {
+		t.Fatal("three control-only flags should be refused")
+	}
+	for _, w := range []string{"--gc", "--persist", "--fuel"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("the message does not name %s:\n%v", w, err)
+		}
+	}
+	// ...and none of them is refused when there IS a control module.
+	if err := runMod([]string{tinyGuest(t), "--persist=packed", "--fuel=1000",
+		"--data-module", dataGuest(t, "fk_data"),
+		"--name", "a-mod", "--version", "0.1.0", "--author", "someone",
+		"-o", t.TempDir()}); err != nil {
+		t.Errorf("a control module makes the same flags legal again: %v", err)
+	}
+}
+
 // A mod with no data module ships exactly what it always shipped. The
 // packager's own byte-identity gate is in internal/factorio; this is the same
 // property through the command, because that is where a default could be
