@@ -27,16 +27,19 @@ import (
 // "control structure too long". Both halves matter -- the boundary is exactly
 // MAXARG_sBx and there is no slack.
 //
-// WHAT IT LOOKS LIKE WHEN IT FIRES, and it names nothing useful. The engine
-// reports the token the parser was holding when the pending gotos were patched,
-// which is whatever follows the label:
+// WHAT IT LOOKS LIKE WHEN IT FIRES, measured in a real Factorio 2.1.16 rather
+// than quoted. A mod whose data module carries one over-long jump:
 //
-//	control structure too long near 'trap_unreachable'
+//	Failed to load mod "fk-jumplimit": __fk-jumplimit__/fk_data.lua:84:
+//	__fk-jumplimit__/fk_data_module.lua:163449: control structure too long near '('
 //
-// It names no file, no function and nothing about the guest -- so an author
-// gets a mod that refuses to load and no route back to the Go or Rust that
-// caused it. That is the whole reason this check exists, and it is the same
-// argument checkChunkLocals is built on one limit over.
+// It names the GENERATED file and line, and the token the parser was holding
+// when the pending gotos were patched -- which is whatever follows the label,
+// so for a guest it is often `near 'trap_unreachable'`. What it names nowhere
+// is anything in the AUTHOR'S source: there is no route from
+// fk_data_module.lua:163449 to the Go or Rust function that produced it, and
+// the mod simply does not load. That is the whole reason this check exists, and
+// it is the same argument checkChunkLocals is built on one limit over.
 //
 // WHICH EMITTED CONSTRUCT CARRIES A LONG JUMP. Emission is flat, so a function
 // body is a run of statements with `goto L<n>` and `::L<n>::` at body level.
@@ -258,8 +261,8 @@ func checkJumpSpan(name string, src string) error {
 			"generated Lua and the limit is about %d, because Lua 5.2 encodes a "+
 			"jump offset in 18 bits and cannot express one longer than %d VM "+
 			"instructions. Lua reports this at the player's game start as "+
-			"\"control structure too long\", naming neither the file nor the "+
-			"function that caused it. Split the function: //go:noinline in Go, "+
+			"\"control structure too long\", pointing into generated Lua and naming "+
+			"nothing in your source. Split the function: //go:noinline in Go, "+
 			"#[inline(never)] in Rust, on the boundaries you already think of as "+
 			"sections. The optimizer inlined a whole program into one function, "+
 			"and it is that concentration rather than anything you wrote that "+

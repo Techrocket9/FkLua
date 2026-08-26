@@ -97,7 +97,7 @@ This matters beyond code size: the M0 kernels were hand-written in the forwarded
 
 **Lua encodes a jump offset in 18 bits, so no jump may span more than `MAXARG_sBx` = 131,071 VM instructions.** The mechanic, the exact boundary and what the engine says when it fires are in [`agents/sandbox.md`](sandbox.md), "A jump is 18 bits". This section is what the emitter does about it.
 
-`internal/luagen/funclimit.go` refuses such a module at package time, beside `checkChunkLocals` and for the same reason one limit over: without it the chunk compiles here and the *player's* game start reports `control structure too long`, naming neither the file nor the function. It is enforced inside `EmitModuleWith`, so `fklua compile` and `fklua mod` both carry it, and `mod` carries it for the data module as well as the control one.
+`internal/luagen/funclimit.go` refuses such a module at package time, beside `checkChunkLocals` and for the same reason one limit over: without it the chunk compiles here and the *player's* game start reports `control structure too long` against a generated file and line, naming nothing in the guest. It is enforced inside `EmitModuleWith`, so `fklua compile` and `fklua mod` both carry it, and `mod` carries it for the data module as well as the control one.
 
 **The metric is emitted BYTES between a `goto L<n>` and its `::L<n>::`, per function**, and every part of that is a decision:
 

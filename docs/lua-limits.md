@@ -19,7 +19,7 @@ Lua 5.2 encodes a jump offset in an 18-bit field, so no single jump inside one f
 control structure too long near 'trap_unreachable'
 ```
 
-That message names no file, no function and nothing about your mod, and it appears when a player starts the game rather than when you build. The package-time check exists to move it to where you can act on it.
+The line it points at is generated Lua, not anything you wrote, and there is no route from it back to your Go or Rust. It appears when a player starts the game rather than when you build. The package-time check exists to move it to where you can act on it.
 
 The limit is on **one jump's span**, not on how big a function is. A function with no branch in it can be arbitrarily large: a 140,998-instruction function with no jump loads fine. What reaches the limit is a large function that also contains a branch crossing most of it.
 
