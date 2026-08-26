@@ -67,6 +67,196 @@ func TestAPIDiffClassifiesAgainstAHandCheckedExpectation(t *testing.T) {
 	t.Logf("2.0.77 -> 2.1.12: %d breaking, %d additive, %d cosmetic", br, ad, co)
 }
 
+// A DEFINE VALUE THAT GOES WHILE ITS GROUP STAYS IS WHAT A GUEST ACTUALLY
+// LOSES, and a comparison of group NAMES cannot see one.
+//
+// A `fk.define` id is a dense index over the flattened value paths, so
+// `defines.inventory.furnace_result` is a thing a guest baked an id for and
+// `defines.inventory` is not. Comparing only the top-level group names --
+// which is what this did -- reports nothing at all for the twenty value
+// removals between 2.0.77 and 2.1.12, and `api check` reads the diff, so a
+// guest that lost one got a clean bill.
+//
+// Both arms of the walk are exercised, because a subkey is a separate branch:
+// a value directly under a group, and one under a nested group.
+func TestDiffNoticesADefineValueRemovedFromASurvivingGroup(t *testing.T) {
+	base, err := LoadAPI(apiPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("directly under a group", func(t *testing.T) {
+		gi := -1
+		for i, d := range base.Defines {
+			// Two or more, so the group itself survives the removal -- which is
+			// the whole point: a group-name comparison must be unable to see it.
+			if d.Name != "events" && len(d.Values) > 1 {
+				gi = i
+				break
+			}
+		}
+		if gi < 0 {
+			t.Fatal("no define group has two values, which cannot be right")
+		}
+		mod := *base
+		mod.Defines = append([]Define(nil), base.Defines...)
+		group := mod.Defines[gi].Name
+		gone := "defines." + group + "." + mod.Defines[gi].Values[0].Name
+		mod.Defines[gi].Values = mod.Defines[gi].Values[1:]
+
+		d := DiffAPI(base, &mod)
+		if !hasChange(d, Breaking, gone, "define value removed") {
+			t.Errorf("removing %s was not reported as breaking; the group %q "+
+				"survives, so nothing comparing group names could see it", gone, group)
+		}
+		// ANTI-VACUITY, and it is the whole shape of the defect: the group must
+		// NOT be reported, or this would pass on a diff that only looks at
+		// groups and happened to lose one.
+		if hasChange(d, Breaking, "defines."+group, "define removed") {
+			t.Errorf("the group %q was reported as removed and it is still there", group)
+		}
+	})
+
+	t.Run("under a subkey", func(t *testing.T) {
+		gi, si := -1, -1
+		for i, d := range base.Defines {
+			if d.Name == "events" {
+				continue
+			}
+			for j, s := range d.Subkeys {
+				if len(s.Values) > 1 {
+					gi, si = i, j
+					break
+				}
+			}
+			if gi >= 0 {
+				break
+			}
+		}
+		if gi < 0 {
+			t.Skip("no define group has a subkey with two values, so the nested " +
+				"arm of the walk cannot be exercised against this description")
+		}
+		mod := *base
+		mod.Defines = append([]Define(nil), base.Defines...)
+		mod.Defines[gi].Subkeys = append([]Define(nil), base.Defines[gi].Subkeys...)
+		sub := &mod.Defines[gi].Subkeys[si]
+		gone := "defines." + mod.Defines[gi].Name + "." + sub.Name + "." + sub.Values[0].Name
+		sub.Values = sub.Values[1:]
+
+		if !hasChange(DiffAPI(base, &mod), Breaking, gone, "define value removed") {
+			t.Errorf("removing the nested value %s was not reported as breaking", gone)
+		}
+	})
+
+	t.Run("a new value is additive", func(t *testing.T) {
+		mod := *base
+		mod.Defines = append([]Define(nil), base.Defines...)
+		gi := 0
+		for i, d := range base.Defines {
+			if d.Name != "events" {
+				gi = i
+				break
+			}
+		}
+		group := mod.Defines[gi].Name
+		mod.Defines[gi].Values = append(append([]DefineVal(nil), base.Defines[gi].Values...),
+			DefineVal{Name: "entirely_new"})
+		if !hasChange(DiffAPI(base, &mod), Additive,
+			"defines."+group+".entirely_new", "new define value") {
+			t.Error("a new define value was not reported as additive")
+		}
+	})
+
+	t.Run("a removed group takes its values with it", func(t *testing.T) {
+		gi := -1
+		for i, d := range base.Defines {
+			if d.Name != "events" && len(d.Values) > 0 {
+				gi = i
+				break
+			}
+		}
+		if gi < 0 {
+			t.Fatal("no define group outside events carries a value")
+		}
+		group := base.Defines[gi].Name
+		first := "defines." + group + "." + base.Defines[gi].Values[0].Name
+		mod := *base
+		mod.Defines = append(append([]Define(nil), base.Defines[:gi]...),
+			base.Defines[gi+1:]...)
+
+		d := DiffAPI(base, &mod)
+		// The GROUP finding is what it always was -- this is the arm that was
+		// already there and must keep reporting exactly what it did.
+		if !hasChange(d, Breaking, "defines."+group, "define removed") {
+			t.Errorf("the group-level finding for %q is gone", group)
+		}
+		// And the values are reported too, because they are what a guest holds
+		// an id for.
+		if !hasChange(d, Breaking, first, "define value removed") {
+			t.Errorf("%s went with its group and was not reported", first)
+		}
+	})
+}
+
+// The value-level walk against the REAL descriptions, which is where the
+// twenty removals the group comparison could not see actually live.
+func TestTheCommittedDescriptionsDisagreeAboutDefineValues(t *testing.T) {
+	dir := filepath.Join("..", "..", "api")
+	from, err := LoadAPI(filepath.Join(dir, "2.0.77", "runtime-api.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	to, err := LoadAPI(filepath.Join(dir, "2.1.12", "runtime-api.json"))
+	if err != nil {
+		t.Skip("2.1.12 is not cached; run `fklua api pull 2.1.12`")
+	}
+
+	// Derived rather than named, for the reason every id in this package is:
+	// a path written down here is one that quietly stops discriminating the
+	// next time either description is regenerated.
+	surviving := map[string]bool{}
+	for _, g := range to.Defines {
+		surviving[g.Name] = true
+	}
+	newV := map[string]bool{}
+	for _, p := range definePaths(to) {
+		newV[p] = true
+	}
+	var lost []string
+	for _, p := range definePaths(from) {
+		if newV[p] {
+			continue
+		}
+		if group, _, _ := strings.Cut(p, "."); surviving[group] {
+			lost = append(lost, p)
+		}
+	}
+	if len(lost) == 0 {
+		t.Skip("no define value was removed from a group that survives 2.0.77 -> " +
+			"2.1.12, so the real descriptions cannot exercise this")
+	}
+
+	d := DiffAPI(from, to)
+	for _, p := range lost {
+		if !hasChange(d, Breaking, "defines."+p, "define value removed") {
+			t.Errorf("%s is in 2.0.77 and not in 2.1.12 and the diff says nothing "+
+				"about it", p)
+		}
+	}
+	t.Logf("2.0.77 -> 2.1.12: %d define value(s) removed from surviving groups, "+
+		"first %q", len(lost), lost[0])
+
+	// And the reverse direction gains them, which is the additive arm over the
+	// same pair rather than a second synthetic one.
+	back := DiffAPI(to, from)
+	for _, p := range lost {
+		if !hasChange(back, Additive, "defines."+p, "new define value") {
+			t.Errorf("%s reads as removed going forward and not as added going back", p)
+		}
+	}
+}
+
 func hasChange(d APIDiff, kind ChangeKind, what, detail string) bool {
 	for _, c := range d.Changes {
 		if c.Kind == kind && c.What == what && strings.Contains(c.Detail, detail) {
@@ -130,6 +320,15 @@ func TestDiffNoticesEachKindOfChange(t *testing.T) {
 		mod.Events = append([]Event(nil), base.Events[1:]...)
 		if !hasChange(DiffAPI(base, &mod), Breaking, gone, "event removed") {
 			t.Errorf("removing event %s was not reported as breaking", gone)
+		}
+	})
+
+	t.Run("removed define group", func(t *testing.T) {
+		mod := *base
+		gone := base.Defines[0].Name
+		mod.Defines = append([]Define(nil), base.Defines[1:]...)
+		if !hasChange(DiffAPI(base, &mod), Breaking, "defines."+gone, "define removed") {
+			t.Errorf("removing the define group %s was not reported as breaking", gone)
 		}
 	})
 

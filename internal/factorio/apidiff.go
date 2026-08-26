@@ -451,6 +451,19 @@ func diffUnion(name string, o, n Type, add func(ChangeKind, string, string)) {
 	}
 }
 
+// diffDefines reports what moved in `defines`, at BOTH levels.
+//
+// The group level is the coarse one -- `defines.inventory` gone entirely -- and
+// the value level is the one a guest actually stands on: `fk.define` ids are
+// dense indices over the flattened value paths (definePaths, gen.go), so
+// `defines.inventory.furnace_result` disappearing while `defines.inventory`
+// survives is invisible to a group-name comparison and is exactly the shape
+// 2.0.77 -> 2.1.12 has twenty of.
+//
+// Both are reported rather than the finer one alone. A removed group takes its
+// values with it and therefore produces a finding per value as well, which is
+// not noise: the group line is what a human reads, and the value lines are what
+// `api check` cross-references a guest's surface against.
 func diffDefines(from, to *API, add func(ChangeKind, string, string)) {
 	oldD := map[string]bool{}
 	for _, x := range from.Defines {
@@ -460,14 +473,37 @@ func diffDefines(from, to *API, add func(ChangeKind, string, string)) {
 	for _, x := range to.Defines {
 		newD[x.Name] = true
 	}
-	for name := range oldD {
-		if !newD[name] {
-			add(Breaking, "defines."+name, "define removed")
+	// Iterated over the SLICES rather than the maps, so the order changes reach
+	// `add` in is the description's own. DiffAPI sorts afterwards either way;
+	// this is so that a caller reading the raw sequence never sees map order.
+	for _, x := range from.Defines {
+		if !newD[x.Name] {
+			add(Breaking, "defines."+x.Name, "define removed")
 		}
 	}
-	for name := range newD {
-		if !oldD[name] {
-			add(Additive, "defines."+name, "new define")
+	for _, x := range to.Defines {
+		if !oldD[x.Name] {
+			add(Additive, "defines."+x.Name, "new define")
+		}
+	}
+
+	oldPaths, newPaths := definePaths(from), definePaths(to)
+	oldV := map[string]bool{}
+	for _, p := range oldPaths {
+		oldV[p] = true
+	}
+	newV := map[string]bool{}
+	for _, p := range newPaths {
+		newV[p] = true
+	}
+	for _, p := range oldPaths {
+		if !newV[p] {
+			add(Breaking, "defines."+p, "define value removed")
+		}
+	}
+	for _, p := range newPaths {
+		if !oldV[p] {
+			add(Additive, "defines."+p, "new define value")
 		}
 	}
 }

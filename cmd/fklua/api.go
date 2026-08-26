@@ -358,11 +358,16 @@ func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
 		return res, asJSON, fmt.Errorf("%s: %w (run `fklua api pull %s`)", to, err, to)
 	}
 
+	// All three tables come from `a`, the FROM description: member, event and
+	// define ids are dense per-version indices, and the guest baked in the ones
+	// its own bindings were generated against.
 	report := factorio.GenerateMembers(a)
 	evs := factorio.GenerateEvents(a)
+	defs := factorio.GenerateDefines(a)
 	usedM, mOK := factorio.UsedMembers(im)
 	usedE, eOK := factorio.UsedEvents(im)
-	surface := factorio.SurfaceOf(report, usedM, mOK, usedE, eOK, evs)
+	usedD, dOK := factorio.UsedDefines(im)
+	surface := factorio.SurfaceOf(report, usedM, mOK, usedE, eOK, evs, usedD, dOK, defs)
 
 	// From and To come out of the DESCRIPTIONS' own application_version rather
 	// than from what was typed, which is what makes echoing them worth anything:

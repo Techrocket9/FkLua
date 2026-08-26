@@ -76,11 +76,23 @@ The whole-signature form survives as the fallback for shapes that are not compar
 
 ### 2.0.77 → 2.1.12, measured
 
-**200 breaking, 578 additive, 52 cosmetic.** The breaking set is mostly one shape — 2.1 added circuit-network selection to nearly every blueprint control behaviour, and each new field moves the offsets after it.
+**220 breaking, 644 additive, 52 cosmetic.** The breaking set is mostly one shape — 2.1 added circuit-network selection to nearly every blueprint control behaviour, and each new field moves the offsets after it.
 
-`TestAPIDiffClassifiesAgainstAHandCheckedExpectation` is the gate. It names specific changes verified against the raw JSON rather than asserting a total: a test pinning "200 breaking" would pass whatever the classifier did, as long as it kept doing it. It also asserts that additive **outnumbers** breaking, which a classifier that called everything breaking would fail while passing everything else.
+`TestAPIDiffClassifiesAgainstAHandCheckedExpectation` is the gate. It names specific changes verified against the raw JSON rather than asserting a total: a test pinning "220 breaking" would pass whatever the classifier did, as long as it kept doing it. It also asserts that additive **outnumbers** breaking, which a classifier that called everything breaking would fail while passing everything else.
 
 Two properties worth their own tests: a version against itself produces the **empty** diff, and a schema bump is always reported.
+
+#### `defines` is diffed at BOTH levels, and the value level is the one a guest stands on
+
+`diffDefines` compared **top-level group names only**, so `defines.inventory` disappearing was reported and `defines.inventory.furnace_result` disappearing while the group survived was not. **Twenty of the 220 breaking changes above are exactly that shape**, and every one of them was invisible — to `api diff`, and therefore to `api check`, which reads the diff.
+
+The distinction is not cosmetic: **a `fk.define` id is a dense index over the flattened VALUE paths** (`definePaths`, `internal/factorio/gen.go`), so a value is what a guest bakes an id for and a group is not. `defines.events` is excluded from the walk on both sides because `GenerateDefines` excludes it — the events table resolves its own numbers, and offering a guest both spellings of `on_tick` would be a trap.
+
+Both levels are reported. A removed group produces its group finding **and** a finding per value it took with it, which is not noise: the group line is what a human reads and the value lines are what `api check` cross-references a surface against. The group findings are exactly what they were, so nothing that already read them moves.
+
+**One walk, called twice.** `definePaths` is the function `GenerateDefines` assigns ids over *and* the one `diffDefines` compares — the AD5 rule, and here it has teeth in both directions: a copy that drifted by one rule (the events skip, say) would either report a define as removed that no guest could ever have read, or say nothing about one that every guest reading it lost.
+
+`TestDiffNoticesADefineValueRemovedFromASurvivingGroup` drives both arms of the walk (a value directly under a group, and one under a subkey), the additive direction, and the removed-group case where the two levels must BOTH fire; its anti-vacuity clause requires the group to be reported as surviving, so it cannot pass on a diff that only sees groups. `TestTheCommittedDescriptionsDisagreeAboutDefineValues` derives the twenty real ones from the two descriptions rather than naming any, and checks the reverse direction reports them as additive.
 
 ## `api check` — **built, and this is M9's other gate**
 
@@ -88,25 +100,31 @@ Two properties worth their own tests: a version against itself produces the **em
 fklua api check my-mod.wasm --to 2.1.12
 ```
 
-The plan calls this the feature that matters most to a mod author, and the reason is arithmetic: 2.0.77 → 2.1.12 has **200** breaking changes and a typical mod touches a few dozen members, so the honest answer for most mods is "none of them are yours" — but only a cross-reference can say that, and without one an author reads 200 lines hunting for the four that matter.
+The plan calls this the feature that matters most to a mod author, and the reason is arithmetic: 2.0.77 → 2.1.12 has **220** breaking changes and a typical mod touches a few dozen members, so the honest answer for most mods is "none of them are yours" — but only a cross-reference can say that, and without one an author reads 220 lines hunting for the four that matter.
 
 ```
 # api check: 2.0.77 -> 2.1.12
 
-This guest touches 1 member(s), 0 event(s) and 0 named type(s).
+This guest touches 1 member(s), 0 event(s), 0 define(s) and 0 named type(s).
 
-**1 breaking change(s) affect this guest**, out of 200 in the release.
+**1 breaking change(s) affect this guest**, out of 220 in the release.
 
 - `LuaAssemblingMachineControlBehavior::include_fuel` — attribute removed
 ```
 
 The manifest is not new work. `UsedMembers` already recovers exactly which members a compiled guest references, because the table pruner needs the same answer to ship 1 KB instead of 1,032 KB.
 
-**The surface is more than the member list.** A guest calling a member whose argument is a `MapGenSettings` breaks when `MapGenSettings` gains a field, even though the member itself did not change — so the check also collects every named type reachable from the signatures it uses, recursively through structs, arrays and dictionaries. Without that it would miss the *dominant* shape of the 2.0.77 → 2.1.12 breakage, which is table concepts gaining fields.
+**The surface is members, events, DEFINES and named types.** Four scans, and the check consumes all four:
+
+- **Members and events** are what the guest calls and subscribes to, by the constant ids the pruner already recovers.
+- **Defines** are the `defines.*` VALUES it reads, as dotted paths carrying the `defines.` prefix so they are the same strings the diff reports. `UsedDefines` has existed since the pruner needed it and **this file did not consume it**, so a guest holding an id for a value a release removed was told `clean`, exit 0. That is the quiet direction as well as the wrong one: `fk_mod.lua`'s resolver returns **0** for a path this Factorio does not have, so the guest reads a wrong constant rather than failing. `SurfaceOf` folds `definesComplete` into `Complete` for the same reason it folds the other two.
+- **Named types.** A guest calling a member whose argument is a `MapGenSettings` breaks when `MapGenSettings` gains a field, even though the member itself did not change — so the check also collects every named type reachable from the signatures it uses, recursively through structs, arrays and dictionaries. Without that it would miss the *dominant* shape of the 2.0.77 → 2.1.12 breakage, which is table concepts gaining fields.
+
+**Every table `SurfaceOf` resolves ids against must come from the `from` description.** Member, event and define ids are all dense per-version indices, so resolving them against anything else names different things — silently, since every id still resolves to something. It is the same requirement `TestAPICheckCatchesABrokenGuest` records for members, one axis wider.
 
 ### The exit code is a contract, and `--json` is the interface
 
-Exits non-zero when something breaks, so CI can gate without parsing. **It also exits non-zero when the scan was incomplete** — if a member id was not a compile-time constant the check cannot see everything, and unproven is not a pass.
+Exits non-zero when something breaks, so CI can gate without parsing. **It also exits non-zero when the scan was incomplete** — if a member, event or define id was not a compile-time constant the check cannot see everything, and unproven is not a pass.
 
 **Since 2026-08-25 there are THREE codes, because "your guest is fine" and "you misspelled the version" were both 1** and nothing but a human reading stderr could tell them apart. `api check` is the one command here that answers a *question* rather than performing a task, so two of its three outcomes are successful runs:
 
@@ -129,9 +147,9 @@ Exits non-zero when something breaks, so CI can gate without parsing. **It also 
   "verdict": "impacted",
   "complete": true,
   "exit_code": 1,
-  "surface": { "members": 12, "events": 3, "concepts": 8 },
-  "breaking_total": 221,
-  "ignored": 220,
+  "surface": { "members": 12, "events": 3, "defines": 4, "concepts": 8 },
+  "breaking_total": 241,
+  "ignored": 240,
   "findings": [
     {
       "what": "LuaAssemblingMachineControlBehavior::include_fuel",
@@ -148,7 +166,7 @@ Four properties are the contract rather than the rendering, and each has a test 
 - **`from` and `to` are the RESOLVED versions, always**, taken from the descriptions' own `application_version`. `--from` defaults to **this binary's `DefaultAPIVersion`**, which is the gotcha every downstream harness has to know — pass it explicitly — and echoing it is the only way a caller that did not learns which description its answer is about. That constant has moved under this repo twice.
 - **Field names are lowercase_snake and the key SET is pinned**, top level, `surface` and a finding alike. A typed unmarshal is silent about a renamed field, which is exactly the drift a consumer meets in production, so the test reads the keys as raw JSON and requires the set exactly — adding a field is an edit to that list.
 - **`findings` is `[]` and never `null`.** `encoding/json` reads both as an empty slice, so this is a property of the BYTES and is asserted on them.
-- **`match` says why a finding reaches this guest** — `member`, `event`, `concept`, `class` or `schema`. It is the question a reader has after "what moved": a `MapPosition` gaining a field is a type the guest never named, and it is here because a member it calls takes one. The values are a closed set in `internal/factorio/apicheck.go` and nowhere else.
+- **`match` says why a finding reaches this guest** — `member`, `event`, `define`, `concept`, `class` or `schema`. It is the question a reader has after "what moved": a `MapPosition` gaining a field is a type the guest never named, and it is here because a member it calls takes one. The values are a closed set in `internal/factorio/apicheck.go` and nowhere else.
 
 `ExitCode()` is **derived from** `Verdict()` rather than decided beside it, because two functions answering one question is how a table and the code behind it come apart — which is this file's own most-repeated shape.
 
@@ -158,7 +176,9 @@ Four properties are the contract rather than the rendering, and each has a test 
 
 A check that reports "clean" for every guest passes trivially and is worth nothing — and that is the live failure mode, because most guests really are unaffected by most releases, so a broken implementation looks identical to a working one on real input.
 
-`TestAPICheckCatchesABrokenGuest` builds a guest that calls `LuaAssemblingMachineControlBehavior::include_fuel`, removed in 2.1.12, and asserts it is reported: **1 hit, 199 ignored**. The control is `examples/api`, which must come back clean — without it, a check that reported every breaking change would pass the first half.
+`TestAPICheckCatchesABrokenGuest` builds a guest that calls an attribute removed in 2.1.12 and asserts it is reported: **1 hit**, everything else ignored. The control is `examples/api`, which must come back clean — without it, a check that reported every breaking change would pass the first half. That control is now a stronger one than it was: `examples/api` reads `defines.direction.east` and `defines.inventory.chest`, so it exercises the define arm as well, and both survive 2.1.12.
+
+**The define arm has its own three, in `cmd/fklua/apicheck_test.go`, and they are a separate gate because a guest can reach a define without calling one member.** `definingGuest` is a `.wat` whose only import is `fk.define`, so its member and event surfaces are empty and any finding it produces has to be the define's: `TestAPICheckNamesADefineTheUpgradeRemoved` reads a value 2.1.12 removes and must come out `impacted` with `match: "define"`, `TestAPICheckIsCleanForAGuestReadingASurvivingDefine` reads one both versions have and must come out `clean`, and `TestAPICheckWillNotCallAGuestWithAComputedDefineIDClean` puts the id in a parameter and must come out `unproven` — which is the arm that fails if `definesComplete` is ever dropped out of the AND. Both paths are DERIVED from the two descriptions, and the impacted one additionally requires the value's GROUP to survive, so the finding cannot have come from the group-level walk. **Confirmed red** by leaving the used-define set out of the surface, which is exactly what shipped: the same guest reads `"verdict": "clean"`, `"exit_code": 0`, `"surface": {"defines": 0}` against 220 breaking changes, all ignored.
 
 **The status and the document are gated separately, in `cmd/fklua/apicheck_test.go`, and without a toolchain.** Both members are DERIVED from the two committed descriptions at test time — the impacted one is a member whose own identity is in the breaking list, the clean one is the first member whose identity, class and every named type in its signature all survive — and the guest is `stampedGuest`'s hand-written `.wat` calling one member by a constant id. An id baked into a test file is one that quietly stops discriminating the next time either description is regenerated. Anti-vacuity is explicit on both sides: the clean case fails if the diff has no breaking change in it at all, and the impacted case fails if `ignored` is 0, which is what a check that reports everything looks like. Confirmed red four ways — the verdict inverted, exit 2 collapsed back into 1 (all six operational cases fire), `findings` emitted as `null`, and one field renamed to lowerCamel.
 

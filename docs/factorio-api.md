@@ -142,9 +142,9 @@ fklua api check dist/my-mod.wasm --from 2.0.77 --to 2.1.16 --json
   "verdict": "impacted",
   "complete": true,
   "exit_code": 1,
-  "surface": { "members": 12, "events": 3, "concepts": 8 },
-  "breaking_total": 221,
-  "ignored": 220,
+  "surface": { "members": 12, "events": 3, "defines": 4, "concepts": 8 },
+  "breaking_total": 241,
+  "ignored": 240,
   "findings": [
     {
       "what": "LuaAssemblingMachineControlBehavior::include_fuel",
@@ -156,7 +156,11 @@ fklua api check dist/my-mod.wasm --from 2.0.77 --to 2.1.16 --json
 }
 ```
 
-`verdict` is `clean`, `impacted` or `unproven`, and it is the field to branch on. `unproven` means a member or event id was not a compile-time constant, so the scan could not see everything the guest reaches; it exits 1 because unproven is not a pass, and `complete` carries the same fact for a caller that wants both. `match` on a finding says why that change reaches this guest: `member` and `event` are things the guest calls or subscribes to, `concept` is a named type reachable from a signature it uses, `class` is a class-level change that takes every member on that class with it, and `schema` is the description format itself moving. `findings` is always an array, empty on a clean verdict.
+`verdict` is `clean`, `impacted` or `unproven`, and it is the field to branch on. `unproven` means a member, event or define id was not a compile-time constant, so the scan could not see everything the guest reaches; it exits 1 because unproven is not a pass, and `complete` carries the same fact for a caller that wants both. `match` on a finding says why that change reaches this guest: `member` and `event` are things the guest calls or subscribes to, `define` is a `defines.*` value it reads, `concept` is a named type reachable from a signature it uses, `class` is a class-level change that takes every member on that class with it, and `schema` is the description format itself moving. `findings` is always an array, empty on a clean verdict.
+
+The surface the check cross-references is everything a compiled guest touches: the members it calls, the events it subscribes to, the `defines.*` values it reads, and every named type reachable from the signatures of those members. All four are recovered from the module itself, so nothing has to be declared.
+
+`api diff` classifies `defines` at two levels, and `api check` reads both. A whole group going away is reported as `defines.<group>`; an individual value going away is reported as `defines.<group>.<value>`, including values nested under a subkey. The value level is the one a guest depends on, because a generated define accessor resolves one dotted value path by name at load: a value that a release removed reads back as `0` at runtime rather than failing, so a guest holding one has a wrong constant and no error. Values under `defines.events` are not diffed here, since events are compared as events.
 
 **Pass `--from` explicitly.** It defaults to the FkLua binary's own pin, and that value moves between FkLua releases, so a script that omits it can silently start asking a different question. The document echoes the versions it resolved for exactly that reason.
 

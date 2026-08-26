@@ -19,6 +19,11 @@ import (
 // members a compiled guest references, because the table pruner needs the same
 // answer to ship 1 KB instead of the whole ~1 MB table. This joins it to the
 // diff.
+//
+// ALL THREE PRUNING SCANS FEED IT, and the third is here because it was not:
+// `UsedDefines` existed for the pruner and this file never read it, so a guest
+// whose `defines.*` value a release renamed or removed got a CLEAN verdict --
+// the one answer the feature exists to make impossible.
 
 // GuestSurface is everything about the API one compiled guest touches.
 type GuestSurface struct {
@@ -26,22 +31,38 @@ type GuestSurface struct {
 	Members []string
 	// Events are the event names it subscribes to.
 	Events []string
+	// Defines are the dotted paths of the `defines.*` VALUES it reads, carrying
+	// the "defines." prefix so they are the same strings the diff reports.
+	//
+	// Values rather than groups, because a value is what a guest asks for: a
+	// `fk.define` id is a dense index over the flattened value paths, so a
+	// group surviving says nothing about whether the constant a guest baked an
+	// id for is still there.
+	Defines []string
 	// Concepts are the named types reachable from those members' signatures --
 	// the argument and return shapes it therefore depends on.
 	Concepts []string
-	// Complete is false when a member or event id was not a compile-time
-	// constant, so the scan could not see everything.
+	// Complete is false when a member, event or define id was not a
+	// compile-time constant, so the scan could not see everything.
 	//
 	// When this is false the check CANNOT be trusted to be exhaustive, and
 	// says so rather than reporting a clean bill.
 	Complete bool
 }
 
-// SurfaceOf builds the manifest for a guest, given the report its ids index.
+// SurfaceOf builds the manifest for a guest, given the reports its ids index.
+//
+// EVERY REPORT HERE MUST COME FROM THE `from` DESCRIPTION, which is the pin the
+// guest was compiled against. Member, event and define ids are all dense
+// indices assigned per version, so resolving them against anything else names
+// different things -- silently, since every id still resolves to something.
 func SurfaceOf(r Report, usedMembers map[int]bool, membersComplete bool,
-	usedEvents map[int]bool, eventsComplete bool, evs EventReport) GuestSurface {
+	usedEvents map[int]bool, eventsComplete bool, evs EventReport,
+	usedDefines map[int]bool, definesComplete bool, defs DefineReport) GuestSurface {
 
-	s := GuestSurface{Complete: membersComplete && eventsComplete}
+	s := GuestSurface{
+		Complete: membersComplete && eventsComplete && definesComplete,
+	}
 	concepts := map[string]bool{}
 	for _, m := range r.Members {
 		if !usedMembers[m.ID] {
@@ -63,11 +84,17 @@ func SurfaceOf(r Report, usedMembers map[int]bool, membersComplete bool,
 			s.Events = append(s.Events, e.Name)
 		}
 	}
+	for _, d := range defs.Defines {
+		if usedDefines[d.ID] {
+			s.Defines = append(s.Defines, "defines."+d.Path)
+		}
+	}
 	for c := range concepts {
 		s.Concepts = append(s.Concepts, c)
 	}
 	sort.Strings(s.Members)
 	sort.Strings(s.Events)
+	sort.Strings(s.Defines)
 	sort.Strings(s.Concepts)
 	return s
 }
@@ -108,6 +135,8 @@ const (
 	MatchMember = "member"
 	// MatchEvent is an event the guest subscribes to.
 	MatchEvent = "event"
+	// MatchDefine is a `defines.*` value the guest reads, by its dotted path.
+	MatchDefine = "define"
 	// MatchConcept is a named type reachable from a signature the guest uses.
 	MatchConcept = "concept"
 	// MatchClass is a class-level change, which takes every member on that
@@ -172,6 +201,11 @@ func CheckGuest(s GuestSurface, d APIDiff) CheckResult {
 	}
 	for _, e := range s.Events {
 		mine[e] = MatchEvent
+	}
+	// Defines cannot collide with anything above: every one of these carries the
+	// "defines." prefix and no class, member or event name does.
+	for _, d := range s.Defines {
+		mine[d] = MatchDefine
 	}
 	// Concepts last and non-destructively: a class name can be both a concept
 	// the guest names in a signature and the class a member it calls lives on,
@@ -264,8 +298,9 @@ type CheckVerdict struct {
 	Guest string `json:"guest"`
 	// Verdict is one of the Verdict* constants.
 	Verdict string `json:"verdict"`
-	// Complete is false when a member or event id was not a compile-time
-	// constant, so the scan could not see everything the guest reaches.
+	// Complete is false when a member, event or define id was not a
+	// compile-time constant, so the scan could not see everything the guest
+	// reaches.
 	Complete bool `json:"complete"`
 	// ExitCode is what the process exited with, restated so a caller that
 	// captured only stdout still has it.
@@ -284,6 +319,7 @@ type CheckVerdict struct {
 type CheckVerdictSurface struct {
 	Members  int `json:"members"`
 	Events   int `json:"events"`
+	Defines  int `json:"defines"`
 	Concepts int `json:"concepts"`
 }
 
@@ -302,6 +338,7 @@ func (r CheckResult) VerdictDoc() CheckVerdict {
 		Surface: CheckVerdictSurface{
 			Members:  len(r.Surface.Members),
 			Events:   len(r.Surface.Events),
+			Defines:  len(r.Surface.Defines),
 			Concepts: len(r.Surface.Concepts),
 		},
 		BreakingTotal: len(r.Hits) + r.Ignored,
@@ -324,18 +361,19 @@ func (r CheckResult) JSON() ([]byte, error) {
 func (r CheckResult) Report() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# api check: %s -> %s\n\n", r.From, r.To)
-	fmt.Fprintf(&b, "This guest touches %d member(s), %d event(s) and %d named type(s).\n\n",
-		len(r.Surface.Members), len(r.Surface.Events), len(r.Surface.Concepts))
+	fmt.Fprintf(&b, "This guest touches %d member(s), %d event(s), %d define(s) and %d named type(s).\n\n",
+		len(r.Surface.Members), len(r.Surface.Events), len(r.Surface.Defines),
+		len(r.Surface.Concepts))
 
 	if !r.Surface.Complete {
-		b.WriteString("**This check is NOT exhaustive.** A member or event id was not a\n")
-		b.WriteString("compile-time constant, so the scan could not see everything the guest\n")
+		b.WriteString("**This check is NOT exhaustive.** A member, event or define id was not\n")
+		b.WriteString("a compile-time constant, so the scan could not see everything the guest\n")
 		b.WriteString("reaches. Treat a clean result as unproven rather than as a pass.\n\n")
 	}
 
 	if len(r.Hits) == 0 {
 		fmt.Fprintf(&b, "**Nothing this guest uses is affected.** %d breaking change(s) in\n", r.Ignored)
-		b.WriteString("the release touch members it never calls.\n")
+		b.WriteString("the release touch nothing on the surface above.\n")
 		return b.String()
 	}
 	fmt.Fprintf(&b, "**%d breaking change(s) affect this guest**, out of %d in the release.\n\n",

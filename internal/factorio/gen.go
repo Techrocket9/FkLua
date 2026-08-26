@@ -1762,12 +1762,25 @@ type DefineReport struct {
 	Defines []DefineDef
 }
 
-// GenerateDefines walks the define groups and assigns per-build ids.
+// definePaths flattens the define groups to the dotted path of every VALUE,
+// sorted.
 //
 // EVERY GROUP EXCEPT defines.events. That one already has a resolved table of
 // its own, and its numbers are not what fk.subscribe takes -- offering a guest
 // both spellings of "on_tick" would be a trap dressed as a convenience.
-func GenerateDefines(a *API) DefineReport {
+//
+// Sorted, so the ids GenerateDefines assigns over this depend on the API
+// description and nothing else. Determinism is a correctness property here for
+// the same reason it is everywhere else in this package: two machines building
+// the same mod must produce the same table.
+//
+// A FUNCTION RATHER THAN A WALK WRITTEN WHEREVER ONE IS NEEDED, because there
+// are two callers with opposite failure modes and they must agree: this one
+// decides which paths a guest can ASK for, and `diffDefines` decides which
+// paths an upgrade TOOK AWAY. A copy that drifted by one rule -- the events
+// skip, say -- would report a define as removed that no guest could have read,
+// or say nothing about one every guest reading it lost.
+func definePaths(a *API) []string {
 	var paths []string
 	var walk func(prefix string, d Define)
 	walk = func(prefix string, d Define) {
@@ -1785,13 +1798,14 @@ func GenerateDefines(a *API) DefineReport {
 		}
 		walk("", d)
 	}
-	// Sorted, so the ids a build assigns depend on the API description and
-	// nothing else. Determinism is a correctness property here for the same
-	// reason it is everywhere else in this package: two machines building the
-	// same mod must produce the same table.
 	sort.Strings(paths)
+	return paths
+}
+
+// GenerateDefines walks the define groups and assigns per-build ids.
+func GenerateDefines(a *API) DefineReport {
 	r := DefineReport{}
-	for i, p := range paths {
+	for i, p := range definePaths(a) {
 		r.Defines = append(r.Defines, DefineDef{ID: i + 1, Path: p})
 	}
 	return r

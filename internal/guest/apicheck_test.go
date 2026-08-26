@@ -180,11 +180,13 @@ func checkOne(t *testing.T, root, wasmPath string, api *factorio.API,
 	}
 	report := factorio.GenerateMembers(api)
 	evs := factorio.GenerateEvents(api)
+	defs := factorio.GenerateDefines(api)
 	usedM, mOK := factorio.UsedMembers(im)
 	usedE, eOK := factorio.UsedEvents(im)
+	usedD, dOK := factorio.UsedDefines(im)
 	if !mOK {
 		t.Fatal("the member id scan was incomplete, so the check cannot be trusted")
 	}
-	s := factorio.SurfaceOf(report, usedM, mOK, usedE, eOK, evs)
+	s := factorio.SurfaceOf(report, usedM, mOK, usedE, eOK, evs, usedD, dOK, defs)
 	return factorio.CheckGuest(s, diff)
 }
