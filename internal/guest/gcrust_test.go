@@ -143,11 +143,10 @@ func rustGCEmit(t *testing.T, pkg string, collected bool) string {
 // against: K for the exports, WORDS() for linear memory, and STEP/PACE standing
 // in for control.lua's one-shot on_tick with the ticks taken out.
 //
-// It is byte-for-byte the preamble gcBuildChunk emits, and it is here rather
-// than shared with it because the Go half memoises a whole chunk and this half
-// needs the wrapper separately. TestTheTwoHarnessesDriveTheCollectorIdentically
-// asserts the two texts are the same string, so a change to one that is not made
-// to the other is a failure rather than a divergence nobody notices.
+// It is the ONE preamble both harnesses use: gcBuildChunk calls this same
+// function, so the two languages' guests run under identical driver text by
+// construction rather than by a comparison test. (An earlier shape kept two
+// copies and a test asserting them equal; sharing the function retired both.)
 func gcPreamble(t *testing.T, chunk string) string {
 	t.Helper()
 	var b strings.Builder

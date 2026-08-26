@@ -41,7 +41,7 @@ func Enabled() bool { return true }
 // If a guest ever gains a way to be re-entered mid-collection -- a host callback
 // into guest code from inside a step, a scheduler, a coroutine -- this argument
 // dies and the barrier's obligations change. The precondition is asserted by
-// TestACollectionStepRunsOnlyBetweenOutermostDispatches, not left as a comment.
+// TestACollectionStepRunsOnlyAtAnOutermostDispatch, not left as a comment.
 // ---------------------------------------------------------------------------
 
 const (
