@@ -295,7 +295,7 @@ It changes nothing about the ABI, which sorts either way, and nothing about Fact
 
 ## Open items
 
-- **The golden is 2.0.77's.** `--dump-data` exists on 2.1 and the mechanics are the same, but base's own prototypes move between series, so the 2.1 arm wants a line of its own taken there. The file's format already carries one line per engine.
+- **The golden has a line per engine and both series are recorded**: 2.0.77 and 2.1.16. base's own prototypes move between series, so a hash taken on one says nothing about the other; the mod-set column is what makes the difference legible, since 2.1 bundles `recycler` and 2.0.77 does not. Both arms produce an identical dump from the Go and the Rust guest, and both are deterministic across two runs.
 - **The tier-2 per-leaf cost is derived, not measured.** D-clone's 150-vs-2500 leaf comparison is arithmetic over measured leaf counts; the microseconds are not. If a future round wants a number, measure `read_dyn`/`write_dyn` over a real prototype under `lua52f` before committing to any optimisation.
 - **`helpers` is userdata at both stages** and was not enumerated. If a future data-stage need wants `helpers.*`, probe it before designing around it.
 - **`load()` and `string.dump` are present at the data stage.** Nothing here uses them and nothing should; a future "just `load()` the chunk" shortcut would bypass the factory shape the whole thing rests on.
