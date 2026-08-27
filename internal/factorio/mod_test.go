@@ -53,7 +53,7 @@ func TestPackageWritesALoadableShape(t *testing.T) {
 		}
 	}
 	// Asserted as a RELATIONSHIP and not as a literal, because the literal is
-	// what drifts: `api = "2.1.16"` with `factorio_version = "2.0"` is two
+	// what drifts: `api = "2.1.17"` with `factorio_version = "2.0"` is two
 	// answers to one question, which is the shape that cost this repo `gc` and
 	// then `api`. Whatever the pin becomes, the declared series is its
 	// major.minor -- and it is a series, so it carries no patch component.

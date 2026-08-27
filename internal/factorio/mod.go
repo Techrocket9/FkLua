@@ -43,7 +43,7 @@ type Info struct {
 // that is this repo's own named failure shape being avoided rather than a
 // tidy-up: two constants that must agree about one manifest key is exactly what
 // `gc` was, and then `api`, and both times the two disagreed for milestones
-// with nothing to say so. A mod whose bindings come from a 2.1.16 description
+// with nothing to say so. A mod whose bindings come from a 2.1.17 description
 // and whose info.json declares "2.0" is refused by the loader at game start —
 // the worst place to learn it — and the reverse pairing loads and then calls
 // members by ids the running engine numbers differently. One source, so the
@@ -55,7 +55,7 @@ type Info struct {
 // from; they are separate axes, and the series is the default only because a
 // mod built against a description usually runs on that description's series.
 // They come apart in exactly the case this repo is in: the committed default is
-// GA (2.0.x) and the machine that runs the in-game gates has 2.1.16 installed,
+// GA (2.0.x) and the machine that runs the in-game gates has 2.1.17 installed,
 // which REFUSES a mod declaring "2.0" -- "Incompatible Factorio version
 // (current: 2.1, required: 2.0)", at game start, which is where every one of
 // those gates would have died. So the key is overridable, by `[mod]
@@ -67,7 +67,7 @@ type Info struct {
 // with a 2.0 pin is the GA shipping shape and is what `fklua init` writes.
 var DefaultFactorioVersion = majorMinor(DefaultAPIVersion)
 
-// majorMinor takes the "2.1" series out of a "2.1.16" build id. A string with
+// majorMinor takes the "2.1" series out of a "2.1.17" build id. A string with
 // fewer than two dotted components is returned unchanged: there is no series to
 // recover, and inventing one would be worse than passing the odd value through
 // to the loader, which says so plainly.

@@ -17,7 +17,7 @@
 #   gates on (helpers.game_version, read in game).
 #
 # They agree on a machine that has GA (2.0.x) installed, which is the Steam
-# default, and they do not agree when the 2.1.16 beta branch is installed: the pin
+# default, and they do not agree when the 2.1.17 beta branch is installed: the pin
 # is 2.0.x either way. A 2.1 engine REFUSES a mod whose info.json declares 2.0 --
 # "Incompatible Factorio version (current: 2.1, required: 2.0)", at game start,
 # before a line of the mod runs -- and a 2.0 engine refuses one declaring 2.1, so
@@ -33,7 +33,7 @@
 # Every function here needs FACTORIO set to the binary. Source this file after
 # the FACTORIO= line the scripts already have.
 
-# factorio_version_triple prints the installed engine's full version: "2.1.16".
+# factorio_version_triple prints the installed engine's full version: "2.1.17".
 #
 # `factorio --version` prints several "Version:" lines -- the build, then the
 # save format, then the map input version -- so the first one is the only one
@@ -42,7 +42,7 @@
 factorio_version_triple() {
   local line
   line="$("$FACTORIO" --version 2>/dev/null | head -1)"
-  # "Version: 2.1.16 (build 87294, mac-arm64, steam)"
+  # "Version: 2.1.17 (build 87315, mac-arm64, steam)"
   line="${line#Version: }"
   line="${line%% *}"
   case "$line" in
