@@ -24,3 +24,4 @@
 # 2.1 bundles `recycler` and 2.0.77 does not.
 2.0.77  b2f94000d43cedff88af03686774d182883feccba977c27836efcc8cd4e0907c  base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
 2.1.16  d7a87af89e4bb773c60fb6ef690cc6bb202f00beaf892e9f889db57ad2f3a3af  base@2.1.16 core@0.0.0 elevated-rails@2.1.16 fkd-example@0.1.0 quality@2.1.16 recycler@2.1.16 space-age@2.1.16
+2.1.17  4bf04000445104978fb4f843ce20d8d6e3a93d2b9217e2e6f4f94c4d6ddc311b  base@2.1.17 core@0.0.0 elevated-rails@2.1.17 fkd-example@0.1.0 quality@2.1.17 recycler@2.1.17 space-age@2.1.17
