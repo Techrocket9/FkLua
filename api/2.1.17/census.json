@@ -1,0 +1,67 @@
+{
+  "application_version": "2.1.17",
+  "api_version": 6,
+  "classes": 157,
+  "members": 3782,
+  "methods": 1039,
+  "attributes": 2743,
+  "events": 225,
+  "concepts": 495,
+  "defines": 62,
+  "define_values": 1185,
+  "global_objects": 9,
+  "global_functions": 3,
+  "positional_methods": 925,
+  "takes_table_methods": 114,
+  "variant_group_methods": 5,
+  "subclass_restricted_methods": 192,
+  "subclass_restricted_attributes": 965,
+  "optional_readable_attributes": 964,
+  "operators": 9,
+  "attribute_shaped_operators": 7,
+  "operators_bound": 9,
+  "global_functions_bound": 3,
+  "custom_table_handle_members": 58,
+  "index_setter_members": 1,
+  "table_shaped_concepts": 346,
+  "pure_string_enum_concepts": 46,
+  "host_members_bound": 4859,
+  "host_members_skipped": 5,
+  "host_skips_by_reason": {
+    "callback parameter": 3,
+    "variadic parameter": 2
+  },
+  "fields_omitted": 1,
+  "fields_omitted_by_reason": {
+    "nil": 1
+  },
+  "host_events_bound": 225,
+  "event_scratch_bytes": 128,
+  "go_members_bound": 4857,
+  "go_members_deferred": 2,
+  "go_deferrals_by_reason": {
+    "Go name collides with another member of the class": 2
+  },
+  "go_literals_deferred": 1,
+  "go_literal_deferrals_by_reason": {
+    "a string literal with no identifier name": 1
+  },
+  "go_members_inherited": 1529,
+  "go_event_payload_structs": 225,
+  "go_define_accessors": 1185,
+  "go_event_payloads_deferred": 0,
+  "go_event_deferrals_by_reason": {},
+  "rust_members_bound": 4857,
+  "rust_members_deferred": 2,
+  "rust_deferrals_by_reason": {
+    "Rust name collides with another member of the class": 2
+  },
+  "rust_literals_deferred": 1,
+  "rust_literal_deferrals_by_reason": {
+    "a string literal with no identifier name": 1
+  },
+  "rust_members_inherited": 1529,
+  "rust_event_payload_structs": 225,
+  "rust_define_accessors": 1185,
+  "max_method_return_arity": 3
+}
