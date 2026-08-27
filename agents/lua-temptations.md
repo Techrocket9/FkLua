@@ -128,3 +128,41 @@ Recorded because absence of a gap is a result too: combat and unit AI (compound 
 4. **The long levers** (L, schedule on demand): the bulk attribute read, which decides the polling genre; the batched GUI add, which decides the GUI-application genre at scale; the data-stage function splitter, which decides the overhaul genre's data half.
 
 The census cannot see most of what this survey found: a member that binds and cannot fire, a hook that discards its payload, a check that is blind to a whole id space, and every ergonomic temptation are all invisible to a bound-versus-deferred count. Where a new capability lands, the census should grow the row that would have caught its absence, which is this project's own standing rule about zeros nobody writes down.
+
+## The queue (2026-08-26)
+
+The four rounds above are QUEUED as executable work; none is started. Amendments
+since the survey was written, folded into their rounds:
+
+- **Round 1** drops "the defines wiring for `api check`": it shipped with the
+  survey itself (leaf-path keying and event-payload concept collection, both
+  red-proven, merged). It gains the rename table for the two standing
+  name-collision deferrals (takes both languages' deferrals to zero and turns
+  the emission-ordering accident into a decision), and the packaging half of
+  the one open downstream ledger item: `fklua mod` packages a stale wasm
+  against fresh bindings without complaint at the same pin
+  (BetterBeltBalancer's FKLUA-GAPS item 18); the lock hash is in hand at
+  package time, so a mismatch should be at least a loud warning.
+- **Round 2** gains the typed `ModSetting` accessors (Bool/Number/String over
+  the untyped Value field).
+- **Round 3** gains the verify-then-publish of the simulation bridge recipe
+  (`SimulationDefinition.mods` plus a remote call into the seam; assembled
+  from documented pieces, never probed end to end), and the diff blind spot
+  the 2.1.17 bump measured: `api diff` walks a method's top-level parameters
+  and never its variant groups, so a method gaining its first group or losing
+  its last would flip its binding shape between dyn and positional silently.
+  Zero instances existed in any shipped pair; the detector belongs beside the
+  takes-table flip the diff already reports.
+- **Round 4** gains Q5, the build-time configuration channel (a config written
+  once reaching both a build tag and a startup setting), which the ports
+  campaign left open.
+
+Execution notes for whoever picks a round up: each round is a worktree off
+master with the house gates (build the lua52f oracle first or thirty tests
+skip as passes; `make test`; `gen-bindings --check` across every description;
+red proofs per mechanism; docs in the same commit). Rounds are independent and
+ordered by value rather than dependency, except that `fklog` precedes
+`Value.Dump` inside round 2. If a round regenerates bindings, member ids can
+move: the downstream stale-pair rule applies, and the round's report must say
+whether consumers need a re-pin. The evidence behind every item is in this
+file's body and the downstream audit records it cites.
