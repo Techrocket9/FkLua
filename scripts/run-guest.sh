@@ -56,11 +56,24 @@ case "$GUEST" in
   # a mod that quietly computes the wrong thing.
   gcsave) MODNAME=fk-gcsave; INIT_RE="\\[gcsave\\] .* collector ON"
          RUN_RE="(tick [0-9]+ seen=.*intact=32)"; GC=collected ;;
+  # The TYPED ARGUMENT form of a member whose parameter table is a
+  # discriminated union. The only thing here that crosses fk.call_typed, so a
+  # break in M.call_typed or in either generator's typed encode shows up in
+  # `typedargs` alone.
+  #
+  # ITS GUI HALF CANNOT RUN HERE AND SAYS SO. LuaGuiElement::add needs a player
+  # and a headless --create has none, so what this reaches is create_entity --
+  # the other variant-defeated member, on a surface that exists at tick 0. The
+  # `gui: no player` line is in the pattern deliberately: a guest that silently
+  # skipped a leg would be a run that proved less than it looks.
+  typedargs) MODNAME=fk-typedargs
+         INIT_RE="gui: no player|entity dyn: iron-chest|entity typed: iron-chest"
+         RUN_RE="(tick typed: iron-chest)" ;;
   # `array` is deliberately NOT here. It needs a connected player to have any
   # handle to work with, and a headless benchmark has none -- it would report
   # "handles: 0", return early and pass while testing nothing. Its home is
   # TestArraysCrossInBothDirections, where a stub supplies the objects.
-  *) echo "unknown GUEST: $GUEST (want hello, api, goroutine or gcsave)" >&2; exit 1 ;;
+  *) echo "unknown GUEST: $GUEST (want hello, api, typedargs, goroutine or gcsave)" >&2; exit 1 ;;
 esac
 
 MODDIR="$ROOT/testdata/tmp/guest-mods"
@@ -110,7 +123,7 @@ rm -rf "$MODDIR" "$MAP"
 mkdir -p "$MODDIR"
 
 if [ "$LANG_" = "rust" ]; then
-  case "$GUEST" in hello|api|gcsave) ;; *) echo "GUEST=$GUEST has no Rust example" >&2; exit 1 ;; esac
+  case "$GUEST" in hello|api|typedargs|gcsave) ;; *) echo "GUEST=$GUEST has no Rust example" >&2; exit 1 ;; esac
   command -v cargo >/dev/null || { echo "cargo is not installed: https://rustup.rs" >&2; exit 1; }
   # THE COLLECTOR IS A --features FLAG AND NOT A -gc FLAG, and it is passed on the
   # command line rather than declared in the guest's Cargo.toml: Cargo's v2

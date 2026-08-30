@@ -93,6 +93,17 @@ local imports = {
     call = function(handle, member, argp, retp)
       return H.call(handle, member, argp, retp)
     end,
+    -- The same dispatch over a TYPED argument block, for the handful of members
+    -- whose parameter table is a discriminated union (LuaGuiElement::add,
+    -- LuaSurface::create_entity). Same handle, same member id, same return
+    -- block; the argument block is a tier-1 struct plus one optional tier-2
+    -- slot for the variant tail instead of one tier-2 map, which is measured at
+    -- 3.3x on the host side. A second import rather than a flag on `call`
+    -- because the two decode different blocks -- see fk_abi.lua's M.call_typed
+    -- and internal/factorio/used.go.
+    call_typed = function(handle, member, argp, retp)
+      return H.call_typed(handle, member, argp, retp)
+    end,
     -- Promote a handle past the end of this dispatch, and give it back.
     retain = function(handle)
       local p = H.retain(handle)

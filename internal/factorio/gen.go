@@ -57,6 +57,28 @@ type Member struct {
 	Optional bool
 	Args     []FieldSpec
 	Rets     []FieldSpec
+	// TypedArgs is a SECOND argument list for the same member id, and only a
+	// method whose parameter table is a discriminated union has one.
+	//
+	// Those methods take `args Value` -- one tier-2 map the guest builds by
+	// hand out of key strings -- because a variant table is a discriminated
+	// union and that is what tier 2 is for. It is also the most expensive thing
+	// this ABI does: a tier-2 map is measured at 20,359 ns per GUI element
+	// host-side against 6,175 for a flat block, and the difference is read_dyn
+	// walking a tagged key/value pair list where a block reads a (ptr, len) at a
+	// known offset. See agents/drafts/r4b-batched-gui-add.md.
+	//
+	// So the SHARED parameters cross as a tier-1 struct and the variant tail
+	// crosses beside it as one optional tier-2 slot:
+	//
+	//	[{args, KindStruct, <shared parameters>}, {extra, KindDyn, optional}]
+	//
+	// TWO LISTS OVER ONE MEMBER ID, which is what keeps this additive: the
+	// tier-2 form stays exactly as it was, nothing is renumbered, and a guest
+	// already in the field is untouched. What tells the host which list to
+	// decode is WHICH IMPORT the guest called -- fk.call reads Args and
+	// fk.call_typed reads this. See fk_abi.lua's M.call_typed and used.go.
+	TypedArgs []FieldSpec
 	// Unfillable is set when the HOST can bind this member and no GUEST can ever
 	// call it usefully. It carries the reason a guest generator defers on.
 	//
@@ -1659,11 +1681,40 @@ func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {
 	}
 
 	if len(meth.VariantGroups) > 0 {
-		// The method's own parameter table is a discriminated union -- the four
-		// of these are set_gui_arrow, LuaGuiElement::add, create_entity and
-		// create_segmented_unit. Same answer as a variant-group concept: one
-		// tier-2 argument, which the guest fills as a tagged table.
+		// The method's own parameter table is a discriminated union -- at the GA
+		// pin the four are set_gui_arrow, LuaGuiElement::add, create_entity and
+		// create_segmented_unit, and 2.1.17 adds a fifth
+		// (LuaSimulation::get_widget_position), so the POPULATION is a
+		// measurement per description rather than the constant this comment used
+		// to state. Same answer as a variant-group concept: one tier-2 argument,
+		// which the guest fills as a tagged table.
 		out.Args = []FieldSpec{{Name: "args", Kind: KindDyn}}
+
+		// ...AND A SECOND, TYPED ARGUMENT LIST OVER THE SAME MEMBER ID. The
+		// tier-2 form above is what makes these members reachable at all; it is
+		// also 3.3x the cost of a flat block (agents/drafts/r4b-batched-gui-add.md)
+		// and 341 field names that appear nowhere in the guest's language. So the
+		// SHARED parameters -- every parameter the description declares outside a
+		// variant group -- lay out as an ordinary tier-1 struct, and the variant
+		// tail crosses beside it as one optional tier-2 slot.
+		//
+		// TWO TOP-LEVEL FIELDS RATHER THAN AN `extra` FIELD INSIDE THE STRUCT,
+		// and that is a correctness decision rather than a shape preference: a
+		// field inside the block would occupy a KEY, and a variant group is free
+		// to declare a parameter of any name. Measured -- create_entity's shared
+		// `target` is ALSO a variant-group parameter, at every committed pin --
+		// so the two namespaces really do overlap, and keeping the tail outside
+		// the block means it can never collide with the block's own field names.
+		//
+		// A member whose shared parameters do not map keeps the tier-2 form
+		// alone. Nothing is lost: the typed form is additive over an id that
+		// already works.
+		if fields, err := m.mapFields(meth.Parameters, nil, 1); err == nil && len(fields) > 0 {
+			out.TypedArgs = []FieldSpec{
+				{Name: "args", Kind: KindStruct, Struct: fields},
+				{Name: "extra", Kind: KindDyn, Optional: true},
+			}
+		}
 	} else if meth.TakesTable() {
 		// One struct argument rather than positional ones, which is exactly the
 		// tier-1 shape.
@@ -1765,6 +1816,23 @@ func (m Member) blocks() (StructBlock, StructBlock, error) {
 	return args, rets, nil
 }
 
+// typedBlock lays out the second, typed argument list. See Member.TypedArgs.
+//
+// It is the SAME LayoutStruct the ordinary argument block goes through, which is
+// the whole reason a typed block costs no new marshalling machinery: presence
+// bytes where Placed.HasOffset puts them, (ptr, len) for a string, natural
+// alignment. The host reads it with read_struct.
+func (m Member) typedBlock() (StructBlock, bool, error) {
+	if len(m.TypedArgs) == 0 {
+		return StructBlock{}, false, nil
+	}
+	blk, err := LayoutStruct(m.TypedArgs)
+	if err != nil {
+		return StructBlock{}, false, fmt.Errorf("%s::%s typed args: %w", m.Class, m.Name, err)
+	}
+	return blk, true, nil
+}
+
 // luaQuote renders a Lua string literal.
 //
 // \ddd escapes rather than Go's %q, for the same reason luagen has its own:
@@ -1846,10 +1914,23 @@ func (r Report) LuaSourceWith(a *API, ev EventReport) (string, error) {
 		if m.Optional && m.Kind != MemberSet {
 			opt = "opt=true,"
 		}
-		add("    [%d]={kind=%d,name=%s,class=%s,%s%sargsize=%d,retsize=%d,"+
-			"sig={args=%s,rets=%s}},\n",
-			m.ID, m.Kind, luaQuote(m.Name), luaQuote(m.Class), valid, opt,
-			args.Size, rets.Size, args.LuaTable(), rets.LuaTable())
+		// targsize= and targs= are emitted only for a member that HAS a typed
+		// argument list, which is a method whose parameter table is a
+		// discriminated union -- five of 4,262 at the widest committed pin. Every
+		// other member's row is byte for byte what it was.
+		targs, hasTyped, err := m.typedBlock()
+		if err != nil {
+			return "", err
+		}
+		tsize, ttab := "", ""
+		if hasTyped {
+			tsize = fmt.Sprintf("targsize=%d,", targs.Size)
+			ttab = fmt.Sprintf(",targs=%s", targs.LuaTable())
+		}
+		add("    [%d]={kind=%d,name=%s,class=%s,%s%s%sargsize=%d,retsize=%d,"+
+			"sig={args=%s,rets=%s%s}},\n",
+			m.ID, m.Kind, luaQuote(m.Name), luaQuote(m.Class), valid, opt, tsize,
+			args.Size, rets.Size, args.LuaTable(), rets.LuaTable(), ttab)
 	}
 
 	add("  },\n")

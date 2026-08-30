@@ -17,6 +17,13 @@ use alloc::vec::Vec;
 extern "C" {
     #[link_name = "call"]
     fn fk_call(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
+    // The same dispatch over a TYPED argument block: same handle, same member
+    // id, same return block, and an argument block laid out as a tier-1 struct
+    // plus one optional tier-2 slot instead of one tier-2 map. Only a member
+    // whose parameter table is a discriminated union has one -- see the
+    // <name>_typed bindings.
+    #[link_name = "call_typed"]
+    fn fk_call_typed(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
     #[link_name = "subscribe"]
     fn fk_subscribe(event: u32, filterp: u32, skip: u32, namep: u32, namelen: u32) -> u32;
     #[link_name = "define"]
@@ -1003,7 +1010,7 @@ pub extern "C" fn fk_api_pin_2_0_77() {}
 // the same pin. Language-independent: a Go guest generated from this
 // description carries the same name.
 #[no_mangle]
-pub extern "C" fn fk_api_sig_ed025ff06828() {}
+pub extern "C" fn fk_api_sig_be51c0c62aca() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
 // free functions here for that reason. fk_call's handle operand is
@@ -5473,6 +5480,26 @@ impl LuaControl {
         let mut a = [0u8; 16];
         write_dyn(&mut a[0..], args);
         let st = unsafe { fk_call(self.0.0, 328, a.as_ptr() as u32, 0) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        Ok(())
+    }
+
+    /// `set_gui_arrow` with its SHARED parameters spelled out instead of
+    /// hand-built as tier-2 keys. Same member, same result; the
+    /// variant tail goes in `extra`, whose keys are applied over the
+    /// block, and `None` means there is no tail. The block crosses as
+    /// a flat struct, which the host reads about 3x faster.
+    pub fn set_gui_arrow_typed(&self, args: LuaControlSetGuiArrowArgs, extra: Option<&Value>) -> Result<(), Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 32];
+        args.encode_at(&mut a[0..]);
+        if let Some(v) = extra {
+            a[12] = 1;
+            write_dyn(&mut a[16..], v);
+        }
+        let st = unsafe { fk_call_typed(self.0.0, 328, a.as_ptr() as u32, 0) };
         if st != 0 {
             return Err(Status(st));
         }
@@ -27392,6 +27419,28 @@ impl LuaGuiElement {
         let mut r = [0u8; 4];
         write_dyn(&mut a[0..], args);
         let st = unsafe { fk_call(self.0.0, 1932, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    /// `add` with its SHARED parameters spelled out instead of
+    /// hand-built as tier-2 keys. Same member, same result; the
+    /// variant tail goes in `extra`, whose keys are applied over the
+    /// block, and `None` means there is no tail. The block crosses as
+    /// a flat struct, which the host reads about 3x faster.
+    pub fn add_typed(&self, args: LuaGuiElementAddArgs, extra: Option<&Value>) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 248];
+        let mut r = [0u8; 4];
+        args.encode_at(&mut a[0..]);
+        if let Some(v) = extra {
+            a[224] = 1;
+            write_dyn(&mut a[232..], v);
+        }
+        let st = unsafe { fk_call_typed(self.0.0, 1932, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
         if st != 0 {
             return Err(Status(st));
         }
@@ -52490,6 +52539,31 @@ impl LuaSurface {
         Ok(v0)
     }
 
+    /// `create_entity` with its SHARED parameters spelled out instead of
+    /// hand-built as tier-2 keys. Same member, same result; the
+    /// variant tail goes in `extra`, whose keys are applied over the
+    /// block, and `None` means there is no tail. The block crosses as
+    /// a flat struct, which the host reads about 3x faster.
+    pub fn create_entity_typed(&self, args: LuaSurfaceCreateEntityArgs, extra: Option<&Value>) -> Result<Option<Object>, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 224];
+        let mut r = [0u8; 8];
+        args.encode_at(&mut a[0..]);
+        if let Some(v) = extra {
+            a[200] = 1;
+            write_dyn(&mut a[208..], v);
+        }
+        let st = unsafe { fk_call_typed(self.0.0, 3800, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let mut v0: Option<Object> = None;
+        if r[0] != 0 {
+            v0 = Some(Object(rd_u32(&r[..], 4)));
+        }
+        Ok(v0)
+    }
+
     pub fn create_global_electric_network(&self) -> Result<(), Status> {
         let st = unsafe { fk_call(self.0.0, 3801, 0, 0) };
         if st != 0 {
@@ -52515,6 +52589,31 @@ impl LuaSurface {
         let mut r = [0u8; 8];
         write_dyn(&mut a[0..], args);
         let st = unsafe { fk_call(self.0.0, 3803, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let mut v0: Option<Object> = None;
+        if r[0] != 0 {
+            v0 = Some(Object(rd_u32(&r[..], 4)));
+        }
+        Ok(v0)
+    }
+
+    /// `create_segmented_unit` with its SHARED parameters spelled out instead of
+    /// hand-built as tier-2 keys. Same member, same result; the
+    /// variant tail goes in `extra`, whose keys are applied over the
+    /// block, and `None` means there is no tail. The block crosses as
+    /// a flat struct, which the host reads about 3x faster.
+    pub fn create_segmented_unit_typed(&self, args: LuaSurfaceCreateSegmentedUnitArgs, extra: Option<&Value>) -> Result<Option<Object>, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 64];
+        let mut r = [0u8; 8];
+        args.encode_at(&mut a[0..]);
+        if let Some(v) = extra {
+            a[40] = 1;
+            write_dyn(&mut a[48..], v);
+        }
+        let st = unsafe { fk_call_typed(self.0.0, 3803, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
         if st != 0 {
             return Err(Status(st));
         }
@@ -61358,6 +61457,11 @@ impl LuaEntity {
     }
 
     #[inline]
+    pub fn set_gui_arrow_typed(&self, args: LuaControlSetGuiArrowArgs, extra: Option<&Value>) -> Result<(), Status> {
+        LuaControl(self.0).set_gui_arrow_typed(args, extra)
+    }
+
+    #[inline]
     pub fn set_mining_state(&self, value: LuaControlMiningStateValue) -> Result<(), Status> {
         LuaControl(self.0).set_mining_state(value)
     }
@@ -64591,6 +64695,11 @@ impl LuaPlayer {
     }
 
     #[inline]
+    pub fn set_gui_arrow_typed(&self, args: LuaControlSetGuiArrowArgs, extra: Option<&Value>) -> Result<(), Status> {
+        LuaControl(self.0).set_gui_arrow_typed(args, extra)
+    }
+
+    #[inline]
     pub fn set_mining_state(&self, value: LuaControlMiningStateValue) -> Result<(), Status> {
         LuaControl(self.0).set_mining_state(value)
     }
@@ -66989,7 +67098,7 @@ impl MineableProperties {
             d[17] = 1;
             put_str(&mut d[..], 20, v.as_bytes());
         }
-        d[28] = 1;
+        if !self.products.is_empty() { d[28] = 1; }
         let p = galloc((self.products.len() * 16) as u32);
         for (i, e) in self.products.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -67005,7 +67114,7 @@ impl MineableProperties {
             d[56] = 1;
             put_str(&mut d[..], 60, v.as_bytes());
         }
-        d[68] = 1;
+        if !self.mining_trigger.is_empty() { d[68] = 1; }
         let p = galloc((self.mining_trigger.len() * 16) as u32);
         for (i, e) in self.mining_trigger.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -67358,7 +67467,7 @@ impl LuaBootstrapRaiseScriptReviveArgs {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..16].iter_mut() { *b = 0; }
         wr_u32(&mut d[..], 0, self.entity.0);
-        d[4] = 1;
+        if !self.tags.is_empty() { d[4] = 1; }
         let p = galloc((self.tags.len() * 24) as u32);
         for (i, (k, v)) in self.tags.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -68241,6 +68350,38 @@ impl LuaControlCancelCraftingArgs {
 
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
+pub struct LuaControlSetGuiArrowArgs {
+    pub margin: u32,
+    pub r#type: LuaStr,
+}
+
+impl LuaControlSetGuiArrowArgs {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..12].iter_mut() { *b = 0; }
+        d[0..4].copy_from_slice(&(self.margin as u32).to_le_bytes());
+        put_str(&mut d[..], 4, self.r#type.as_bytes());
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.margin = u32::from_le_bytes(d[0..4].try_into().unwrap());
+        v.r#type = get_str(&d[..], 4);
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(2);
+        kv.push((Value::Str(LuaStr::from("margin")), Value::Number(self.margin as f64)));
+        kv.push((Value::Str(LuaStr::from("type")), Value::Str(self.r#type.clone())));
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
 pub struct CraftingQueueItem {
     pub index: u32,
     pub recipe: LuaStr,
@@ -68841,7 +68982,7 @@ impl AutoplaceSpecification {
         }
         put_str(&mut d[..], 36, self.order.as_bytes());
         d[44] = if self.default_enabled { 1 } else { 0 };
-        d[45] = 1;
+        if !self.tile_restriction.is_empty() { d[45] = 1; }
         let p = galloc((self.tile_restriction.len() * 24) as u32);
         for (i, e) in self.tile_restriction.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -69157,7 +69298,7 @@ pub struct Offer {
 impl Offer {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..32].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.price.is_empty() { d[0] = 1; }
         let p = galloc((self.price.len() * 24) as u32);
         for (i, e) in self.price.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -70574,7 +70715,7 @@ pub struct ItemInventoryPositions {
 impl ItemInventoryPositions {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..20].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.in_inventory.is_empty() { d[0] = 1; }
         let p = galloc((self.in_inventory.len() * 12) as u32);
         for (i, e) in self.in_inventory.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 12) as *mut u8, 12) };
@@ -72049,7 +72190,7 @@ impl SpiderLegSpecification {
         put_str(&mut d[..], 0, self.leg.as_bytes());
         self.mount_position.encode_at(&mut d[8..]);
         self.ground_position.encode_at(&mut d[16..]);
-        d[24] = 1;
+        if !self.leg_hit_the_ground_trigger.is_empty() { d[24] = 1; }
         let p = galloc((self.leg_hit_the_ground_trigger.len() * 16) as u32);
         for (i, e) in self.leg_hit_the_ground_trigger.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -72057,7 +72198,7 @@ impl SpiderLegSpecification {
         }
         wr_u32(&mut d[..], 28, p);
         wr_u32(&mut d[..], 32, self.leg_hit_the_ground_trigger.len() as u32);
-        d[36] = 1;
+        if !self.leg_hit_the_ground_when_attacking_trigger.is_empty() { d[36] = 1; }
         let p = galloc((self.leg_hit_the_ground_when_attacking_trigger.len() * 16) as u32);
         for (i, e) in self.leg_hit_the_ground_when_attacking_trigger.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -72657,7 +72798,7 @@ impl LuaEquipmentPrototypeShapeResult {
         for b in d[..20].iter_mut() { *b = 0; }
         d[0..4].copy_from_slice(&(self.width as u32).to_le_bytes());
         d[4..8].copy_from_slice(&(self.height as u32).to_le_bytes());
-        d[8] = 1;
+        if !self.points.is_empty() { d[8] = 1; }
         let p = galloc((self.points.len() * 8) as u32);
         for (i, e) in self.points.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 8) as *mut u8, 8) };
@@ -73498,7 +73639,7 @@ pub struct MapGenSettings {
 impl MapGenSettings {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..184].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.autoplace_controls.is_empty() { d[0] = 1; }
         let p = galloc((self.autoplace_controls.len() * 56) as u32);
         for (i, (k, v)) in self.autoplace_controls.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 56) as *mut u8, 56) };
@@ -73511,7 +73652,7 @@ impl MapGenSettings {
             d[12] = 1;
             d[13] = if *v { 1 } else { 0 };
         }
-        d[14] = 1;
+        if !self.autoplace_settings.is_empty() { d[14] = 1; }
         let p = galloc((self.autoplace_settings.len() * 20) as u32);
         for (i, (k, v)) in self.autoplace_settings.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 20) as *mut u8, 20) };
@@ -73536,7 +73677,7 @@ impl MapGenSettings {
             d[48] = 1;
             write_dyn(&mut d[56..], v);
         }
-        d[72] = 1;
+        if !self.starting_points.is_empty() { d[72] = 1; }
         let p = galloc((self.starting_points.len() * 16) as u32);
         for (i, e) in self.starting_points.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -73552,7 +73693,7 @@ impl MapGenSettings {
             d[86] = 1;
             d[87] = if *v { 1 } else { 0 };
         }
-        d[88] = 1;
+        if !self.property_expression_names.is_empty() { d[88] = 1; }
         let p = galloc((self.property_expression_names.len() * 16) as u32);
         for (i, (k, v)) in self.property_expression_names.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -73757,7 +73898,7 @@ impl AutoplaceSettings {
             d[0] = 1;
             d[1] = if *v { 1 } else { 0 };
         }
-        d[2] = 1;
+        if !self.settings.is_empty() { d[2] = 1; }
         let p = galloc((self.settings.len() * 56) as u32);
         for (i, (k, v)) in self.settings.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 56) as *mut u8, 56) };
@@ -74088,7 +74229,7 @@ impl LuaGameScriptSetLoseEndingInfoArgs {
             d[16] = 1;
             write_dyn(&mut d[24..], v);
         }
-        d[40] = 1;
+        if !self.bullet_points.is_empty() { d[40] = 1; }
         let p = galloc((self.bullet_points.len() * 16) as u32);
         for (i, e) in self.bullet_points.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -74175,7 +74316,7 @@ impl LuaGameScriptSetWinEndingInfoArgs {
             d[16] = 1;
             write_dyn(&mut d[24..], v);
         }
-        d[40] = 1;
+        if !self.bullet_points.is_empty() { d[40] = 1; }
         let p = galloc((self.bullet_points.len() * 16) as u32);
         for (i, e) in self.bullet_points.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -75230,6 +75371,258 @@ impl AsteroidMapSettings {
 
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
+pub struct LuaGuiElementAddArgs {
+    pub r#type: LuaStr,
+    pub name: Option<LuaStr>,
+    pub caption: Option<Value>,
+    pub tooltip: Option<Value>,
+    pub elem_tooltip: Option<ElemID>,
+    pub enabled: Option<bool>,
+    pub visible: Option<bool>,
+    pub locked: Option<bool>,
+    pub ignored_by_interaction: Option<bool>,
+    pub style: Option<LuaStr>,
+    pub tags: BTreeMap<LuaStr, Value>,
+    pub index: Option<u32>,
+    pub anchor: Option<GuiAnchor>,
+    pub game_controller_interaction: Option<u32>,
+    pub raise_hover_events: Option<bool>,
+}
+
+impl LuaGuiElementAddArgs {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..224].iter_mut() { *b = 0; }
+        put_str(&mut d[..], 0, self.r#type.as_bytes());
+        if let Some(v) = &self.name {
+            d[8] = 1;
+            put_str(&mut d[..], 12, v.as_bytes());
+        }
+        if let Some(v) = &self.caption {
+            d[20] = 1;
+            write_dyn(&mut d[24..], v);
+        }
+        if let Some(v) = &self.tooltip {
+            d[40] = 1;
+            write_dyn(&mut d[48..], v);
+        }
+        if let Some(v) = &self.elem_tooltip {
+            d[64] = 1;
+            v.encode_at(&mut d[68..]);
+        }
+        if let Some(v) = &self.enabled {
+            d[108] = 1;
+            d[109] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.visible {
+            d[110] = 1;
+            d[111] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.locked {
+            d[112] = 1;
+            d[113] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.ignored_by_interaction {
+            d[114] = 1;
+            d[115] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.style {
+            d[116] = 1;
+            put_str(&mut d[..], 120, v.as_bytes());
+        }
+        if !self.tags.is_empty() { d[128] = 1; }
+        let p = galloc((self.tags.len() * 24) as u32);
+        for (i, (k, v)) in self.tags.iter().enumerate() {
+            let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
+            put_str(&mut s[..], 0, k.as_bytes());
+            write_dyn(&mut s[8..], v);
+        }
+        wr_u32(&mut d[..], 132, p);
+        wr_u32(&mut d[..], 136, self.tags.len() as u32);
+        if let Some(v) = &self.index {
+            d[140] = 1;
+            d[144..148].copy_from_slice(&(*v as u32).to_le_bytes());
+        }
+        if let Some(v) = &self.anchor {
+            d[148] = 1;
+            v.encode_at(&mut d[152..]);
+        }
+        if let Some(v) = &self.game_controller_interaction {
+            d[208] = 1;
+            d[212..216].copy_from_slice(&(*v as u32).to_le_bytes());
+        }
+        if let Some(v) = &self.raise_hover_events {
+            d[216] = 1;
+            d[217] = if *v { 1 } else { 0 };
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.r#type = get_str(&d[..], 0);
+        if d[8] != 0 {
+            v.name = Some(get_str(&d[..], 12));
+        }
+        if d[20] != 0 {
+            v.caption = Some(read_dyn(&d[24..]));
+        }
+        if d[40] != 0 {
+            v.tooltip = Some(read_dyn(&d[48..]));
+        }
+        if d[64] != 0 {
+            v.elem_tooltip = Some(ElemID::decode_at(&d[68..]));
+        }
+        if d[108] != 0 {
+            v.enabled = Some(d[109] != 0);
+        }
+        if d[110] != 0 {
+            v.visible = Some(d[111] != 0);
+        }
+        if d[112] != 0 {
+            v.locked = Some(d[113] != 0);
+        }
+        if d[114] != 0 {
+            v.ignored_by_interaction = Some(d[115] != 0);
+        }
+        if d[116] != 0 {
+            v.style = Some(get_str(&d[..], 120));
+        }
+        if d[128] != 0 {
+        {
+            let base = rd_u32(&d[..], 132) as usize;
+            let n = rd_u32(&d[..], 136) as usize;
+            for i in 0..n {
+                let s = unsafe { core::slice::from_raw_parts((base + i * 24) as *const u8, 24) };
+                v.tags.insert(get_str(&s[..], 0), read_dyn(&s[8..]));
+            }
+        }
+        }
+        if d[140] != 0 {
+            v.index = Some(u32::from_le_bytes(d[144..148].try_into().unwrap()));
+        }
+        if d[148] != 0 {
+            v.anchor = Some(GuiAnchor::decode_at(&d[152..]));
+        }
+        if d[208] != 0 {
+            v.game_controller_interaction = Some(u32::from_le_bytes(d[212..216].try_into().unwrap()));
+        }
+        if d[216] != 0 {
+            v.raise_hover_events = Some(d[217] != 0);
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(15);
+        kv.push((Value::Str(LuaStr::from("type")), Value::Str(self.r#type.clone())));
+        if let Some(x) = &self.name {
+            kv.push((Value::Str(LuaStr::from("name")), Value::Str(x.clone())));
+        }
+        if let Some(x) = &self.caption {
+            kv.push((Value::Str(LuaStr::from("caption")), x.clone()));
+        }
+        if let Some(x) = &self.tooltip {
+            kv.push((Value::Str(LuaStr::from("tooltip")), x.clone()));
+        }
+        if let Some(x) = &self.elem_tooltip {
+            kv.push((Value::Str(LuaStr::from("elem_tooltip")), x.to_value()));
+        }
+        if let Some(x) = &self.enabled {
+            kv.push((Value::Str(LuaStr::from("enabled")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.visible {
+            kv.push((Value::Str(LuaStr::from("visible")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.locked {
+            kv.push((Value::Str(LuaStr::from("locked")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.ignored_by_interaction {
+            kv.push((Value::Str(LuaStr::from("ignored_by_interaction")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.style {
+            kv.push((Value::Str(LuaStr::from("style")), Value::Str(x.clone())));
+        }
+        if !self.tags.is_empty() {
+            let mut m: Vec<(Value, Value)> = Vec::new();
+            for (k, v) in self.tags.iter() {
+                m.push((Value::Str(k.clone()), v.clone()));
+            }
+            kv.push((Value::Str(LuaStr::from("tags")), Value::Map(m)));
+        }
+        if let Some(x) = &self.index {
+            kv.push((Value::Str(LuaStr::from("index")), Value::Number(*x as f64)));
+        }
+        if let Some(x) = &self.anchor {
+            kv.push((Value::Str(LuaStr::from("anchor")), x.to_value()));
+        }
+        if let Some(x) = &self.game_controller_interaction {
+            kv.push((Value::Str(LuaStr::from("game_controller_interaction")), Value::Number(*x as f64)));
+        }
+        if let Some(x) = &self.raise_hover_events {
+            kv.push((Value::Str(LuaStr::from("raise_hover_events")), Value::Bool(*x)));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
+pub struct ElemID {
+    pub r#type: LuaStr,
+    pub name: LuaStr,
+    pub quality: Option<LuaStr>,
+    pub signal_type: Option<LuaStr>,
+}
+
+impl ElemID {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..40].iter_mut() { *b = 0; }
+        put_str(&mut d[..], 0, self.r#type.as_bytes());
+        put_str(&mut d[..], 8, self.name.as_bytes());
+        if let Some(v) = &self.quality {
+            d[16] = 1;
+            put_str(&mut d[..], 20, v.as_bytes());
+        }
+        if let Some(v) = &self.signal_type {
+            d[28] = 1;
+            put_str(&mut d[..], 32, v.as_bytes());
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.r#type = get_str(&d[..], 0);
+        v.name = get_str(&d[..], 8);
+        if d[16] != 0 {
+            v.quality = Some(get_str(&d[..], 20));
+        }
+        if d[28] != 0 {
+            v.signal_type = Some(get_str(&d[..], 32));
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(4);
+        kv.push((Value::Str(LuaStr::from("type")), Value::Str(self.r#type.clone())));
+        kv.push((Value::Str(LuaStr::from("name")), Value::Str(self.name.clone())));
+        if let Some(x) = &self.quality {
+            kv.push((Value::Str(LuaStr::from("quality")), Value::Str(x.clone())));
+        }
+        if let Some(x) = &self.signal_type {
+            kv.push((Value::Str(LuaStr::from("signal_type")), Value::Str(x.clone())));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
 pub struct GuiAnchor {
     pub gui: u32,
     pub position: u32,
@@ -75252,7 +75645,7 @@ impl GuiAnchor {
             d[20] = 1;
             put_str(&mut d[..], 24, v.as_bytes());
         }
-        d[32] = 1;
+        if !self.names.is_empty() { d[32] = 1; }
         let p = galloc((self.names.len() * 8) as u32);
         for (i, e) in self.names.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 8) as *mut u8, 8) };
@@ -75314,60 +75707,6 @@ impl GuiAnchor {
         }
         if let Some(x) = &self.ghost_mode {
             kv.push((Value::Str(LuaStr::from("ghost_mode")), Value::Str(x.clone())));
-        }
-        Value::Map(kv)
-    }
-}
-
-/// Mirrors the API type of the same name, laid out to match the wire.
-#[derive(Clone, Debug, Default)]
-pub struct ElemID {
-    pub r#type: LuaStr,
-    pub name: LuaStr,
-    pub quality: Option<LuaStr>,
-    pub signal_type: Option<LuaStr>,
-}
-
-impl ElemID {
-    pub fn encode_at(&self, d: &mut [u8]) {
-        for b in d[..40].iter_mut() { *b = 0; }
-        put_str(&mut d[..], 0, self.r#type.as_bytes());
-        put_str(&mut d[..], 8, self.name.as_bytes());
-        if let Some(v) = &self.quality {
-            d[16] = 1;
-            put_str(&mut d[..], 20, v.as_bytes());
-        }
-        if let Some(v) = &self.signal_type {
-            d[28] = 1;
-            put_str(&mut d[..], 32, v.as_bytes());
-        }
-    }
-
-    pub fn decode_at(d: &[u8]) -> Self {
-        let mut v = Self::default();
-        v.r#type = get_str(&d[..], 0);
-        v.name = get_str(&d[..], 8);
-        if d[16] != 0 {
-            v.quality = Some(get_str(&d[..], 20));
-        }
-        if d[28] != 0 {
-            v.signal_type = Some(get_str(&d[..], 32));
-        }
-        v
-    }
-
-    /// Renders this as the tier-2 table the engine expects, so a
-    /// union-typed field can be filled from the typed struct instead of
-    /// from hand-written key strings. An absent optional is omitted.
-    pub fn to_value(&self) -> Value {
-        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(4);
-        kv.push((Value::Str(LuaStr::from("type")), Value::Str(self.r#type.clone())));
-        kv.push((Value::Str(LuaStr::from("name")), Value::Str(self.name.clone())));
-        if let Some(x) = &self.quality {
-            kv.push((Value::Str(LuaStr::from("quality")), Value::Str(x.clone())));
-        }
-        if let Some(x) = &self.signal_type {
-            kv.push((Value::Str(LuaStr::from("signal_type")), Value::Str(x.clone())));
         }
         Value::Map(kv)
     }
@@ -75998,7 +76337,7 @@ pub struct LogisticSections {
 impl LogisticSections {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..16].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.sections.is_empty() { d[0] = 1; }
         let p = galloc((self.sections.len() * 36) as u32);
         for (i, e) in self.sections.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 36) as *mut u8, 36) };
@@ -76063,7 +76402,7 @@ impl LogisticSection {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..36].iter_mut() { *b = 0; }
         d[0..1].copy_from_slice(&(self.index as u8).to_le_bytes());
-        d[1] = 1;
+        if !self.filters.is_empty() { d[1] = 1; }
         let p = galloc((self.filters.len() * 80) as u32);
         for (i, e) in self.filters.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 80) as *mut u8, 80) };
@@ -76319,7 +76658,7 @@ pub struct AmmoType {
 impl AmmoType {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..88].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.action.is_empty() { d[0] = 1; }
         let p = galloc((self.action.len() * 16) as u32);
         for (i, e) in self.action.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -76348,7 +76687,7 @@ impl AmmoType {
             d[64] = 1;
             d[68..72].copy_from_slice(&(*v).to_le_bytes());
         }
-        d[72] = 1;
+        if !self.target_filter.is_empty() { d[72] = 1; }
         let p = galloc((self.target_filter.len() * 8) as u32);
         for (i, e) in self.target_filter.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 8) as *mut u8, 8) };
@@ -77819,7 +78158,7 @@ impl LuaPlayerSetControllerArgs {
             d[4] = 1;
             wr_u32(&mut d[..], 8, v.0);
         }
-        d[12] = 1;
+        if !self.waypoints.is_empty() { d[12] = 1; }
         let p = galloc((self.waypoints.len() * 72) as u32);
         for (i, e) in self.waypoints.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 72) as *mut u8, 72) };
@@ -79252,7 +79591,7 @@ impl LuaRenderingDrawAnimationArgs {
             d[208] = 1;
             write_dyn(&mut d[216..], v);
         }
-        d[232] = 1;
+        if !self.players.is_empty() { d[232] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -79449,7 +79788,7 @@ impl LuaRenderingDrawArcArgs {
             d[88] = 1;
             write_dyn(&mut d[96..], v);
         }
-        d[112] = 1;
+        if !self.players.is_empty() { d[112] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -79608,7 +79947,7 @@ impl LuaRenderingDrawCircleArgs {
             d[88] = 1;
             write_dyn(&mut d[96..], v);
         }
-        d[112] = 1;
+        if !self.players.is_empty() { d[112] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -79790,7 +80129,7 @@ impl LuaRenderingDrawLightArgs {
             d[112] = 1;
             write_dyn(&mut d[120..], v);
         }
-        d[136] = 1;
+        if !self.players.is_empty() { d[136] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -79974,7 +80313,7 @@ impl LuaRenderingDrawLineArgs {
             d[128] = 1;
             write_dyn(&mut d[136..], v);
         }
-        d[152] = 1;
+        if !self.players.is_empty() { d[152] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -80161,7 +80500,7 @@ impl LuaRenderingDrawPolygonArgs {
             d[116] = 1;
             write_dyn(&mut d[120..], v);
         }
-        d[136] = 1;
+        if !self.players.is_empty() { d[136] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -80349,7 +80688,7 @@ impl LuaRenderingDrawRectangleArgs {
             d[96] = 1;
             write_dyn(&mut d[104..], v);
         }
-        d[120] = 1;
+        if !self.players.is_empty() { d[120] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -80541,7 +80880,7 @@ impl LuaRenderingDrawSpriteArgs {
             d[176] = 1;
             write_dyn(&mut d[184..], v);
         }
-        d[200] = 1;
+        if !self.players.is_empty() { d[200] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -80735,7 +81074,7 @@ impl LuaRenderingDrawTextArgs {
             d[112] = 1;
             write_dyn(&mut d[120..], v);
         }
-        d[136] = 1;
+        if !self.players.is_empty() { d[136] = 1; }
         let p = galloc((self.players.len() * 4) as u32);
         for (i, e) in self.players.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 4) as *mut u8, 4) };
@@ -80920,7 +81259,7 @@ impl ScheduleInterrupt {
             d[0] = 1;
             put_str(&mut d[..], 4, v.as_bytes());
         }
-        d[12] = 1;
+        if !self.conditions.is_empty() { d[12] = 1; }
         let p = galloc((self.conditions.len() * 80) as u32);
         for (i, e) in self.conditions.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 80) as *mut u8, 80) };
@@ -80928,7 +81267,7 @@ impl ScheduleInterrupt {
         }
         wr_u32(&mut d[..], 16, p);
         wr_u32(&mut d[..], 20, self.conditions.len() as u32);
-        d[24] = 1;
+        if !self.targets.is_empty() { d[24] = 1; }
         let p = galloc((self.targets.len() * 48) as u32);
         for (i, e) in self.targets.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 48) as *mut u8, 48) };
@@ -81123,7 +81462,7 @@ impl ScheduleRecord {
             d[20] = 1;
             d[24..28].copy_from_slice(&(*v as u32).to_le_bytes());
         }
-        d[28] = 1;
+        if !self.wait_conditions.is_empty() { d[28] = 1; }
         let p = galloc((self.wait_conditions.len() * 80) as u32);
         for (i, e) in self.wait_conditions.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 80) as *mut u8, 80) };
@@ -81252,7 +81591,7 @@ impl AddRecordData {
             d[32] = 1;
             d[33] = if *v { 1 } else { 0 };
         }
-        d[34] = 1;
+        if !self.wait_conditions.is_empty() { d[34] = 1; }
         let p = galloc((self.wait_conditions.len() * 80) as u32);
         for (i, e) in self.wait_conditions.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 80) as *mut u8, 80) };
@@ -83635,6 +83974,391 @@ impl LuaSurfaceCreateEntitiesFromBlueprintStringArgs {
 
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
+pub struct LuaSurfaceCreateEntityArgs {
+    pub name: Value,
+    pub position: MapPosition,
+    pub direction: Option<u32>,
+    pub mirror: Option<bool>,
+    pub quality: Option<Object>,
+    pub force: Option<Object>,
+    pub target: Option<Value>,
+    pub source: Option<Value>,
+    pub cause: Option<Value>,
+    pub snap_to_grid: Option<bool>,
+    pub fast_replace: Option<bool>,
+    pub undo_index: Option<u32>,
+    pub player: Option<Object>,
+    pub character: Option<Object>,
+    pub spill: Option<bool>,
+    pub raise_built: Option<bool>,
+    pub create_build_effect_smoke: Option<bool>,
+    pub spawn_decorations: Option<bool>,
+    pub move_stuck_players: Option<bool>,
+    pub item: Option<Object>,
+    pub preserve_ghosts_and_corpses: Option<bool>,
+    pub register_plant: Option<bool>,
+    pub burner_fuel_inventory: Option<BlueprintInventoryWithFilters>,
+}
+
+impl LuaSurfaceCreateEntityArgs {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..200].iter_mut() { *b = 0; }
+        write_dyn(&mut d[0..], &self.name);
+        self.position.encode_at(&mut d[16..]);
+        if let Some(v) = &self.direction {
+            d[32] = 1;
+            d[36..40].copy_from_slice(&(*v as u32).to_le_bytes());
+        }
+        if let Some(v) = &self.mirror {
+            d[40] = 1;
+            d[41] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.quality {
+            d[42] = 1;
+            wr_u32(&mut d[..], 44, v.0);
+        }
+        if let Some(v) = &self.force {
+            d[48] = 1;
+            wr_u32(&mut d[..], 52, v.0);
+        }
+        if let Some(v) = &self.target {
+            d[56] = 1;
+            write_dyn(&mut d[64..], v);
+        }
+        if let Some(v) = &self.source {
+            d[80] = 1;
+            write_dyn(&mut d[88..], v);
+        }
+        if let Some(v) = &self.cause {
+            d[104] = 1;
+            write_dyn(&mut d[112..], v);
+        }
+        if let Some(v) = &self.snap_to_grid {
+            d[128] = 1;
+            d[129] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.fast_replace {
+            d[130] = 1;
+            d[131] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.undo_index {
+            d[132] = 1;
+            d[136..140].copy_from_slice(&(*v as u32).to_le_bytes());
+        }
+        if let Some(v) = &self.player {
+            d[140] = 1;
+            wr_u32(&mut d[..], 144, v.0);
+        }
+        if let Some(v) = &self.character {
+            d[148] = 1;
+            wr_u32(&mut d[..], 152, v.0);
+        }
+        if let Some(v) = &self.spill {
+            d[156] = 1;
+            d[157] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.raise_built {
+            d[158] = 1;
+            d[159] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.create_build_effect_smoke {
+            d[160] = 1;
+            d[161] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.spawn_decorations {
+            d[162] = 1;
+            d[163] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.move_stuck_players {
+            d[164] = 1;
+            d[165] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.item {
+            d[166] = 1;
+            wr_u32(&mut d[..], 168, v.0);
+        }
+        if let Some(v) = &self.preserve_ghosts_and_corpses {
+            d[172] = 1;
+            d[173] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.register_plant {
+            d[174] = 1;
+            d[175] = if *v { 1 } else { 0 };
+        }
+        if let Some(v) = &self.burner_fuel_inventory {
+            d[176] = 1;
+            v.encode_at(&mut d[180..]);
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.name = read_dyn(&d[0..]);
+        v.position = MapPosition::decode_at(&d[16..]);
+        if d[32] != 0 {
+            v.direction = Some(u32::from_le_bytes(d[36..40].try_into().unwrap()));
+        }
+        if d[40] != 0 {
+            v.mirror = Some(d[41] != 0);
+        }
+        if d[42] != 0 {
+            v.quality = Some(Object(rd_u32(&d[..], 44)));
+        }
+        if d[48] != 0 {
+            v.force = Some(Object(rd_u32(&d[..], 52)));
+        }
+        if d[56] != 0 {
+            v.target = Some(read_dyn(&d[64..]));
+        }
+        if d[80] != 0 {
+            v.source = Some(read_dyn(&d[88..]));
+        }
+        if d[104] != 0 {
+            v.cause = Some(read_dyn(&d[112..]));
+        }
+        if d[128] != 0 {
+            v.snap_to_grid = Some(d[129] != 0);
+        }
+        if d[130] != 0 {
+            v.fast_replace = Some(d[131] != 0);
+        }
+        if d[132] != 0 {
+            v.undo_index = Some(u32::from_le_bytes(d[136..140].try_into().unwrap()));
+        }
+        if d[140] != 0 {
+            v.player = Some(Object(rd_u32(&d[..], 144)));
+        }
+        if d[148] != 0 {
+            v.character = Some(Object(rd_u32(&d[..], 152)));
+        }
+        if d[156] != 0 {
+            v.spill = Some(d[157] != 0);
+        }
+        if d[158] != 0 {
+            v.raise_built = Some(d[159] != 0);
+        }
+        if d[160] != 0 {
+            v.create_build_effect_smoke = Some(d[161] != 0);
+        }
+        if d[162] != 0 {
+            v.spawn_decorations = Some(d[163] != 0);
+        }
+        if d[164] != 0 {
+            v.move_stuck_players = Some(d[165] != 0);
+        }
+        if d[166] != 0 {
+            v.item = Some(Object(rd_u32(&d[..], 168)));
+        }
+        if d[172] != 0 {
+            v.preserve_ghosts_and_corpses = Some(d[173] != 0);
+        }
+        if d[174] != 0 {
+            v.register_plant = Some(d[175] != 0);
+        }
+        if d[176] != 0 {
+            v.burner_fuel_inventory = Some(BlueprintInventoryWithFilters::decode_at(&d[180..]));
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(23);
+        kv.push((Value::Str(LuaStr::from("name")), self.name.clone()));
+        kv.push((Value::Str(LuaStr::from("position")), self.position.to_value()));
+        if let Some(x) = &self.direction {
+            kv.push((Value::Str(LuaStr::from("direction")), Value::Number(*x as f64)));
+        }
+        if let Some(x) = &self.mirror {
+            kv.push((Value::Str(LuaStr::from("mirror")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.quality {
+            kv.push((Value::Str(LuaStr::from("quality")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.force {
+            kv.push((Value::Str(LuaStr::from("force")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.target {
+            kv.push((Value::Str(LuaStr::from("target")), x.clone()));
+        }
+        if let Some(x) = &self.source {
+            kv.push((Value::Str(LuaStr::from("source")), x.clone()));
+        }
+        if let Some(x) = &self.cause {
+            kv.push((Value::Str(LuaStr::from("cause")), x.clone()));
+        }
+        if let Some(x) = &self.snap_to_grid {
+            kv.push((Value::Str(LuaStr::from("snap_to_grid")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.fast_replace {
+            kv.push((Value::Str(LuaStr::from("fast_replace")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.undo_index {
+            kv.push((Value::Str(LuaStr::from("undo_index")), Value::Number(*x as f64)));
+        }
+        if let Some(x) = &self.player {
+            kv.push((Value::Str(LuaStr::from("player")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.character {
+            kv.push((Value::Str(LuaStr::from("character")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.spill {
+            kv.push((Value::Str(LuaStr::from("spill")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.raise_built {
+            kv.push((Value::Str(LuaStr::from("raise_built")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.create_build_effect_smoke {
+            kv.push((Value::Str(LuaStr::from("create_build_effect_smoke")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.spawn_decorations {
+            kv.push((Value::Str(LuaStr::from("spawn_decorations")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.move_stuck_players {
+            kv.push((Value::Str(LuaStr::from("move_stuck_players")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.item {
+            kv.push((Value::Str(LuaStr::from("item")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.preserve_ghosts_and_corpses {
+            kv.push((Value::Str(LuaStr::from("preserve_ghosts_and_corpses")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.register_plant {
+            kv.push((Value::Str(LuaStr::from("register_plant")), Value::Bool(*x)));
+        }
+        if let Some(x) = &self.burner_fuel_inventory {
+            kv.push((Value::Str(LuaStr::from("burner_fuel_inventory")), x.to_value()));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
+pub struct BlueprintInventoryWithFilters {
+    pub bar: Option<u16>,
+    pub filters: Vec<BlueprintItemFilter>,
+}
+
+impl BlueprintInventoryWithFilters {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..16].iter_mut() { *b = 0; }
+        if let Some(v) = &self.bar {
+            d[0] = 1;
+            d[2..4].copy_from_slice(&(*v as u16).to_le_bytes());
+        }
+        if !self.filters.is_empty() { d[4] = 1; }
+        let p = galloc((self.filters.len() * 48) as u32);
+        for (i, e) in self.filters.iter().enumerate() {
+            let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 48) as *mut u8, 48) };
+            e.encode_at(&mut s[0..]);
+        }
+        wr_u32(&mut d[..], 8, p);
+        wr_u32(&mut d[..], 12, self.filters.len() as u32);
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        if d[0] != 0 {
+            v.bar = Some(u16::from_le_bytes(d[2..4].try_into().unwrap()));
+        }
+        if d[4] != 0 {
+        {
+            let base = rd_u32(&d[..], 8) as usize;
+            let n = rd_u32(&d[..], 12) as usize;
+            for i in 0..n {
+                let s = unsafe { core::slice::from_raw_parts((base + i * 48) as *const u8, 48) };
+                v.filters.push(BlueprintItemFilter::decode_at(&s[0..]));
+            }
+        }
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(2);
+        if let Some(x) = &self.bar {
+            kv.push((Value::Str(LuaStr::from("bar")), Value::Number(*x as f64)));
+        }
+        if !self.filters.is_empty() {
+            let mut a: Vec<Value> = Vec::with_capacity(self.filters.len());
+            for e in self.filters.iter() {
+                a.push(e.to_value());
+            }
+            kv.push((Value::Str(LuaStr::from("filters")), Value::Array(a)));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
+pub struct BlueprintItemFilter {
+    pub index: u32,
+    pub name: Option<Value>,
+    pub quality: Option<Object>,
+    pub comparator: Option<LuaStr>,
+}
+
+impl BlueprintItemFilter {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..48].iter_mut() { *b = 0; }
+        d[0..4].copy_from_slice(&(self.index as u32).to_le_bytes());
+        if let Some(v) = &self.name {
+            d[4] = 1;
+            write_dyn(&mut d[8..], v);
+        }
+        if let Some(v) = &self.quality {
+            d[24] = 1;
+            wr_u32(&mut d[..], 28, v.0);
+        }
+        if let Some(v) = &self.comparator {
+            d[32] = 1;
+            put_str(&mut d[..], 36, v.as_bytes());
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.index = u32::from_le_bytes(d[0..4].try_into().unwrap());
+        if d[4] != 0 {
+            v.name = Some(read_dyn(&d[8..]));
+        }
+        if d[24] != 0 {
+            v.quality = Some(Object(rd_u32(&d[..], 28)));
+        }
+        if d[32] != 0 {
+            v.comparator = Some(get_str(&d[..], 36));
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(4);
+        kv.push((Value::Str(LuaStr::from("index")), Value::Number(self.index as f64)));
+        if let Some(x) = &self.name {
+            kv.push((Value::Str(LuaStr::from("name")), x.clone()));
+        }
+        if let Some(x) = &self.quality {
+            kv.push((Value::Str(LuaStr::from("quality")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.comparator {
+            kv.push((Value::Str(LuaStr::from("comparator")), Value::Str(x.clone())));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateParticleArgs {
     pub name: Object,
     pub position: MapPosition,
@@ -83683,6 +84407,67 @@ impl LuaSurfaceCreateParticleArgs {
 
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
+pub struct LuaSurfaceCreateSegmentedUnitArgs {
+    pub name: Value,
+    pub quality: Option<Object>,
+    pub force: Option<Object>,
+    pub territory: Option<Object>,
+}
+
+impl LuaSurfaceCreateSegmentedUnitArgs {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..40].iter_mut() { *b = 0; }
+        write_dyn(&mut d[0..], &self.name);
+        if let Some(v) = &self.quality {
+            d[16] = 1;
+            wr_u32(&mut d[..], 20, v.0);
+        }
+        if let Some(v) = &self.force {
+            d[24] = 1;
+            wr_u32(&mut d[..], 28, v.0);
+        }
+        if let Some(v) = &self.territory {
+            d[32] = 1;
+            wr_u32(&mut d[..], 36, v.0);
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        v.name = read_dyn(&d[0..]);
+        if d[16] != 0 {
+            v.quality = Some(Object(rd_u32(&d[..], 20)));
+        }
+        if d[24] != 0 {
+            v.force = Some(Object(rd_u32(&d[..], 28)));
+        }
+        if d[32] != 0 {
+            v.territory = Some(Object(rd_u32(&d[..], 36)));
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(4);
+        kv.push((Value::Str(LuaStr::from("name")), self.name.clone()));
+        if let Some(x) = &self.quality {
+            kv.push((Value::Str(LuaStr::from("quality")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.force {
+            kv.push((Value::Str(LuaStr::from("force")), Value::Obj(*x)));
+        }
+        if let Some(x) = &self.territory {
+            kv.push((Value::Str(LuaStr::from("territory")), Value::Obj(*x)));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateTerritoryArgs {
     pub chunks: Vec<ChunkPosition>,
     pub patrol_path: Vec<MapPosition>,
@@ -83698,7 +84483,7 @@ impl LuaSurfaceCreateTerritoryArgs {
         }
         wr_u32(&mut d[..], 0, p);
         wr_u32(&mut d[..], 4, self.chunks.len() as u32);
-        d[8] = 1;
+        if !self.patrol_path.is_empty() { d[8] = 1; }
         let p = galloc((self.patrol_path.len() * 16) as u32);
         for (i, e) in self.patrol_path.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -85505,7 +86290,7 @@ impl LuaTrainManagerRequestTrainPathArgs {
             d[28] = 1;
             d[29] = if *v { 1 } else { 0 };
         }
-        d[30] = 1;
+        if !self.starts.is_empty() { d[30] = 1; }
         let p = galloc((self.starts.len() * 16) as u32);
         for (i, e) in self.starts.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
@@ -86263,7 +87048,7 @@ impl OnBuiltEntity {
         wr_u32(&mut d[..], 0, self.entity.0);
         d[4..8].copy_from_slice(&(self.player_index as u32).to_le_bytes());
         wr_u32(&mut d[..], 8, self.consumed_items.0);
-        d[12] = 1;
+        if !self.tags.is_empty() { d[12] = 1; }
         let p = galloc((self.tags.len() * 24) as u32);
         for (i, (k, v)) in self.tags.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -93839,7 +94624,7 @@ impl OnRobotBuiltEntity {
         wr_u32(&mut d[..], 0, self.robot.0);
         wr_u32(&mut d[..], 4, self.entity.0);
         wr_u32(&mut d[..], 8, self.stack.0);
-        d[12] = 1;
+        if !self.tags.is_empty() { d[12] = 1; }
         let p = galloc((self.tags.len() * 24) as u32);
         for (i, (k, v)) in self.tags.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -94428,7 +95213,7 @@ pub struct OnScriptPathRequestFinished {
 impl OnScriptPathRequestFinished {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..32].iter_mut() { *b = 0; }
-        d[0] = 1;
+        if !self.path.is_empty() { d[0] = 1; }
         let p = galloc((self.path.len() * 24) as u32);
         for (i, e) in self.path.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -95000,7 +95785,7 @@ impl OnSpacePlatformBuiltEntity {
         wr_u32(&mut d[..], 0, self.platform.0);
         wr_u32(&mut d[..], 4, self.entity.0);
         wr_u32(&mut d[..], 8, self.stack.0);
-        d[12] = 1;
+        if !self.tags.is_empty() { d[12] = 1; }
         let p = galloc((self.tags.len() * 24) as u32);
         for (i, (k, v)) in self.tags.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };
@@ -96563,7 +97348,7 @@ impl ScriptRaisedRevive {
     pub fn encode_at(&self, d: &mut [u8]) {
         for b in d[..28].iter_mut() { *b = 0; }
         wr_u32(&mut d[..], 0, self.entity.0);
-        d[4] = 1;
+        if !self.tags.is_empty() { d[4] = 1; }
         let p = galloc((self.tags.len() * 24) as u32);
         for (i, (k, v)) in self.tags.iter().enumerate() {
             let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 24) as *mut u8, 24) };

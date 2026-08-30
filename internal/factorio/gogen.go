@@ -90,6 +90,13 @@ type GoBindings struct {
 	// raise the coverage figure without covering anything, which is exactly the
 	// mistake the EventStructs split above was made to avoid.
 	IntoVariants int
+	// TypedVariants counts the <Name>Typed bindings: a second binding over a
+	// member whose parameter table is a discriminated union, taking its shared
+	// parameters as a tier-1 struct and the variant tail as one tier-2 slot.
+	// Separate from Emitted for IntoVariants' reason -- the member is already
+	// counted, and folding this in would raise coverage without covering
+	// anything.
+	TypedVariants int
 	// DynValueStructs counts the generated structs whose whole content is ONE
 	// tier-2 value and which therefore got typed Bool/Num/Str/Obj readers --
 	// ModSetting's shape. See IsDynValueStruct: it is a rule over the layout,
@@ -447,6 +454,20 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 				w("%s", isrc)
 				out.IntoVariants++
 				bound[cls][iname] = isig
+			}
+
+			// AND THE TYPED-ARGUMENT VARIANT, for a member whose parameter table
+			// is a discriminated union. Same member id, same returns, and an
+			// argument block that is a tier-1 struct plus one tier-2 slot rather
+			// than one tier-2 map. Counted in its own row for the reason the
+			// Into variant is: both are a second BINDING over a member Emitted
+			// has already counted once.
+			tsrc, tname, tsig, tok := goMemberTyped(structs, typeName, m)
+			if tok && !seen[tname] {
+				seen[tname] = true
+				w("%s", tsrc)
+				out.TypedVariants++
+				bound[cls][tname] = tsig
 			}
 		}
 		out.StaleRenames = append(out.StaleRenames,
@@ -852,17 +873,38 @@ type goSig struct {
 // exactly that. Fewer allocations is fewer collections; it is no longer a leak.
 
 func goMember(g *goStructs, typeName string, m Member) (src, name string, sig goSig, why string, ok bool) {
-	return goMemberVariant(g, typeName, m, false)
+	return goMemberVariant(g, typeName, m, false, false)
 }
 
 // goMemberInto renders the destination-slice variant, or reports that this
 // member has no container return to write into.
 func goMemberInto(g *goStructs, typeName string, m Member) (src, name string, sig goSig, ok bool) {
-	src, name, sig, _, ok = goMemberVariant(g, typeName, m, true)
+	src, name, sig, _, ok = goMemberVariant(g, typeName, m, true, false)
 	return
 }
 
-func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, name string, sig goSig, why string, ok bool) {
+// goMemberTyped renders the TYPED-ARGUMENT variant, or reports that this member
+// has no second argument list.
+//
+// SAME MEMBER ID, SAME RETURNS, DIFFERENT ARGUMENT BLOCK -- so it is the whole
+// ordinary member body over a substituted Args, which is what makes it cheap:
+// nothing about encoding, presence bytes, containers or return decoding is
+// written twice. The one thing that has to differ inside is the import, and
+// hostCallTyped is what says which block the host will read.
+//
+// The <Name>Into precedent one file over: a second BINDING over a member that is
+// already counted, entered in bound[] so inheritance forwards it, and counted in
+// a row of its own rather than in Emitted.
+func goMemberTyped(g *goStructs, typeName string, m Member) (src, name string, sig goSig, ok bool) {
+	if len(m.TypedArgs) == 0 {
+		return "", "", goSig{}, false
+	}
+	m.Args = m.TypedArgs
+	src, name, sig, _, ok = goMemberVariant(g, typeName, m, false, true)
+	return
+}
+
+func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) (src, name string, sig goSig, why string, ok bool) {
 	args, rets, err := m.blocks()
 	if err != nil {
 		return "", "", goSig{}, "signature has no memory layout", false
@@ -1057,6 +1099,13 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 	if into {
 		name += "Into"
 	}
+	// <Name>Typed, beside <Name> rather than instead of it. The tier-2 form is
+	// what makes these members reachable at all and a guest already using one
+	// keeps compiling; this is the same member id with its shared parameters
+	// spelled out.
+	if typed {
+		name += "Typed"
+	}
 
 	var b strings.Builder
 	w := func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }
@@ -1089,6 +1138,14 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 			rts = append(rts, optType(f))
 		}
 		retType = "(" + strings.Join(rts, ", ") + ", error)"
+	}
+	if typed {
+		w("// %s is %s with its SHARED parameters spelled out instead of\n",
+			name, exportName(m.Name))
+		w("// hand-built as tier-2 keys. Same member, same result; the variant\n")
+		w("// tail goes in extra, whose keys are applied over the block, and a\n")
+		w("// nil extra means there is no tail. The block crosses as a flat\n")
+		w("// struct, which the host reads about 3x faster than the map form.\n")
 	}
 	if into {
 		w("// %s is %s writing into dst, reusing its capacity rather than\n",
@@ -1302,7 +1359,11 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 	if m.Kind == MemberGlobalFunc {
 		recv = "0"
 	}
-	w("\tif st := hostCall(%s, %d, %s, %s); st != 0 {\n", recv, m.ID, ap, rp)
+	call := "hostCall"
+	if typed {
+		call = "hostCallTyped"
+	}
+	w("\tif st := %s(%s, %d, %s, %s); st != 0 {\n", call, recv, m.ID, ap, rp)
 	w("\t\treturn %sStatus(st)\n\t}\n", zero)
 	// ONE DECODE PER RETURN FIELD, into v0, v1, ... ONE ABSENT FIELD MUST NOT
 	// RETURN EARLY, which is the whole structural change the multi-return work
@@ -1638,6 +1699,15 @@ func goLoad(buf string, off int, k Kind) string {
 const goRuntime = `
 //go:wasmimport fk call
 func hostCall(handle, member, argp, retp uint32) uint32
+
+// hostCallTyped is the same dispatch over a TYPED argument block: same handle,
+// same member id, same return block, and an argument block laid out as a tier-1
+// struct plus one optional tier-2 slot instead of one tier-2 map. Only a member
+// whose parameter table is a discriminated union has one -- see the <Name>Typed
+// bindings below.
+//
+//go:wasmimport fk call_typed
+func hostCallTyped(handle, member, argp, retp uint32) uint32
 
 //go:wasmimport fk retain
 func hostRetain(handle uint32) uint32

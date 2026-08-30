@@ -420,6 +420,23 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 		}
 		w("}\n\n")
 
+		// AN ABSENT OPTIONAL CONTAINER IS ABSENT, and until the typed-args
+		// round nothing in this repo encoded one. This branch set the presence
+		// byte UNCONDITIONALLY, so an optional array or dictionary field a Rust
+		// guest never touched crossed as PRESENT AND EMPTY -- `tags = {}` on
+		// LuaGuiElement::add where the Go guest sent no `tags` key at all. The
+		// two backends therefore called the engine differently from the same
+		// spec, which is the AD5 shape and is what a mirror test is for.
+		//
+		// EMPTY MEANS ABSENT HERE, and it has to: Go's optional container keeps
+		// its own nilable type, so nil is absent and an empty slice is
+		// present-and-empty, while a BTreeMap and a Vec have no nil and cannot
+		// say both. Given one of the two readings, absent is the one this ABI's
+		// own rule names -- an absent optional is left alone -- and it is the
+		// one a caller who wrote nothing meant. A Rust guest that really wants
+		// an empty container sent has no expression for it; that is a stated
+		// residual rather than a silent one, and closing it means
+		// Option<BTreeMap<..>> in the generated struct.
 		w("impl %s {\n", name)
 		w("    pub fn encode_at(&self, d: &mut [u8]) {\n")
 		w("        for b in d[..%d].iter_mut() { *b = 0; }\n", blk.Size)
@@ -427,7 +444,7 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 			fn := rustName(p.Name)
 			if e, ok := g.elem[name+"."+p.Name]; ok && p.Kind == KindArray {
 				if p.HasOffset >= 0 {
-					w("        d[%d] = 1;\n", p.HasOffset)
+					w("        if !self.%s.is_empty() { d[%d] = 1; }\n", fn, p.HasOffset)
 				}
 				w("        let p = galloc((self.%s.len() * %d) as u32);\n", fn, e.stride)
 				w("        for (i, e) in self.%s.iter().enumerate() {\n", fn)
@@ -448,7 +465,7 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 				// k: &K and v: &V either way. So the emitted body does not
 				// depend on which container rustDictType chose.
 				if p.HasOffset >= 0 {
-					w("        d[%d] = 1;\n", p.HasOffset)
+					w("        if !self.%s.is_empty() { d[%d] = 1; }\n", fn, p.HasOffset)
 				}
 				w("        let p = galloc((self.%s.len() * %d) as u32);\n", fn, e.stride)
 				w("        for (i, (k, v)) in self.%s.iter().enumerate() {\n", fn)

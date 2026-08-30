@@ -131,6 +131,26 @@ type CensusData struct {
 	// a row flipped from false to true moves it by one, which is exactly the
 	// event a version diff should make a reader look at.
 	IndexSetters int `json:"index_setter_members"`
+	// TypedArgMembers is how many members carry a SECOND, typed argument list
+	// beside the tier-2 one -- a method whose parameter table is a discriminated
+	// union, which is what Member.TypedArgs is for.
+	//
+	// A ROW BECAUSE THE POPULATION IS A MEASUREMENT AND NOT A CONSTANT: the
+	// generator's own comment said "the four of these" and 2.1.17 has five
+	// (LuaSimulation::get_widget_position joined them), which is exactly the
+	// thing a prose count cannot notice. Its failure mode is silent in the other
+	// direction too -- a shared parameter list that stops mapping drops the
+	// typed form for that member and leaves the tier-2 one working, so nothing
+	// breaks and nothing says so.
+	TypedArgMembers int `json:"typed_arg_members"`
+	// TypedVariantBindings is how many <Name>Typed / <name>_typed bindings each
+	// backend emitted over those members.
+	//
+	// ONE ROW FOR BOTH LANGUAGES, like dyn_value_structs: the two walk one
+	// Report and read one Member.TypedArgs, so a disagreement would be a defect
+	// rather than a language difference, and the Rust count is compared against
+	// this by a test instead of being written down twice.
+	TypedVariantBindings int `json:"typed_variant_bindings"`
 
 	TableConcepts int `json:"table_shaped_concepts"`
 	StringEnums   int `json:"pure_string_enum_concepts"`
@@ -335,6 +355,9 @@ func TakeCensus(a *API) (CensusData, error) {
 		if m.Kind == MemberIndexSet {
 			c.IndexSetters++
 		}
+		if len(m.TypedArgs) > 0 {
+			c.TypedArgMembers++
+		}
 		if m.Kind == MemberGlobalFunc {
 			c.GlobalFunctionsBound++
 		}
@@ -388,6 +411,7 @@ func TakeCensus(a *API) (CensusData, error) {
 	// a test rather than written down twice: two numbers spelling one fact is
 	// this repo's most-repeated failure shape.
 	c.DynValueStructs = g.DynValueStructs
+	c.TypedVariantBindings = g.TypedVariants
 	c.RustLiteralsDeferred, c.RustLiteralDeferBy = rb.LiteralsDeferred, rb.LiteralDeferBy
 	if c.RustLiteralDeferBy == nil {
 		c.RustLiteralDeferBy = map[string]int{}
@@ -470,6 +494,8 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("global functions bound", old.GlobalFunctionsBound, c.GlobalFunctionsBound)
 	cmp("LuaCustomTable handle members", old.CustomTableHandles, c.CustomTableHandles)
 	cmp("index-assign members", old.IndexSetters, c.IndexSetters)
+	cmp("typed-arg members", old.TypedArgMembers, c.TypedArgMembers)
+	cmp("typed-arg bindings", old.TypedVariantBindings, c.TypedVariantBindings)
 	cmp("table-shaped concepts", old.TableConcepts, c.TableConcepts)
 	cmp("pure string-enum concepts", old.StringEnums, c.StringEnums)
 	cmp("host members bound", old.HostMembers, c.HostMembers)

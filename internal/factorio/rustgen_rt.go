@@ -14,6 +14,13 @@ const rustRuntime = `
 extern "C" {
     #[link_name = "call"]
     fn fk_call(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
+    // The same dispatch over a TYPED argument block: same handle, same member
+    // id, same return block, and an argument block laid out as a tier-1 struct
+    // plus one optional tier-2 slot instead of one tier-2 map. Only a member
+    // whose parameter table is a discriminated union has one -- see the
+    // <name>_typed bindings.
+    #[link_name = "call_typed"]
+    fn fk_call_typed(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
     #[link_name = "subscribe"]
     fn fk_subscribe(event: u32, filterp: u32, skip: u32, namep: u32, namelen: u32) -> u32;
     #[link_name = "define"]

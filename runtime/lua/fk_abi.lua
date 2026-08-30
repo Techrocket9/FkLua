@@ -1405,6 +1405,71 @@ local function call_eq(m, h, mid, argp, retp)
   return M.OK
 end
 
+-- THE TYPED-ARGUMENT FORM of a method whose parameter table is a discriminated
+-- union: LuaGuiElement::add, LuaSurface::create_entity and the handful like
+-- them.
+--
+-- Those members take one tier-2 map, because a variant table IS a discriminated
+-- union and that is what tier 2 is for. It is also the most expensive thing this
+-- ABI does -- a GUI element's spec is 20,359 ns as a tier-2 map against 6,175 as
+-- a flat block, and 86% of that is read_dyn walking a tagged key/value pair list
+-- where a block reads a (ptr, len) at a known offset.
+--
+-- So the SHARED parameters cross as an ordinary tier-1 struct and the variant
+-- tail crosses beside it as one optional tier-2 slot. sig.targs is that pair:
+-- targs[1] is the block, targs[2] the tail.
+--
+-- SAME MEMBER ID, SAME sig.rets, SAME M.invoke. What the engine is finally
+-- handed is one Lua table either way, and the only thing that differs is where
+-- its keys were read from -- which is what makes "the typed path and the dyn
+-- path build the same table" a test rather than a claim.
+--
+-- THE TAIL IS APPLIED LAST AND WINS, deliberately. A shared parameter and a
+-- variant-group parameter may share a NAME (create_entity's `target` does, at
+-- every pin this repo owns), so the tail is not merely disjoint extra keys: it
+-- is the escape hatch, and an escape hatch that cannot override is not one. A
+-- guest with nothing to add passes it absent and the merge never runs.
+--
+-- pairs() OVER THE TAIL IS DETERMINISTIC HERE, which is worth stating because
+-- iteration order is a desync everywhere else in this runtime. What the loop
+-- produces is a SET OF KEYS IN A TABLE, not a sequence of engine calls: the keys
+-- are distinct by construction, so the resulting table is a function of the
+-- guest's bytes alone, whatever order they are visited in.
+local function call_typed(m, h, mid, argp, retp)
+  local t = m.sig.targs
+  -- A guest built against bindings that had a typed form for this member,
+  -- packaged against a table that does not. ERR_BAD_ARGS rather than a silent
+  -- decode of the wrong block; fk_api_sig_* is what catches the pairing itself.
+  if t == nil then return M.ERR_BAD_ARGS end
+  local mark = M.scratch_mark()
+  local blk = t[1]
+  local tbl = read_struct(blk.fields, argp + blk.at)
+  local tail = t[2]
+  if tail ~= nil and io_.ld8(argp + tail.has) ~= 0 then
+    local extra = read_dyn(argp + tail.at)
+    if type(extra) == "table" then
+      for k, v in pairs(extra) do tbl[k] = v end
+    end
+  end
+  -- ONE ARGUMENT, ALWAYS. A variant-group method takes exactly one option table
+  -- by construction -- that is what having variant groups means -- so there is
+  -- no arity to dispatch on and no trailing-optional trim to make.
+  local st, a, b, c, d = M.invoke(h, mid, tbl)
+  if st ~= M.OK then return st end
+  M.scratch_release(mark)
+  return M.encode_rets(m.sig, retp, a, b, c, d)
+end
+
+-- fk.call_typed: the import behind the form above. A separate import rather than
+-- a flag on M.call, so the ordinary path keeps the shape it had -- see
+-- internal/factorio/used.go, which also says why pruning does not move.
+function M.call_typed(h, mid, argp, retp)
+  lastError = ""
+  local m = members[mid]
+  if m == nil or m.sig == nil then return M.ERR_NO_MEMBER end
+  return call_typed(m, h, mid, argp, retp)
+end
+
 -- The import the guest calls. Everything above exists to make this one line
 -- long, and to make each half testable without the other.
 function M.call(h, mid, argp, retp)

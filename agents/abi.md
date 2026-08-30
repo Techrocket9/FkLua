@@ -698,6 +698,47 @@ The cost is real and worth stating plainly: a caller gets a `Value` rather than 
 
 **This is also why the "few enough to hand-write" premise deserved re-checking before being acted on.** It was version-dependent, and it was miscounted.
 
+### ...and a SECOND, TYPED argument list over the same member id — `Member.TypedArgs`
+
+**The typed wrapper the paragraph above says can land on top is generated rather than hand-written, and it is a WIRE change and not only an ergonomic one.** A variant-group method's shared parameters are ordinary described parameters with ordinary types; only the tail is a discriminated union. So the shared half lays out as a tier-1 struct through the same `mapFields`/`LayoutStruct` every takes-table method uses, and the tail crosses beside it as one optional tier-2 slot:
+
+```
+TypedArgs = [{args, KindStruct, <shared parameters>}, {extra, KindDyn, optional}]
+```
+
+`<Name>Typed(args, extra)` in Go and `<name>_typed(args, extra)` in Rust, over the **same member id**, with the tier-2 form untouched. Both are entered in the inheritance table, so `LuaEntity` and `LuaPlayer` forward `SetGuiArrowTyped` the way they forward everything else.
+
+**Which import the guest calls is what tells the host which block to decode.** `fk.call_typed(h, mid, argp, retp)` is a second import beside `fk.call`, and `M.call_typed` reads `sig.targs` where `M.call` reads `sig.args`. A fifth operand on `fk.call` was the alternative and was refused: the two forms decode different blocks, so a form flag puts a branch on the hot path of every host call in the API to serve five members, and every generated binding in both languages would have to pass a fifth constant — the wasm of every guest in existence changes for a golden diff nobody can review. **Pruning is unaffected by construction**: the member id is still an i32 constant in operand 1 of its own call, so `UsedMembers` unions two scans and `usedIDs` does not change. `fk.register`/`fk.remote_call` are the precedent for a second import where the work behind it is different.
+
+**TWO TOP-LEVEL FIELDS RATHER THAN AN `extra` FIELD INSIDE THE BLOCK, and it is a correctness decision.** A field inside the struct would occupy a KEY, and a variant group may declare a parameter of any name. Measured: `create_entity`'s shared `target` is also a variant-group parameter, at every committed description. **The tail is applied over the block and wins**, for the same reason — the two namespaces overlap, so an escape hatch that could not override would not be one.
+
+**`pairs()` over the tail is deterministic here**, which is worth stating because iteration order is a desync everywhere else in this runtime. The loop produces a SET OF KEYS IN A TABLE, not a sequence of engine calls; the keys are distinct by construction, so the resulting table is a function of the guest's bytes whatever order they are visited in.
+
+**The typed block is in the ABI SIGNATURE**, because it is part of the wire: a member with two ways to be called at one id could otherwise have its typed layout move while `fk_api_sig_*` stayed put, which is exactly the class that digest exists for. It is empty for every member that has none, so no existing member's line in the digest moved.
+
+#### What it is worth, measured on the shipped path
+
+`scratchpad/r2/bench.py`, `scratchpad/r2/harness.lua`, output in `scratchpad/r2/RESULTS.txt`. The real `runtime/lua/fk_abi.lua` against the real generated `sig` for `LuaGuiElement::add`, `M.call` against `M.call_typed`, one spec written both ways outside the timed loop. This is a stronger instrument than 4b's, which measured prototypes of two encodings because the feature did not exist.
+
+| corpus | dyn call | typed call | | decode only |
+|---|--:|--:|--:|--:|
+| the audited GUI row: type, name, caption, style, tooltip | 15,884 ns | **11,680** | **0.735×** | 0.761× |
+| the same five fields with nothing union-typed: type, name, style, enabled, index | 20,744 ns | **8,273** | **0.399×** | 0.347× |
+
+**The range is wide and the reason is stateable: a shared parameter whose declared type is a UNION stays a tier-2 slot INSIDE the block.** `add`'s `caption` and `tooltip` are `LocalisedString`s (a string or an array), so two of five fields cost what they cost before and only three become `(ptr, len)`. That is why the GUI corpus lands at 1.36× where the all-flat one reaches 2.51×. 4b predicted 3.3× from a flat spec of five plain strings, which `add`'s shared parameters do not provide; the measured pair brackets it.
+
+**One row of that table was counter-intuitive and turned into an ablation.** The all-flat corpus's DYN leg is dearer than the mixed one — 18,787 ns against 13,329 — which reverses the expectation that a bool and a number cost less than two strings. Measured directly, a five-pair map of numbers decodes at **12,488 ns against 9,864** for one of short strings: **a tier-2 number is a double by construction**, so `read_dyn` reads it with `ldf64`, which in emitted Lua is a two-word load plus a `string.pack`/`string.unpack` round trip, where a six-byte string takes `read_string`'s `n < 8` fast path. Tier 2 has no cheap way to carry a small integer, and a typed block gives the same field its declared width — one `ld32` for a `u32`, one `ld8` for a bool. **So the block buys more than the absence of key strings.**
+
+The oracle caveat applies and points one way: `bin/lua52f` reads a Lua table 4-6× faster than Factorio does and both legs are table-dominated, so the ratio is the conservative half. The absolute nanoseconds are not a game figure.
+
+#### The residual, stated
+
+A shape-B union (one class plus scalar identifiers) collapses to a HANDLE in a method parameter, which `canonicalUnion`'s header accepts in as many words. So `create_entity`'s `force` is an `Object` in the typed block and a guest naming a force by string uses `extra`. Nothing is unreachable: the tier-2 form still takes anything, and the tail takes anything the block cannot say.
+
+#### And the reusability the batched form needs
+
+`agents/drafts/r4b-batched-gui-add.md` measures that `fk.batch_add`'s spec block and this one are **the same artifact**, and warns that two shapes for one member would be this repo's most-repeated failure silently. This block is that artifact: `LayoutStruct`'s ordinary output, `(ptr, len)` strings, presence bytes where `Placed.HasOffset` puts them. A batch is `count` copies of it plus a string table and a parent column, and 4b's own note says the residual is then ~250 lines rather than ~600. Nothing here forecloses it.
+
 ### A dictionary field inside a struct — and it is a SLICE of pairs
 
 `goStructs.add` took scalars, structs and arrays, and one refusal took three things down with it: the **5 deferred event payloads** (`on_built_entity`, `on_robot_built_entity`, `on_space_platform_built_entity`, `script_raised_revive`, `on_research_cancelled` — all blocked on `tags`, which is `dictionary[string → any]`), `MapGenSettings` and therefore `create_surface`'s optional argument, and 12 members blocked by a struct blocked by one of those.

@@ -1,0 +1,22 @@
+=== anti-vacuity: both paths ran, and the two decodes agree ===
+add calls: 2
+mixed keys: dyn 5, typed 5
+flat keys: dyn 5, typed 5
+targsize: 248  argsize: 16
+
+=== ONE GUI ELEMENT SPEC, TWO WIRE FORMS, THROUGH THE SHIPPED PATH ===
+  floor (a plain Lua call)        17.9 ns   (A/A 18 and 18 ns, spread 2.7% -- this run's resolution)
+  leg                ns/element  vs call_dyn  vs hand Lua
+  lua_add                 178.7       0.011x         1.0x
+  call_dyn              15883.5       1.000x        88.9x
+  call_typed            11679.6       0.735x        65.4x
+  decode_dyn            13328.9       0.839x        74.6x
+  decode_typed          10136.7       0.638x        56.7x
+  call_dyn_flat         20744.2       1.306x       116.1x
+  call_typed_flat        8272.9       0.521x        46.3x
+  decode_dyn_flat       18787.1       1.183x       105.1x
+  decode_typed_flat       6515.6       0.410x        36.5x
+  decode_dyn_strvals       9863.5       0.621x        55.2x
+  decode_dyn_numvals      12487.6       0.786x        69.9x
+
+NOISE: the A/A spread is 2.7%. A ratio inside it is not a measurement.

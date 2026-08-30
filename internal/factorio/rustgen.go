@@ -49,6 +49,9 @@ type RustBindings struct {
 	// members returning a container. Separate from Emitted, which counts
 	// MEMBERS bound: this is a second binding over one already counted.
 	IntoVariants int
+	// TypedVariants is gogen.go's, mirrored: the `<name>_typed` bindings over a
+	// member whose parameter table is a discriminated union.
+	TypedVariants int
 	// DynValueStructs is gogen.go's, mirrored: the generated structs that are a
 	// box around one tier-2 value and got typed readers. Counted in both
 	// because two backends walking one Report is exactly the assumption AD5
@@ -424,6 +427,18 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 				out.IntoVariants++
 				bound[cls][iname] = isig
 			}
+
+			// AND THE TYPED-ARGUMENT VARIANT, for a member whose parameter table
+			// is a discriminated union. Same member id, same returns, and an
+			// argument block that is a tier-1 struct plus one tier-2 slot rather
+			// than one tier-2 map.
+			tsrc, tname, tsig, tok := rustMemberTyped(structs, typeName, m)
+			if tok && !seen[tname] {
+				seen[tname] = true
+				w("%s", tsrc)
+				out.TypedVariants++
+				bound[cls][tname] = tsig
+			}
 		}
 		if !global {
 			w("}\n")
@@ -767,7 +782,7 @@ pub fn %s() -> u32 {
 
 // rustMember renders one member, or reports why it could not.
 func rustMember(g *rustStructs, typeName string, m Member) (src, name string, sig rustSig, why string, ok bool) {
-	return rustMemberVariant(g, typeName, m, false)
+	return rustMemberVariant(g, typeName, m, false, false)
 }
 
 // rustMemberInto renders the destination-vector variant for a member returning a
@@ -785,11 +800,24 @@ func rustMember(g *rustStructs, typeName string, m Member) (src, name string, si
 // entities. That is the same rule as Go's `dst[:0]` and it exists for the same
 // reason: a stale container is a wrong answer that looks like a right one.
 func rustMemberInto(g *rustStructs, typeName string, m Member) (src, name string, sig rustSig, ok bool) {
-	src, name, sig, _, ok = rustMemberVariant(g, typeName, m, true)
+	src, name, sig, _, ok = rustMemberVariant(g, typeName, m, true, false)
 	return
 }
 
-func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (src, name string, sig rustSig, why string, ok bool) {
+// rustMemberTyped renders the TYPED-ARGUMENT variant, or reports that this
+// member has no second argument list. gogen.go's goMemberTyped is the twin and
+// carries the argument; the short form is that this is the ordinary member body
+// over a substituted Args and a different import.
+func rustMemberTyped(g *rustStructs, typeName string, m Member) (src, name string, sig rustSig, ok bool) {
+	if len(m.TypedArgs) == 0 {
+		return "", "", rustSig{}, false
+	}
+	m.Args = m.TypedArgs
+	src, name, sig, _, ok = rustMemberVariant(g, typeName, m, false, true)
+	return
+}
+
+func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bool) (src, name string, sig rustSig, why string, ok bool) {
 	args, rets, err := m.blocks()
 	if err != nil {
 		return "", "", sig, "signature has no memory layout", false
@@ -916,6 +944,12 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 	if r, ok := memberRename[MemberKey(m)]; ok && !into && name == r.WasRust {
 		name = r.Rust
 	}
+	// <name>_typed, beside <name> rather than instead of it: the tier-2 form is
+	// what makes these members reachable at all and a guest already using one
+	// keeps compiling.
+	if typed {
+		name += "_typed"
+	}
 	if into {
 		name += "_into"
 	}
@@ -1035,6 +1069,13 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 	// three overlapping rules (optType, paramType, the Into destination) and
 	// stating them twice is how the two copies drift.
 	sig = rustSig{Params: params, Args: callArgs, RetType: ret}
+	if typed {
+		w("    /// `%s` with its SHARED parameters spelled out instead of\n", rustName(m.Name))
+		w("    /// hand-built as tier-2 keys. Same member, same result; the\n")
+		w("    /// variant tail goes in `extra`, whose keys are applied over the\n")
+		w("    /// block, and `None` means there is no tail. The block crosses as\n")
+		w("    /// a flat struct, which the host reads about 3x faster.\n")
+	}
 	if into {
 		w("    /// `%s` writing into `dst`, reusing its allocation rather than\n", rustName(m.Name))
 		w("    /// making a fresh one. `dst` is cleared first, so it is empty on\n")
@@ -1188,7 +1229,11 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 	if m.Kind == MemberGlobalFunc {
 		recv = "0"
 	}
-	w("        let st = unsafe { fk_call(%s, %d, %s, %s) };\n", recv, m.ID, ap, rp)
+	call := "fk_call"
+	if typed {
+		call = "fk_call_typed"
+	}
+	w("        let st = unsafe { %s(%s, %d, %s, %s) };\n", call, recv, m.ID, ap, rp)
 	w("        if st != 0 {\n            return Err(Status(st));\n        }\n")
 
 	// ONE DECODE PER RETURN FIELD, into v0, v1, ... An absent optional must not

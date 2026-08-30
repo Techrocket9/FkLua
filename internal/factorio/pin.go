@@ -189,8 +189,22 @@ func APISignature(a *API) string {
 			fmt.Fprintf(h, "%d\t%s\t%s\t%d\tERR %v\n", m.ID, m.Class, m.Name, m.Kind, err)
 			continue
 		}
-		fmt.Fprintf(h, "%d\t%s\t%s\t%d\t%s\t%s\n",
-			m.ID, m.Class, m.Name, m.Kind, args.LuaTable(), rets.LuaTable())
+		// THE TYPED BLOCK IS PART OF THE WIRE and therefore part of the digest.
+		// A member with a second, typed argument list has two ways to be called
+		// at one id, and a guest built against one layout of it packaged with a
+		// table carrying another would misread the block silently -- which is
+		// exactly the class this digest exists to name. Empty for every member
+		// that has none, so no existing member's line moves.
+		targs, _, terr := m.typedBlock()
+		tsig := ""
+		switch {
+		case terr != nil:
+			tsig = fmt.Sprintf("ERR %v", terr)
+		case len(m.TypedArgs) > 0:
+			tsig = targs.LuaTable()
+		}
+		fmt.Fprintf(h, "%d\t%s\t%s\t%d\t%s\t%s\t%s\n",
+			m.ID, m.Class, m.Name, m.Kind, args.LuaTable(), rets.LuaTable(), tsig)
 	}
 	for _, e := range ev.Events {
 		blk, err := LayoutStruct(e.Fields)

@@ -9,6 +9,15 @@ import "unsafe"
 //go:wasmimport fk call
 func hostCall(handle, member, argp, retp uint32) uint32
 
+// hostCallTyped is the same dispatch over a TYPED argument block: same handle,
+// same member id, same return block, and an argument block laid out as a tier-1
+// struct plus one optional tier-2 slot instead of one tier-2 map. Only a member
+// whose parameter table is a discriminated union has one -- see the <Name>Typed
+// bindings below.
+//
+//go:wasmimport fk call_typed
+func hostCallTyped(handle, member, argp, retp uint32) uint32
+
 //go:wasmimport fk retain
 func hostRetain(handle uint32) uint32
 
@@ -1002,7 +1011,7 @@ func fkAPIPin() {}
 // Language-independent: a Rust guest generated from this description
 // carries the same name.
 //
-//go:wasmexport fk_api_sig_ed025ff06828
+//go:wasmexport fk_api_sig_be51c0c62aca
 func fkAPISig() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
@@ -5727,6 +5736,26 @@ func (o LuaControl) SetGuiArrow(args Value) error {
 	a := (*[16]byte)(block(16))
 	writeDyn(&a[0], args)
 	if st := hostCall(o.h, 328, ptr(&a[0]), 0); st != 0 {
+		return Status(st)
+	}
+	return nil
+}
+
+// SetGuiArrowTyped is SetGuiArrow with its SHARED parameters spelled out instead of
+// hand-built as tier-2 keys. Same member, same result; the variant
+// tail goes in extra, whose keys are applied over the block, and a
+// nil extra means there is no tail. The block crosses as a flat
+// struct, which the host reads about 3x faster than the map form.
+func (o LuaControl) SetGuiArrowTyped(args LuaControlSetGuiArrowArgs, extra *Value) error {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[32]byte)(block(32))
+	args.encodeAt(&a[0])
+	if extra != nil {
+		a[12] = 1
+		writeDyn(&a[16], (*extra))
+	}
+	if st := hostCallTyped(o.h, 328, ptr(&a[0]), 0); st != 0 {
 		return Status(st)
 	}
 	return nil
@@ -29663,6 +29692,28 @@ func (o LuaGuiElement) Add(args Value) (Object, error) {
 	r := (*[4]byte)(block(4))
 	writeDyn(&a[0], args)
 	if st := hostCall(o.h, 1932, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// AddTyped is Add with its SHARED parameters spelled out instead of
+// hand-built as tier-2 keys. Same member, same result; the variant
+// tail goes in extra, whose keys are applied over the block, and a
+// nil extra means there is no tail. The block crosses as a flat
+// struct, which the host reads about 3x faster than the map form.
+func (o LuaGuiElement) AddTyped(args LuaGuiElementAddArgs, extra *Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[248]byte)(block(248))
+	r := (*[4]byte)(block(4))
+	args.encodeAt(&a[0])
+	if extra != nil {
+		a[224] = 1
+		writeDyn(&a[232], (*extra))
+	}
+	if st := hostCallTyped(o.h, 1932, ptr(&a[0]), ptr(&r[0])); st != 0 {
 		return Object{}, Status(st)
 	}
 	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
@@ -56840,6 +56891,32 @@ func (o LuaSurface) CreateEntity(args Value) (*Object, error) {
 	return v0, nil
 }
 
+// CreateEntityTyped is CreateEntity with its SHARED parameters spelled out instead of
+// hand-built as tier-2 keys. Same member, same result; the variant
+// tail goes in extra, whose keys are applied over the block, and a
+// nil extra means there is no tail. The block crosses as a flat
+// struct, which the host reads about 3x faster than the map form.
+func (o LuaSurface) CreateEntityTyped(args LuaSurfaceCreateEntityArgs, extra *Value) (*Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[224]byte)(block(224))
+	r := (*[8]byte)(block(8))
+	args.encodeAt(&a[0])
+	if extra != nil {
+		a[200] = 1
+		writeDyn(&a[208], (*extra))
+	}
+	if st := hostCallTyped(o.h, 3800, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return nil, Status(st)
+	}
+	var v0 *Object
+	if r[0] != 0 {
+		t0 := Object{*(*uint32)(unsafe.Pointer(&r[4]))}
+		v0 = &t0
+	}
+	return v0, nil
+}
+
 func (o LuaSurface) CreateGlobalElectricNetwork() error {
 	if st := hostCall(o.h, 3801, 0, 0); st != 0 {
 		return Status(st)
@@ -56865,6 +56942,32 @@ func (o LuaSurface) CreateSegmentedUnit(args Value) (*Object, error) {
 	r := (*[8]byte)(block(8))
 	writeDyn(&a[0], args)
 	if st := hostCall(o.h, 3803, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return nil, Status(st)
+	}
+	var v0 *Object
+	if r[0] != 0 {
+		t0 := Object{*(*uint32)(unsafe.Pointer(&r[4]))}
+		v0 = &t0
+	}
+	return v0, nil
+}
+
+// CreateSegmentedUnitTyped is CreateSegmentedUnit with its SHARED parameters spelled out instead of
+// hand-built as tier-2 keys. Same member, same result; the variant
+// tail goes in extra, whose keys are applied over the block, and a
+// nil extra means there is no tail. The block crosses as a flat
+// struct, which the host reads about 3x faster than the map form.
+func (o LuaSurface) CreateSegmentedUnitTyped(args LuaSurfaceCreateSegmentedUnitArgs, extra *Value) (*Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[64]byte)(block(64))
+	r := (*[8]byte)(block(8))
+	args.encodeAt(&a[0])
+	if extra != nil {
+		a[40] = 1
+		writeDyn(&a[48], (*extra))
+	}
+	if st := hostCallTyped(o.h, 3803, ptr(&a[0]), ptr(&r[0])); st != 0 {
 		return nil, Status(st)
 	}
 	var v0 *Object
@@ -65776,6 +65879,10 @@ func (o LuaEntity) SetGuiArrow(args Value) error {
 	return LuaControl{o.Object}.SetGuiArrow(args)
 }
 
+func (o LuaEntity) SetGuiArrowTyped(args LuaControlSetGuiArrowArgs, extra *Value) error {
+	return LuaControl{o.Object}.SetGuiArrowTyped(args, extra)
+}
+
 func (o LuaEntity) SetMiningState(value LuaControlMiningStateValue) error {
 	return LuaControl{o.Object}.SetMiningState(value)
 }
@@ -68296,6 +68403,10 @@ func (o LuaPlayer) SetForce(value Object) error {
 
 func (o LuaPlayer) SetGuiArrow(args Value) error {
 	return LuaControl{o.Object}.SetGuiArrow(args)
+}
+
+func (o LuaPlayer) SetGuiArrowTyped(args LuaControlSetGuiArrowArgs, extra *Value) error {
+	return LuaControl{o.Object}.SetGuiArrowTyped(args, extra)
 }
 
 func (o LuaPlayer) SetMiningState(value LuaControlMiningStateValue) error {
@@ -72170,6 +72281,40 @@ func (v LuaControlCancelCraftingArgs) ToValue() Value {
 	kv := make([]KeyValue, 0, 2)
 	kv = append(kv, KeyValue{Key: OfString("index"), Val: OfNumber(float64(v.Index))})
 	kv = append(kv, KeyValue{Key: OfString("count"), Val: OfNumber(float64(v.Count))})
+	return OfMap(kv...)
+}
+
+// LuaControlSetGuiArrowArgs mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type LuaControlSetGuiArrowArgs struct {
+	Margin uint32
+	Type   string
+}
+
+func (v LuaControlSetGuiArrowArgs) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 12)
+	for i := range d {
+		d[i] = 0
+	}
+	*(*uint32)(unsafe.Pointer(&d[0])) = v.Margin
+	putStr(&d[4], v.Type)
+}
+
+func decodeLuaControlSetGuiArrowArgs(p *byte) LuaControlSetGuiArrowArgs {
+	var v LuaControlSetGuiArrowArgs
+	d := unsafe.Slice(p, 12)
+	v.Margin = *(*uint32)(unsafe.Pointer(&d[0]))
+	v.Type = getStr(&d[4])
+	return v
+}
+
+// ToValue renders LuaControlSetGuiArrowArgs as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v LuaControlSetGuiArrowArgs) ToValue() Value {
+	kv := make([]KeyValue, 0, 2)
+	kv = append(kv, KeyValue{Key: OfString("margin"), Val: OfNumber(float64(v.Margin))})
+	kv = append(kv, KeyValue{Key: OfString("type"), Val: OfString(v.Type)})
 	return OfMap(kv...)
 }
 
@@ -79638,6 +79783,280 @@ func (v AsteroidMapSettings) ToValue() Value {
 	return OfMap(kv...)
 }
 
+// LuaGuiElementAddArgs mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type LuaGuiElementAddArgs struct {
+	Type                      string
+	Name                      *string
+	Caption                   *Value
+	Tooltip                   *Value
+	ElemTooltip               *ElemID
+	Enabled                   *bool
+	Visible                   *bool
+	Locked                    *bool
+	IgnoredByInteraction      *bool
+	Style                     *string
+	Tags                      []EntryStringValue
+	Index                     *uint32
+	Anchor                    *GuiAnchor
+	GameControllerInteraction *uint32
+	RaiseHoverEvents          *bool
+}
+
+func (v LuaGuiElementAddArgs) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 224)
+	for i := range d {
+		d[i] = 0
+	}
+	putStr(&d[0], v.Type)
+	if v.Name != nil {
+		d[8] = 1
+		putStr(&d[12], (*v.Name))
+	}
+	if v.Caption != nil {
+		d[20] = 1
+		writeDyn(&d[24], (*v.Caption))
+	}
+	if v.Tooltip != nil {
+		d[40] = 1
+		writeDyn(&d[48], (*v.Tooltip))
+	}
+	if v.ElemTooltip != nil {
+		d[64] = 1
+		(*v.ElemTooltip).encodeAt(&d[68])
+	}
+	if v.Enabled != nil {
+		d[108] = 1
+		*(*bool)(unsafe.Pointer(&d[109])) = (*v.Enabled)
+	}
+	if v.Visible != nil {
+		d[110] = 1
+		*(*bool)(unsafe.Pointer(&d[111])) = (*v.Visible)
+	}
+	if v.Locked != nil {
+		d[112] = 1
+		*(*bool)(unsafe.Pointer(&d[113])) = (*v.Locked)
+	}
+	if v.IgnoredByInteraction != nil {
+		d[114] = 1
+		*(*bool)(unsafe.Pointer(&d[115])) = (*v.IgnoredByInteraction)
+	}
+	if v.Style != nil {
+		d[116] = 1
+		putStr(&d[120], (*v.Style))
+	}
+	if v.Tags != nil {
+		d[128] = 1
+	}
+	pTags := fkAlloc(uint32(len(v.Tags)) * 24)
+	for i := range v.Tags {
+		e := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pTags)+uintptr(i)*24)), 24)
+		putStr(&e[0], v.Tags[i].Key)
+		writeDyn(&e[8], v.Tags[i].Val)
+	}
+	*(*uint32)(unsafe.Pointer(&d[132])) = pTags
+	*(*uint32)(unsafe.Pointer(&d[136])) = uint32(len(v.Tags))
+	if v.Index != nil {
+		d[140] = 1
+		*(*uint32)(unsafe.Pointer(&d[144])) = (*v.Index)
+	}
+	if v.Anchor != nil {
+		d[148] = 1
+		(*v.Anchor).encodeAt(&d[152])
+	}
+	if v.GameControllerInteraction != nil {
+		d[208] = 1
+		*(*uint32)(unsafe.Pointer(&d[212])) = (*v.GameControllerInteraction)
+	}
+	if v.RaiseHoverEvents != nil {
+		d[216] = 1
+		*(*bool)(unsafe.Pointer(&d[217])) = (*v.RaiseHoverEvents)
+	}
+}
+
+func decodeLuaGuiElementAddArgs(p *byte) LuaGuiElementAddArgs {
+	var v LuaGuiElementAddArgs
+	d := unsafe.Slice(p, 224)
+	v.Type = getStr(&d[0])
+	if d[8] != 0 {
+		x := getStr(&d[12])
+		v.Name = &x
+	}
+	if d[20] != 0 {
+		x := readDyn(&d[24])
+		v.Caption = &x
+	}
+	if d[40] != 0 {
+		x := readDyn(&d[48])
+		v.Tooltip = &x
+	}
+	if d[64] != 0 {
+		x := decodeElemID(&d[68])
+		v.ElemTooltip = &x
+	}
+	if d[108] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[109]))
+		v.Enabled = &x
+	}
+	if d[110] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[111]))
+		v.Visible = &x
+	}
+	if d[112] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[113]))
+		v.Locked = &x
+	}
+	if d[114] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[115]))
+		v.IgnoredByInteraction = &x
+	}
+	if d[116] != 0 {
+		x := getStr(&d[120])
+		v.Style = &x
+	}
+	if d[128] != 0 {
+		{
+			base := uintptr(*(*uint32)(unsafe.Pointer(&d[132])))
+			n := int(*(*uint32)(unsafe.Pointer(&d[136])))
+			v.Tags = make([]EntryStringValue, n)
+			for i := 0; i < n; i++ {
+				e := unsafe.Slice((*byte)(unsafe.Pointer(base+uintptr(i)*24)), 24)
+				v.Tags[i] = EntryStringValue{Key: getStr(&e[0]), Val: readDyn(&e[8])}
+			}
+		}
+	}
+	if d[140] != 0 {
+		x := *(*uint32)(unsafe.Pointer(&d[144]))
+		v.Index = &x
+	}
+	if d[148] != 0 {
+		x := decodeGuiAnchor(&d[152])
+		v.Anchor = &x
+	}
+	if d[208] != 0 {
+		x := *(*uint32)(unsafe.Pointer(&d[212]))
+		v.GameControllerInteraction = &x
+	}
+	if d[216] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[217]))
+		v.RaiseHoverEvents = &x
+	}
+	return v
+}
+
+// ToValue renders LuaGuiElementAddArgs as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v LuaGuiElementAddArgs) ToValue() Value {
+	kv := make([]KeyValue, 0, 15)
+	kv = append(kv, KeyValue{Key: OfString("type"), Val: OfString(v.Type)})
+	if v.Name != nil {
+		kv = append(kv, KeyValue{Key: OfString("name"), Val: OfString((*v.Name))})
+	}
+	if v.Caption != nil {
+		kv = append(kv, KeyValue{Key: OfString("caption"), Val: (*v.Caption)})
+	}
+	if v.Tooltip != nil {
+		kv = append(kv, KeyValue{Key: OfString("tooltip"), Val: (*v.Tooltip)})
+	}
+	if v.ElemTooltip != nil {
+		kv = append(kv, KeyValue{Key: OfString("elem_tooltip"), Val: (*v.ElemTooltip).ToValue()})
+	}
+	if v.Enabled != nil {
+		kv = append(kv, KeyValue{Key: OfString("enabled"), Val: OfBool((*v.Enabled))})
+	}
+	if v.Visible != nil {
+		kv = append(kv, KeyValue{Key: OfString("visible"), Val: OfBool((*v.Visible))})
+	}
+	if v.Locked != nil {
+		kv = append(kv, KeyValue{Key: OfString("locked"), Val: OfBool((*v.Locked))})
+	}
+	if v.IgnoredByInteraction != nil {
+		kv = append(kv, KeyValue{Key: OfString("ignored_by_interaction"), Val: OfBool((*v.IgnoredByInteraction))})
+	}
+	if v.Style != nil {
+		kv = append(kv, KeyValue{Key: OfString("style"), Val: OfString((*v.Style))})
+	}
+	if v.Tags != nil {
+		m := make([]KeyValue, len(v.Tags))
+		for i := range v.Tags {
+			m[i] = KeyValue{Key: OfString(v.Tags[i].Key), Val: v.Tags[i].Val}
+		}
+		kv = append(kv, KeyValue{Key: OfString("tags"), Val: OfMap(m...)})
+	}
+	if v.Index != nil {
+		kv = append(kv, KeyValue{Key: OfString("index"), Val: OfNumber(float64((*v.Index)))})
+	}
+	if v.Anchor != nil {
+		kv = append(kv, KeyValue{Key: OfString("anchor"), Val: (*v.Anchor).ToValue()})
+	}
+	if v.GameControllerInteraction != nil {
+		kv = append(kv, KeyValue{Key: OfString("game_controller_interaction"), Val: OfNumber(float64((*v.GameControllerInteraction)))})
+	}
+	if v.RaiseHoverEvents != nil {
+		kv = append(kv, KeyValue{Key: OfString("raise_hover_events"), Val: OfBool((*v.RaiseHoverEvents))})
+	}
+	return OfMap(kv...)
+}
+
+// ElemID mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type ElemID struct {
+	Type       string
+	Name       string
+	Quality    *string
+	SignalType *string
+}
+
+func (v ElemID) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 40)
+	for i := range d {
+		d[i] = 0
+	}
+	putStr(&d[0], v.Type)
+	putStr(&d[8], v.Name)
+	if v.Quality != nil {
+		d[16] = 1
+		putStr(&d[20], (*v.Quality))
+	}
+	if v.SignalType != nil {
+		d[28] = 1
+		putStr(&d[32], (*v.SignalType))
+	}
+}
+
+func decodeElemID(p *byte) ElemID {
+	var v ElemID
+	d := unsafe.Slice(p, 40)
+	v.Type = getStr(&d[0])
+	v.Name = getStr(&d[8])
+	if d[16] != 0 {
+		x := getStr(&d[20])
+		v.Quality = &x
+	}
+	if d[28] != 0 {
+		x := getStr(&d[32])
+		v.SignalType = &x
+	}
+	return v
+}
+
+// ToValue renders ElemID as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v ElemID) ToValue() Value {
+	kv := make([]KeyValue, 0, 4)
+	kv = append(kv, KeyValue{Key: OfString("type"), Val: OfString(v.Type)})
+	kv = append(kv, KeyValue{Key: OfString("name"), Val: OfString(v.Name)})
+	if v.Quality != nil {
+		kv = append(kv, KeyValue{Key: OfString("quality"), Val: OfString((*v.Quality))})
+	}
+	if v.SignalType != nil {
+		kv = append(kv, KeyValue{Key: OfString("signal_type"), Val: OfString((*v.SignalType))})
+	}
+	return OfMap(kv...)
+}
+
 // GuiAnchor mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type GuiAnchor struct {
@@ -79733,64 +80152,6 @@ func (v GuiAnchor) ToValue() Value {
 	}
 	if v.GhostMode != nil {
 		kv = append(kv, KeyValue{Key: OfString("ghost_mode"), Val: OfString((*v.GhostMode))})
-	}
-	return OfMap(kv...)
-}
-
-// ElemID mirrors the API type of the same name, laid out to match the
-// wire exactly: fields at fixed offsets, an optional as a pointer.
-type ElemID struct {
-	Type       string
-	Name       string
-	Quality    *string
-	SignalType *string
-}
-
-func (v ElemID) encodeAt(p *byte) {
-	d := unsafe.Slice(p, 40)
-	for i := range d {
-		d[i] = 0
-	}
-	putStr(&d[0], v.Type)
-	putStr(&d[8], v.Name)
-	if v.Quality != nil {
-		d[16] = 1
-		putStr(&d[20], (*v.Quality))
-	}
-	if v.SignalType != nil {
-		d[28] = 1
-		putStr(&d[32], (*v.SignalType))
-	}
-}
-
-func decodeElemID(p *byte) ElemID {
-	var v ElemID
-	d := unsafe.Slice(p, 40)
-	v.Type = getStr(&d[0])
-	v.Name = getStr(&d[8])
-	if d[16] != 0 {
-		x := getStr(&d[20])
-		v.Quality = &x
-	}
-	if d[28] != 0 {
-		x := getStr(&d[32])
-		v.SignalType = &x
-	}
-	return v
-}
-
-// ToValue renders ElemID as the tier-2 table the engine expects, so a
-// union-typed field can be filled from the typed struct instead of from
-// hand-written key strings. An absent optional is omitted.
-func (v ElemID) ToValue() Value {
-	kv := make([]KeyValue, 0, 4)
-	kv = append(kv, KeyValue{Key: OfString("type"), Val: OfString(v.Type)})
-	kv = append(kv, KeyValue{Key: OfString("name"), Val: OfString(v.Name)})
-	if v.Quality != nil {
-		kv = append(kv, KeyValue{Key: OfString("quality"), Val: OfString((*v.Quality))})
-	}
-	if v.SignalType != nil {
-		kv = append(kv, KeyValue{Key: OfString("signal_type"), Val: OfString((*v.SignalType))})
 	}
 	return OfMap(kv...)
 }
@@ -88700,6 +89061,425 @@ func (v LuaSurfaceCreateEntitiesFromBlueprintStringArgs) ToValue() Value {
 	return OfMap(kv...)
 }
 
+// LuaSurfaceCreateEntityArgs mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type LuaSurfaceCreateEntityArgs struct {
+	Name                     Value
+	Position                 MapPosition
+	Direction                *uint32
+	Mirror                   *bool
+	Quality                  *Object
+	Force                    *Object
+	Target                   *Value
+	Source                   *Value
+	Cause                    *Value
+	SnapToGrid               *bool
+	FastReplace              *bool
+	UndoIndex                *uint32
+	Player                   *Object
+	Character                *Object
+	Spill                    *bool
+	RaiseBuilt               *bool
+	CreateBuildEffectSmoke   *bool
+	SpawnDecorations         *bool
+	MoveStuckPlayers         *bool
+	Item                     *Object
+	PreserveGhostsAndCorpses *bool
+	RegisterPlant            *bool
+	BurnerFuelInventory      *BlueprintInventoryWithFilters
+}
+
+func (v LuaSurfaceCreateEntityArgs) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 200)
+	for i := range d {
+		d[i] = 0
+	}
+	writeDyn(&d[0], v.Name)
+	v.Position.encodeAt(&d[16])
+	if v.Direction != nil {
+		d[32] = 1
+		*(*uint32)(unsafe.Pointer(&d[36])) = (*v.Direction)
+	}
+	if v.Mirror != nil {
+		d[40] = 1
+		*(*bool)(unsafe.Pointer(&d[41])) = (*v.Mirror)
+	}
+	if v.Quality != nil {
+		d[42] = 1
+		*(*uint32)(unsafe.Pointer(&d[44])) = (*v.Quality).h
+	}
+	if v.Force != nil {
+		d[48] = 1
+		*(*uint32)(unsafe.Pointer(&d[52])) = (*v.Force).h
+	}
+	if v.Target != nil {
+		d[56] = 1
+		writeDyn(&d[64], (*v.Target))
+	}
+	if v.Source != nil {
+		d[80] = 1
+		writeDyn(&d[88], (*v.Source))
+	}
+	if v.Cause != nil {
+		d[104] = 1
+		writeDyn(&d[112], (*v.Cause))
+	}
+	if v.SnapToGrid != nil {
+		d[128] = 1
+		*(*bool)(unsafe.Pointer(&d[129])) = (*v.SnapToGrid)
+	}
+	if v.FastReplace != nil {
+		d[130] = 1
+		*(*bool)(unsafe.Pointer(&d[131])) = (*v.FastReplace)
+	}
+	if v.UndoIndex != nil {
+		d[132] = 1
+		*(*uint32)(unsafe.Pointer(&d[136])) = (*v.UndoIndex)
+	}
+	if v.Player != nil {
+		d[140] = 1
+		*(*uint32)(unsafe.Pointer(&d[144])) = (*v.Player).h
+	}
+	if v.Character != nil {
+		d[148] = 1
+		*(*uint32)(unsafe.Pointer(&d[152])) = (*v.Character).h
+	}
+	if v.Spill != nil {
+		d[156] = 1
+		*(*bool)(unsafe.Pointer(&d[157])) = (*v.Spill)
+	}
+	if v.RaiseBuilt != nil {
+		d[158] = 1
+		*(*bool)(unsafe.Pointer(&d[159])) = (*v.RaiseBuilt)
+	}
+	if v.CreateBuildEffectSmoke != nil {
+		d[160] = 1
+		*(*bool)(unsafe.Pointer(&d[161])) = (*v.CreateBuildEffectSmoke)
+	}
+	if v.SpawnDecorations != nil {
+		d[162] = 1
+		*(*bool)(unsafe.Pointer(&d[163])) = (*v.SpawnDecorations)
+	}
+	if v.MoveStuckPlayers != nil {
+		d[164] = 1
+		*(*bool)(unsafe.Pointer(&d[165])) = (*v.MoveStuckPlayers)
+	}
+	if v.Item != nil {
+		d[166] = 1
+		*(*uint32)(unsafe.Pointer(&d[168])) = (*v.Item).h
+	}
+	if v.PreserveGhostsAndCorpses != nil {
+		d[172] = 1
+		*(*bool)(unsafe.Pointer(&d[173])) = (*v.PreserveGhostsAndCorpses)
+	}
+	if v.RegisterPlant != nil {
+		d[174] = 1
+		*(*bool)(unsafe.Pointer(&d[175])) = (*v.RegisterPlant)
+	}
+	if v.BurnerFuelInventory != nil {
+		d[176] = 1
+		(*v.BurnerFuelInventory).encodeAt(&d[180])
+	}
+}
+
+func decodeLuaSurfaceCreateEntityArgs(p *byte) LuaSurfaceCreateEntityArgs {
+	var v LuaSurfaceCreateEntityArgs
+	d := unsafe.Slice(p, 200)
+	v.Name = readDyn(&d[0])
+	v.Position = decodeMapPosition(&d[16])
+	if d[32] != 0 {
+		x := *(*uint32)(unsafe.Pointer(&d[36]))
+		v.Direction = &x
+	}
+	if d[40] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[41]))
+		v.Mirror = &x
+	}
+	if d[42] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[44]))}
+		v.Quality = &x
+	}
+	if d[48] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[52]))}
+		v.Force = &x
+	}
+	if d[56] != 0 {
+		x := readDyn(&d[64])
+		v.Target = &x
+	}
+	if d[80] != 0 {
+		x := readDyn(&d[88])
+		v.Source = &x
+	}
+	if d[104] != 0 {
+		x := readDyn(&d[112])
+		v.Cause = &x
+	}
+	if d[128] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[129]))
+		v.SnapToGrid = &x
+	}
+	if d[130] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[131]))
+		v.FastReplace = &x
+	}
+	if d[132] != 0 {
+		x := *(*uint32)(unsafe.Pointer(&d[136]))
+		v.UndoIndex = &x
+	}
+	if d[140] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[144]))}
+		v.Player = &x
+	}
+	if d[148] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[152]))}
+		v.Character = &x
+	}
+	if d[156] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[157]))
+		v.Spill = &x
+	}
+	if d[158] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[159]))
+		v.RaiseBuilt = &x
+	}
+	if d[160] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[161]))
+		v.CreateBuildEffectSmoke = &x
+	}
+	if d[162] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[163]))
+		v.SpawnDecorations = &x
+	}
+	if d[164] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[165]))
+		v.MoveStuckPlayers = &x
+	}
+	if d[166] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[168]))}
+		v.Item = &x
+	}
+	if d[172] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[173]))
+		v.PreserveGhostsAndCorpses = &x
+	}
+	if d[174] != 0 {
+		x := *(*bool)(unsafe.Pointer(&d[175]))
+		v.RegisterPlant = &x
+	}
+	if d[176] != 0 {
+		x := decodeBlueprintInventoryWithFilters(&d[180])
+		v.BurnerFuelInventory = &x
+	}
+	return v
+}
+
+// ToValue renders LuaSurfaceCreateEntityArgs as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v LuaSurfaceCreateEntityArgs) ToValue() Value {
+	kv := make([]KeyValue, 0, 23)
+	kv = append(kv, KeyValue{Key: OfString("name"), Val: v.Name})
+	kv = append(kv, KeyValue{Key: OfString("position"), Val: v.Position.ToValue()})
+	if v.Direction != nil {
+		kv = append(kv, KeyValue{Key: OfString("direction"), Val: OfNumber(float64((*v.Direction)))})
+	}
+	if v.Mirror != nil {
+		kv = append(kv, KeyValue{Key: OfString("mirror"), Val: OfBool((*v.Mirror))})
+	}
+	if v.Quality != nil {
+		kv = append(kv, KeyValue{Key: OfString("quality"), Val: OfObject((*v.Quality))})
+	}
+	if v.Force != nil {
+		kv = append(kv, KeyValue{Key: OfString("force"), Val: OfObject((*v.Force))})
+	}
+	if v.Target != nil {
+		kv = append(kv, KeyValue{Key: OfString("target"), Val: (*v.Target)})
+	}
+	if v.Source != nil {
+		kv = append(kv, KeyValue{Key: OfString("source"), Val: (*v.Source)})
+	}
+	if v.Cause != nil {
+		kv = append(kv, KeyValue{Key: OfString("cause"), Val: (*v.Cause)})
+	}
+	if v.SnapToGrid != nil {
+		kv = append(kv, KeyValue{Key: OfString("snap_to_grid"), Val: OfBool((*v.SnapToGrid))})
+	}
+	if v.FastReplace != nil {
+		kv = append(kv, KeyValue{Key: OfString("fast_replace"), Val: OfBool((*v.FastReplace))})
+	}
+	if v.UndoIndex != nil {
+		kv = append(kv, KeyValue{Key: OfString("undo_index"), Val: OfNumber(float64((*v.UndoIndex)))})
+	}
+	if v.Player != nil {
+		kv = append(kv, KeyValue{Key: OfString("player"), Val: OfObject((*v.Player))})
+	}
+	if v.Character != nil {
+		kv = append(kv, KeyValue{Key: OfString("character"), Val: OfObject((*v.Character))})
+	}
+	if v.Spill != nil {
+		kv = append(kv, KeyValue{Key: OfString("spill"), Val: OfBool((*v.Spill))})
+	}
+	if v.RaiseBuilt != nil {
+		kv = append(kv, KeyValue{Key: OfString("raise_built"), Val: OfBool((*v.RaiseBuilt))})
+	}
+	if v.CreateBuildEffectSmoke != nil {
+		kv = append(kv, KeyValue{Key: OfString("create_build_effect_smoke"), Val: OfBool((*v.CreateBuildEffectSmoke))})
+	}
+	if v.SpawnDecorations != nil {
+		kv = append(kv, KeyValue{Key: OfString("spawn_decorations"), Val: OfBool((*v.SpawnDecorations))})
+	}
+	if v.MoveStuckPlayers != nil {
+		kv = append(kv, KeyValue{Key: OfString("move_stuck_players"), Val: OfBool((*v.MoveStuckPlayers))})
+	}
+	if v.Item != nil {
+		kv = append(kv, KeyValue{Key: OfString("item"), Val: OfObject((*v.Item))})
+	}
+	if v.PreserveGhostsAndCorpses != nil {
+		kv = append(kv, KeyValue{Key: OfString("preserve_ghosts_and_corpses"), Val: OfBool((*v.PreserveGhostsAndCorpses))})
+	}
+	if v.RegisterPlant != nil {
+		kv = append(kv, KeyValue{Key: OfString("register_plant"), Val: OfBool((*v.RegisterPlant))})
+	}
+	if v.BurnerFuelInventory != nil {
+		kv = append(kv, KeyValue{Key: OfString("burner_fuel_inventory"), Val: (*v.BurnerFuelInventory).ToValue()})
+	}
+	return OfMap(kv...)
+}
+
+// BlueprintInventoryWithFilters mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type BlueprintInventoryWithFilters struct {
+	Bar     *uint16
+	Filters []BlueprintItemFilter
+}
+
+func (v BlueprintInventoryWithFilters) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 16)
+	for i := range d {
+		d[i] = 0
+	}
+	if v.Bar != nil {
+		d[0] = 1
+		*(*uint16)(unsafe.Pointer(&d[2])) = (*v.Bar)
+	}
+	if v.Filters != nil {
+		d[4] = 1
+	}
+	pFilters := fkAlloc(uint32(len(v.Filters)) * 48)
+	for i := range v.Filters {
+		e := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pFilters)+uintptr(i)*48)), 48)
+		v.Filters[i].encodeAt(&e[0])
+	}
+	*(*uint32)(unsafe.Pointer(&d[8])) = pFilters
+	*(*uint32)(unsafe.Pointer(&d[12])) = uint32(len(v.Filters))
+}
+
+func decodeBlueprintInventoryWithFilters(p *byte) BlueprintInventoryWithFilters {
+	var v BlueprintInventoryWithFilters
+	d := unsafe.Slice(p, 16)
+	if d[0] != 0 {
+		x := *(*uint16)(unsafe.Pointer(&d[2]))
+		v.Bar = &x
+	}
+	if d[4] != 0 {
+		{
+			base := uintptr(*(*uint32)(unsafe.Pointer(&d[8])))
+			n := int(*(*uint32)(unsafe.Pointer(&d[12])))
+			v.Filters = make([]BlueprintItemFilter, n)
+			for i := 0; i < n; i++ {
+				e := unsafe.Slice((*byte)(unsafe.Pointer(base+uintptr(i)*48)), 48)
+				v.Filters[i] = decodeBlueprintItemFilter(&e[0])
+			}
+		}
+	}
+	return v
+}
+
+// ToValue renders BlueprintInventoryWithFilters as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v BlueprintInventoryWithFilters) ToValue() Value {
+	kv := make([]KeyValue, 0, 2)
+	if v.Bar != nil {
+		kv = append(kv, KeyValue{Key: OfString("bar"), Val: OfNumber(float64((*v.Bar)))})
+	}
+	if v.Filters != nil {
+		a := make([]Value, len(v.Filters))
+		for i := range v.Filters {
+			a[i] = v.Filters[i].ToValue()
+		}
+		kv = append(kv, KeyValue{Key: OfString("filters"), Val: OfArray(a...)})
+	}
+	return OfMap(kv...)
+}
+
+// BlueprintItemFilter mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type BlueprintItemFilter struct {
+	Index      uint32
+	Name       *Value
+	Quality    *Object
+	Comparator *string
+}
+
+func (v BlueprintItemFilter) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 48)
+	for i := range d {
+		d[i] = 0
+	}
+	*(*uint32)(unsafe.Pointer(&d[0])) = v.Index
+	if v.Name != nil {
+		d[4] = 1
+		writeDyn(&d[8], (*v.Name))
+	}
+	if v.Quality != nil {
+		d[24] = 1
+		*(*uint32)(unsafe.Pointer(&d[28])) = (*v.Quality).h
+	}
+	if v.Comparator != nil {
+		d[32] = 1
+		putStr(&d[36], (*v.Comparator))
+	}
+}
+
+func decodeBlueprintItemFilter(p *byte) BlueprintItemFilter {
+	var v BlueprintItemFilter
+	d := unsafe.Slice(p, 48)
+	v.Index = *(*uint32)(unsafe.Pointer(&d[0]))
+	if d[4] != 0 {
+		x := readDyn(&d[8])
+		v.Name = &x
+	}
+	if d[24] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[28]))}
+		v.Quality = &x
+	}
+	if d[32] != 0 {
+		x := getStr(&d[36])
+		v.Comparator = &x
+	}
+	return v
+}
+
+// ToValue renders BlueprintItemFilter as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v BlueprintItemFilter) ToValue() Value {
+	kv := make([]KeyValue, 0, 4)
+	kv = append(kv, KeyValue{Key: OfString("index"), Val: OfNumber(float64(v.Index))})
+	if v.Name != nil {
+		kv = append(kv, KeyValue{Key: OfString("name"), Val: (*v.Name)})
+	}
+	if v.Quality != nil {
+		kv = append(kv, KeyValue{Key: OfString("quality"), Val: OfObject((*v.Quality))})
+	}
+	if v.Comparator != nil {
+		kv = append(kv, KeyValue{Key: OfString("comparator"), Val: OfString((*v.Comparator))})
+	}
+	return OfMap(kv...)
+}
+
 // LuaSurfaceCreateParticleArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCreateParticleArgs struct {
@@ -88747,6 +89527,72 @@ func (v LuaSurfaceCreateParticleArgs) ToValue() Value {
 	kv = append(kv, KeyValue{Key: OfString("height"), Val: OfNumber(float64(v.Height))})
 	kv = append(kv, KeyValue{Key: OfString("vertical_speed"), Val: OfNumber(float64(v.VerticalSpeed))})
 	kv = append(kv, KeyValue{Key: OfString("frame_speed"), Val: OfNumber(float64(v.FrameSpeed))})
+	return OfMap(kv...)
+}
+
+// LuaSurfaceCreateSegmentedUnitArgs mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type LuaSurfaceCreateSegmentedUnitArgs struct {
+	Name      Value
+	Quality   *Object
+	Force     *Object
+	Territory *Object
+}
+
+func (v LuaSurfaceCreateSegmentedUnitArgs) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 40)
+	for i := range d {
+		d[i] = 0
+	}
+	writeDyn(&d[0], v.Name)
+	if v.Quality != nil {
+		d[16] = 1
+		*(*uint32)(unsafe.Pointer(&d[20])) = (*v.Quality).h
+	}
+	if v.Force != nil {
+		d[24] = 1
+		*(*uint32)(unsafe.Pointer(&d[28])) = (*v.Force).h
+	}
+	if v.Territory != nil {
+		d[32] = 1
+		*(*uint32)(unsafe.Pointer(&d[36])) = (*v.Territory).h
+	}
+}
+
+func decodeLuaSurfaceCreateSegmentedUnitArgs(p *byte) LuaSurfaceCreateSegmentedUnitArgs {
+	var v LuaSurfaceCreateSegmentedUnitArgs
+	d := unsafe.Slice(p, 40)
+	v.Name = readDyn(&d[0])
+	if d[16] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[20]))}
+		v.Quality = &x
+	}
+	if d[24] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[28]))}
+		v.Force = &x
+	}
+	if d[32] != 0 {
+		x := Object{*(*uint32)(unsafe.Pointer(&d[36]))}
+		v.Territory = &x
+	}
+	return v
+}
+
+// ToValue renders LuaSurfaceCreateSegmentedUnitArgs as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v LuaSurfaceCreateSegmentedUnitArgs) ToValue() Value {
+	kv := make([]KeyValue, 0, 4)
+	kv = append(kv, KeyValue{Key: OfString("name"), Val: v.Name})
+	if v.Quality != nil {
+		kv = append(kv, KeyValue{Key: OfString("quality"), Val: OfObject((*v.Quality))})
+	}
+	if v.Force != nil {
+		kv = append(kv, KeyValue{Key: OfString("force"), Val: OfObject((*v.Force))})
+	}
+	if v.Territory != nil {
+		kv = append(kv, KeyValue{Key: OfString("territory"), Val: OfObject((*v.Territory))})
+	}
 	return OfMap(kv...)
 }
 
