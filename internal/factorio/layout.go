@@ -275,6 +275,24 @@ type StructBlock struct {
 	Size, Align int
 }
 
+// IsDynValueStruct reports the shape ModSetting has: a whole struct whose only
+// content is ONE mandatory tier-2 value.
+//
+// It is what earns a generated struct the typed Bool/Num/Str/Obj readers, and
+// it is a rule over the SHAPE rather than a list of names for the reason this
+// repo keeps meeting: a name list is a decision nobody re-reads, and the same
+// shape arriving at a later pin under a different name would silently get
+// nothing. Both generators ask this one function, so they cannot disagree, and
+// the census counts what it matched.
+//
+// MANDATORY is part of the shape. An optional single field would make the
+// readers answer for a value that may not be there at all, and there the
+// presence byte -- the guest's own pointer, or Option -- is the honest way to
+// ask.
+func IsDynValueStruct(b StructBlock) bool {
+	return len(b.Fields) == 1 && b.Fields[0].Kind == KindDyn && b.Fields[0].HasOffset < 0
+}
+
 // LayoutStruct places named fields, expanding each optional one into a presence
 // bool ahead of its value.
 func LayoutStruct(specs []FieldSpec) (StructBlock, error) {

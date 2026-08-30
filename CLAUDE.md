@@ -593,6 +593,16 @@ The second queued round: the widest TEMPTATIONS rather than the blocks. Each ite
 
 *Red-proven eight times, four per language, each firing one named line: `AsNum` answering on any tag (`num-of-str=0/no` → `0/ok`), a chained miss returning the receiver (`via-scalar=-1` → `42`), `At` walking a map's pair slice as an array, and `sameScalar` reduced to a tag compare so the number 8 finds the number-7 key (`n8=<none>` → `seven`).* **The third of those found a hole in the fixture rather than confirming one**: the map-indexed-as-an-array case was asserted only through a string default, which hides the defect whenever the first pair in `pairs()` order does not hold a string — so it failed on some runs and not others. The line carries `IsNil` as well now, which is tag- and order-independent. Detail: [`agents/abi.md`](agents/abi.md), "Reading a tier-2 value back".
 
+#### A mod setting arrives typed — `IsDynValueStruct`
+
+**`ModSetting` is a box around a tagged union, so a guest reading its own boolean setting switched on a tag to find out whether it was on.** `Bool`/`Num`/`Str`/`Obj` and `as_bool`/`as_num`/`as_str`/`as_obj` delegate to the accessors above and inherit their contract exactly: absent and mismatched both answer not-ok, and nothing coerces.
+
+**A RULE OVER THE LAYOUT rather than a list of names**: `IsDynValueStruct` is *one mandatory field, of kind dyn*, asked by BOTH generators so they cannot disagree about what matched, and the same shape at a later pin under another name gets the readers instead of silently getting nothing. **Mandatory is part of the shape** — an optional single field would make the readers answer for a value that may not be there, and there the presence byte is the honest way to ask.
+
+**Census: `dyn_value_structs` 0 → 1, ONE row for both languages.** That is a claim rather than an economy — the predicate is shared, so a disagreement is a defect and not a language difference — and the Rust count is compared against the Go one by a test instead of being written down twice. The generated diff is **eight lines per language, pure additions**; **no member id moves and no other count moves.**
+
+*Red-proven twice: inverting the predicate's mandatory term reports "no struct matched" at all five pins by name, and disabling the RUST emitter alone reports `go emitted readers for 1 structs and rust for 0` at all five — which is the AD5 half, and is why the count is compared rather than assumed.* Detail: [`agents/abi.md`](agents/abi.md), "A struct that is a BOX around one tier-2 value".
+
 ### Guests (M4, M8, M10)
 
 **TinyGo builds at `-opt=2`, not its default `-opt=z`.** That default optimises for SIZE, which is the one cost this target does not have — the day-0 probe measured Factorio parsing 4 MB of Lua in 106 ms and a chunk never appears in a save. It was the single largest win of the M11 perf pass and it is one flag: `real_names` **0.577×**, `real_grid` 0.771×, `pure_sum` 0.770×, `pure_dot` 0.847×, `real_entities` 0.958×, against `-opt=z` through the same compiler. `pure_prng` is ~2% slower and is the only kernel that loses. It also retired a claim: Rust used to beat TinyGo everywhere by 1.05×–1.46×, which was rustc `-O3` measured against TinyGo `-Oz`.

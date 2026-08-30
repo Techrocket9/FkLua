@@ -62,5 +62,6 @@
   "rust_members_inherited": 1331,
   "rust_event_payload_structs": 219,
   "rust_define_accessors": 1137,
+  "dyn_value_structs": 1,
   "max_method_return_arity": 3
 }

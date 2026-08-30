@@ -49,6 +49,11 @@ type RustBindings struct {
 	// members returning a container. Separate from Emitted, which counts
 	// MEMBERS bound: this is a second binding over one already counted.
 	IntoVariants int
+	// DynValueStructs is gogen.go's, mirrored: the generated structs that are a
+	// box around one tier-2 value and got typed readers. Counted in both
+	// because two backends walking one Report is exactly the assumption AD5
+	// disproved -- the equality is a test rather than a construction.
+	DynValueStructs int
 	// Collisions and StaleRenames are gogen.go's, mirrored. See there: a name
 	// collision is a decision somebody has to take, so the IDENTITY is recorded
 	// and not only the count, and a memberRename row that stops describing one
@@ -552,6 +557,7 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 	}
 
 	structs.emit(w)
+	out.DynValueStructs = structs.dynValue
 
 	// One reader per event. The pointer is into the event scratch buffer, which
 	// is the host's and lives for exactly this dispatch, so the decoder copies

@@ -223,6 +223,18 @@ type CensusData struct {
 	RustEvents           int            `json:"rust_event_payload_structs"`
 	RustDefines          int            `json:"rust_define_accessors"`
 
+	// DynValueStructs is the generated structs that are a BOX AROUND ONE TIER-2
+	// VALUE and therefore carry typed Bool/Num/Str/Obj readers -- ModSetting's
+	// shape, matched by IsDynValueStruct rather than by a list of names.
+	//
+	// ONE ROW FOR BOTH LANGUAGES, unlike the six above, and that is a claim
+	// rather than an economy: the predicate is one function both generators
+	// ask, so a disagreement would be a defect and not a language difference.
+	// TestBothBackendsEmitTheSameDynValueReaders is what says the two really
+	// matched the same set, because AD5 is what happens when a shared analysis
+	// is assumed rather than compared.
+	DynValueStructs int `json:"dyn_value_structs"`
+
 	MaxReturnArty int `json:"max_method_return_arity"`
 }
 
@@ -372,6 +384,10 @@ func TakeCensus(a *API) (CensusData, error) {
 	}
 	c.RustMembers, c.RustDeferred = rb.Emitted, rb.Deferred
 	c.RustInherited, c.RustEvents, c.RustDefines = rb.Inherited, rb.EventStructs, rb.Defines
+	// ONE row, taken from the Go side. The Rust count is compared against it by
+	// a test rather than written down twice: two numbers spelling one fact is
+	// this repo's most-repeated failure shape.
+	c.DynValueStructs = g.DynValueStructs
 	c.RustLiteralsDeferred, c.RustLiteralDeferBy = rb.LiteralsDeferred, rb.LiteralDeferBy
 	if c.RustLiteralDeferBy == nil {
 		c.RustLiteralDeferBy = map[string]int{}
@@ -475,6 +491,7 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("Rust members inherited", old.RustInherited, c.RustInherited)
 	cmp("Rust event payload structs", old.RustEvents, c.RustEvents)
 	cmp("Rust define accessors", old.RustDefines, c.RustDefines)
+	cmp("dyn-value structs", old.DynValueStructs, c.DynValueStructs)
 	cmp("max method return arity", old.MaxReturnArty, c.MaxReturnArty)
 
 	// Reason maps are the actionable half: a NEW reason means a generator met a

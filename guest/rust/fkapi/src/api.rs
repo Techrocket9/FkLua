@@ -78484,6 +78484,14 @@ impl ModSetting {
         kv.push((Value::Str(LuaStr::from("value")), self.value.clone()));
         Value::Map(kv)
     }
+
+    /// The one tier-2 value this carries, read as the type the tag
+    /// names. None for every other tag, which is the contract
+    /// [Value::as_bool] and its siblings have -- these delegate.
+    pub fn as_bool(&self) -> Option<bool> { self.value.as_bool() }
+    pub fn as_num(&self) -> Option<f64> { self.value.as_num() }
+    pub fn as_str(&self) -> Option<&LuaStr> { self.value.as_str() }
+    pub fn as_obj(&self) -> Option<Object> { self.value.as_obj() }
 }
 
 /// Mirrors the API type of the same name, laid out to match the wire.

@@ -90,6 +90,11 @@ type GoBindings struct {
 	// raise the coverage figure without covering anything, which is exactly the
 	// mistake the EventStructs split above was made to avoid.
 	IntoVariants int
+	// DynValueStructs counts the generated structs whose whole content is ONE
+	// tier-2 value and which therefore got typed Bool/Num/Str/Obj readers --
+	// ModSetting's shape. See IsDynValueStruct: it is a rule over the layout,
+	// so the number is what the rule matched rather than a list somebody kept.
+	DynValueStructs int
 	// Collisions names every member whose bound name another member of the class
 	// had already taken and which memberRename has NO ROW for, and StaleRenames
 	// names every row that no longer describes the collision it was written for.
@@ -567,6 +572,7 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 	// and collecting them while the methods were generated is what makes the
 	// set exactly what the methods reach.
 	structs.emit(w)
+	out.DynValueStructs = structs.dynValue
 
 	// One reader per event. The pointer is into the event scratch buffer, which
 	// is the host's and lives for exactly this dispatch, so the decoder copies
@@ -2628,6 +2634,8 @@ type goStructs struct {
 	// byName is the emitted Go type name -> its fields, placed.
 	byName map[string]StructBlock
 	order  []string
+	// dynValue counts the structs emitDynReaders matched -- see there.
+	dynValue int
 	// blocked records a type that cannot be emitted because a field needs a
 	// shape the Go layer does not carry yet.
 	blocked map[string]bool
@@ -3041,6 +3049,53 @@ func (g *goStructs) emit(w func(string, ...any)) {
 		w("\treturn v\n}\n\n")
 
 		g.emitToValue(w, name, blk)
+		g.emitDynReaders(w, name, blk)
+	}
+}
+
+// emitDynReaders writes typed readers over a struct whose whole content is ONE
+// tier-2 value.
+//
+// THE SHAPE IS THE RULE, and the shape is ModSetting: a described table concept
+// with exactly one mandatory field whose type is a union, so the field crosses
+// as a Value and the struct is a box around a tagged union. A guest reading a
+// mod setting therefore switched on a tag to learn whether its own boolean
+// setting was on, which is the thing bindings exist to spare it.
+//
+// A RULE RATHER THAN A NAME, for this repo's usual reason: an allowlist keyed
+// on "ModSetting" would be a decision nobody re-reads, and the same shape
+// arriving at a later pin under another name would silently get nothing.
+// DynValueStructs counts what the rule matched, so the census carries the
+// number rather than this comment carrying a claim.
+//
+// The readers delegate to the Value accessors and are named after them, minus
+// the As- prefix that only exists there to avoid colliding with Value's own
+// fields. Str rather than String, because a String method with a non-standard
+// signature is what go vet's printf checker complains about.
+func (g *goStructs) emitDynReaders(w func(string, ...any), name string, blk StructBlock) {
+	if !IsDynValueStruct(blk) {
+		return
+	}
+	g.dynValue++
+	fn := exportName(blk.Fields[0].Name)
+	w("\n// Bool, Num, Str and Obj read the one tier-2 value %s carries,\n", name)
+	w("// with the ok false for every other tag -- the same contract\n")
+	w("// Value's own As- readers have, which is what these delegate to.\n")
+	for _, m := range [][2]string{
+		{"Bool", "AsBool"}, {"Num", "AsNum"}, {"Str", "AsStr"}, {"Obj", "AsObj"},
+	} {
+		var ret string
+		switch m[0] {
+		case "Bool":
+			ret = "bool"
+		case "Num":
+			ret = "float64"
+		case "Str":
+			ret = "string"
+		default:
+			ret = "Object"
+		}
+		w("func (v %s) %s() (%s, bool) { return v.%s.%s() }\n", name, m[0], ret, fn, m[1])
 	}
 }
 

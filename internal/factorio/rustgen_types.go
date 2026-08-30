@@ -197,8 +197,10 @@ func rustLoad(buf string, off int, k Kind, typ string) string {
 // ---------------------------------------------------------------------------
 
 type rustStructs struct {
-	byName    map[string]StructBlock
-	order     []string
+	byName map[string]StructBlock
+	order  []string
+	// dynValue counts the structs emitDynReaders matched -- gogen.go's twin.
+	dynValue  int
 	blocked   map[string]bool
 	fieldType map[string]string
 	elem      map[string]structArray
@@ -528,7 +530,31 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 		}
 		w("        v\n    }\n")
 		g.emitToValue(w, name, blk)
+		g.emitDynReaders(w, name, blk)
 		w("}\n")
+	}
+}
+
+// emitDynReaders writes typed readers over a struct whose whole content is ONE
+// tier-2 value. See gogen.go's emitDynReaders for the argument; the shape is
+// ModSetting's and the predicate is IsDynValueStruct, asked by both generators
+// so they cannot disagree about what matched.
+//
+// Named for the Value accessors they delegate to, which in Rust keep their
+// as_ prefix because nothing there collides.
+func (g *rustStructs) emitDynReaders(w func(string, ...any), name string, blk StructBlock) {
+	if !IsDynValueStruct(blk) {
+		return
+	}
+	g.dynValue++
+	fn := rustName(blk.Fields[0].Name)
+	w("\n    /// The one tier-2 value this carries, read as the type the tag\n")
+	w("    /// names. None for every other tag, which is the contract\n")
+	w("    /// [Value::as_bool] and its siblings have -- these delegate.\n")
+	for _, m := range [][2]string{
+		{"as_bool", "bool"}, {"as_num", "f64"}, {"as_str", "&LuaStr"}, {"as_obj", "Object"},
+	} {
+		w("    pub fn %s(&self) -> Option<%s> { self.%s.%s() }\n", m[0], m[1], fn, m[0])
 	}
 }
 

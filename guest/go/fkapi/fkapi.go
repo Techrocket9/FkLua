@@ -83146,6 +83146,14 @@ func (v ModSetting) ToValue() Value {
 	return OfMap(kv...)
 }
 
+// Bool, Num, Str and Obj read the one tier-2 value ModSetting carries,
+// with the ok false for every other tag -- the same contract
+// Value's own As- readers have, which is what these delegate to.
+func (v ModSetting) Bool() (bool, bool)   { return v.Value.AsBool() }
+func (v ModSetting) Num() (float64, bool) { return v.Value.AsNum() }
+func (v ModSetting) Str() (string, bool)  { return v.Value.AsStr() }
+func (v ModSetting) Obj() (Object, bool)  { return v.Value.AsObj() }
+
 // ProgrammableSpeakerCircuitParameters mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type ProgrammableSpeakerCircuitParameters struct {
