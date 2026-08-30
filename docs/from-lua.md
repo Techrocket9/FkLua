@@ -20,6 +20,29 @@ The ecosystem's shared library is a set of Lua modules that every mod copies int
 
 **The one residual is prototype fragments.** Helper modules that build a piece of a prototype and hand it back to be spliced in do not fit the data ABI's model: a data guest reads and patches `data.raw` through the host and clones a prototype without marshalling it, which is what keeps the untouched fields exactly as the source shipped them. A helper that returns a table for you to merge would have to marshal that table out and back. Building the fragment in the guest and emitting it as a prototype works; adopting somebody else's Lua fragment library does not. See [data-stage.md](data-stage.md).
 
+## The `remote.interfaces` guard, which you no longer need
+
+A Lua mod that talks to a neighbour guards every call, because `remote.call` into an interface that is not there RAISES and takes the handler down with it:
+
+```lua
+if remote.interfaces["some-mod"] and remote.interfaces["some-mod"]["get_thing"] then
+  remote.call("some-mod", "get_thing")
+end
+```
+
+**A guest cannot be taken down that way.** `RemoteCall` returns a status: a missing interface, a missing method on an interface that is there, and a method that raises are all `StatusCallFailed`, and the guest carries on. So the guard is the call:
+
+```go
+v, st := fkapi.RemoteCall("some-mod", "get_thing")
+if st == fkapi.StatusOK {
+    use(v)
+}
+```
+
+That matters more than it looks, because reading `remote.interfaces` is expensive in a way the Lua version is not. It is a dictionary of dictionaries, so every check copies every interface name AND every method name in the save across the boundary into the guest heap, where a Lua mod was indexing a table it already had. One audited overhaul guards seventeen call sites; on a guest, seventeen of those reads cost more than the calls they were protecting.
+
+Two cases the status does not cover, and what to use instead. **"Is that mod installed at all", asked without wanting to call anything**, is `script.active_mods` (`LuaBootstrap.ActiveMods`), which is an ordered name/version list and is the right question anyway. **Enumerating** what a neighbour offers really does want the whole table, and the materializing read is the right shape for it. `fk.LastError()` carries the engine's own sentence after a failed call, which tells the three failure kinds apart when a log line needs to say which; do not branch on it.
+
 ## Randomness that does not desync
 
 `math.random` is per peer and is a desync waiting for a multiplayer game. Factorio's own answer is a random generator seeded from the map, saved with it, and replicated; it binds like anything else.

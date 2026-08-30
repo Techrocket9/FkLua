@@ -130,11 +130,17 @@ handlers[1]({ tick = 1 })
 		"LOG outbound 9",
 		// A missing interface is ERR_CALL_FAILED (5), not a trap.
 		"LOG missing 5",
+		// ...and so is a missing METHOD on an interface that IS there, which is
+		// the other half of the Lua guard idiom and is why neither half is needed
+		// here: the status answers both without copying every interface name in
+		// the save into the guest.
+		"LOG nomethod 5",
 		// ...and the OUTER invocation's arguments survived both nested calls
 		// encoding their own into the same scratch region.
 		"LOG still hello world",
 		// One command, seven remote invocations (six from the host and one the
-		// guest made itself) and two mod-defined events -- ALL TEN through the one
+		// guest made itself; the two that fail never reach the guest) and two
+		// mod-defined events -- ALL TEN through the one
 		// fk_on_call export, which is the seam's own claim about the third kind
 		// needing no second entry point.
 		"LOG calls 10",

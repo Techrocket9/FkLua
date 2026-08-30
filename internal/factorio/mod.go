@@ -690,3 +690,38 @@ func (p *Package) Inert() bool {
 	}
 	return true
 }
+
+// MigrationDir is where Factorio looks for a mod's migration files.
+const MigrationDir = "migrations"
+
+// LuaMigrations names the hand-written Lua migrations an include tree carried
+// into this package, sorted.
+//
+// IT EXISTS TO KEEP A COUNT AUDITABLE, and that is the whole of it. A mod's own
+// state is the guest's heap, and the heap is migrated by fk_migrate; a Lua
+// migration is not FkLua's state-migration mechanism and will not become one.
+// What the file type keeps is the status of INLINE ASSEMBLY -- permitted,
+// marked, minimised, never generated -- and the mark is a line the packager
+// prints, so a repository can grep its own build output for hand-written Lua
+// rather than remembering to look.
+//
+// JSON MIGRATIONS ARE DATA AND ARE NOT COUNTED. Factorio's other migration form
+// is a prototype-rename table, which is a fact about names rather than a program
+// -- there is nothing there for a compiler to have replaced, and a packager that
+// warned about one would be reporting an author for using the format correctly.
+//
+// The engine tracks a Lua migration ONCE PER SAVE BY FILENAME, so this is also
+// the list whose names must not change casually; that is the author's business
+// and not something to enforce here.
+func (p *Package) LuaMigrations() []string {
+	var out []string
+	for name := range p.Extra {
+		if strings.HasPrefix(name, MigrationDir+"/") &&
+			strings.HasSuffix(name, ".lua") &&
+			!strings.Contains(name[len(MigrationDir)+1:], "/") {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

@@ -1827,6 +1827,19 @@ func runMod(args []string) error {
 	if dataModule != "" {
 		fmt.Printf("  data module %s (%d bytes of Lua)\n", dataModule, dataModuleSize)
 	}
+	// HAND-WRITTEN LUA, NAMED WHERE IT IS CARRIED PAST THE COMPILER. A mod's own
+	// state is the guest's heap and the heap is migrated by fk_migrate;
+	// migrations/*.lua is not FkLua's state-migration mechanism and will not
+	// become one. What it keeps is the status of inline assembly -- permitted,
+	// marked, minimised, never generated -- and this line is the mark, so a
+	// repository can grep its own build output for the count instead of
+	// remembering to look. JSON migrations are a prototype-rename TABLE rather
+	// than a program and are deliberately not counted: there is nothing there a
+	// compiler could have replaced.
+	if migs := pkg.LuaMigrations(); len(migs) > 0 {
+		fmt.Printf("  %d hand-written Lua migration(s): %s\n", len(migs),
+			strings.Join(migs, ", "))
+	}
 
 	// Say what was actually connected. A guest that misspells fk_on_tick
 	// otherwise gets a mod that loads, does nothing, and explains nothing.

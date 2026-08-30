@@ -683,6 +683,29 @@ subsection below and each shipped with its own red proof.
 
 *Red-proven three times: the Go preamble's kind number moved off the host's (the gate names both values and says a descriptor of one kind would be read as another), the host losing a kind the two guests still spell (both writers reported by name), and the ROLLBACK removed — where a second registration to the refused name comes back `st 0`, silently succeeding into a dispatcher Factorio never registered, with the engine's refusal logged once for two attempts.*
 
+#### `migrations/*.lua` — the audit line, and two caveats a Lua author carries over
+
+**The doctrine was already decided and the mechanism was not built: a mod's own state is the guest's heap, the heap is migrated by `fk_migrate`, and `migrations/*.lua` stays available through the include tree with the status of INLINE ASSEMBLY — permitted, marked, minimised, never generated.** What was owed was the MARK. `fklua mod` prints one line naming each Lua migration an include tree carried, so a repository greps its own build output for the count of hand-written Lua instead of remembering to look. **A JSON migration is a prototype-rename TABLE rather than a program and is deliberately not counted**: there is nothing there a compiler could have replaced, and reporting one would be reporting an author for using the format correctly. A `.lua` file BELOW `migrations/` is not counted either — Factorio reads that directory and not a tree under it, so one is the author's own module.
+
+**Two caveats land in [`agents/guests.md`](agents/guests.md) and both are the kind of thing a Lua author carries over unexamined**:
+
+- **The runtime adopts the saved heap at `on_load`, which is ONE STEP AFTER migrations run.** So anything dispatched into a guest from a Lua migration would run on the fresh heap `_initialize` built, and the adoption that follows overwrites it — writing into memory about to be replaced, with nothing to say so. That is the strongest single reason the mechanism is not a hook here rather than a matter of taste.
+- **`fk_migrate` triggers on the BUILD STAMP where Factorio's migrations trigger on the MOD VERSION.** A version bump that changes no wasm moves no stamp and fires nothing; a dev rebuild, a `--gc`/`--persist` change or a repackage against another `--api` pin moves the stamp with the version untouched. Independent by construction: the stamp is a hash of the module and the pin, and neither reads `info.json`.
+
+*Red-proven twice: the `.lua` suffix test dropped (a JSON rename table and a README reported as hand-written Lua), and the `migrations/` prefix dropped (`prototypes/migrations.lua` counted as a migration).*
+
+#### `remote.interfaces` gets NO point query, and that is the finding
+
+**The survey asked for a point-query member or a seam helper, and invited the other answer: "is the guard even needed, or is the honest answer 'call and read the status', documented? If so, document THAT and ship nothing." It is not needed, and nothing shipped.** The guard idiom exists in Lua for one reason — `remote.call` into an interface that is not there RAISES and takes the handler down — and `fk.remote_call` has answered with `ERR_CALL_FAILED` since the callback seam existed. **The whole reason the guard exists does not exist here.**
+
+**Both halves of the idiom are the status**, and the second one is now pinned rather than inferred: a missing INTERFACE and a missing METHOD on an interface that IS there both come back `StatusCallFailed` with the guest still running, which is `remote.interfaces[x]` and `remote.interfaces[x][y]` answered without reading either. The example gained that leg.
+
+**AND A MEMBER WOULD HAVE BEEN FAKED RATHER THAN BOUND.** `LuaRemote::interfaces` is a plain `dictionary[string -> dictionary[string -> boolean]]`, not a `LuaCustomTable` — so `MemberGetHandle` does not apply, there is no handle to index, and a point query would have meant inventing a member kind for one member over a shape the description does not model. That is `indexWriteHalf`'s own discipline pointed at a read: **a skipped member is skipped, never faked.**
+
+**What the cost argument actually says.** Reading `remote.interfaces` copies every interface name AND every method name in the save into the guest heap, per check, where a Lua mod was indexing a table it already had — and the audited overhaul that motivated the item guards seventeen call sites. That is a real cost and it is a cost of *doing something unnecessary*, so the fix is the sentence and not a member. Two residual cases are named rather than glossed: "is that mod installed at all", which is `script.active_mods` and was always the better question, and ENUMERATING a neighbour's surface, which genuinely wants the whole table.
+
+**The record is `docs/from-lua.md`**, beside the other Lua habits, because that is where somebody carrying this one over will be.
+
 #### A mod-shipped scenario is one line of Lua — `[scenarios]`
 
 **A scenario's `control.lua` is a full control stage in its own Lua state, so it is not somewhere a guest can be compiled to** — and the base game's own convention for a mod-shipped scenario is a one-line require into the mod's tree, which is *exactly the file `fklua mod` already writes for the mod root*. So this was never a compiler gap: it was that there was nowhere to put a second copy of that line. `[scenarios] <name> = ["@control"]` writes `scenarios/<name>/control.lua` containing `require("__<mod>__/control")`.

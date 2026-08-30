@@ -138,6 +138,15 @@ func onCall(id, argp, retp uint32) uint32 {
 		if _, st := fkapi.RemoteCall("no-such-interface", "nope"); st != fkapi.StatusOK {
 			fk.Log("missing " + itoa(uint32(st)))
 		}
+		// ...AND SO IS A MISSING METHOD ON AN INTERFACE THAT IS THERE, which is
+		// the OTHER half of the guard idiom a Lua author brings over:
+		// `if remote.interfaces[x] and remote.interfaces[x][y] then`. Both halves
+		// are answered by the status, which is why neither guard is needed here --
+		// and reading remote.interfaces to ask would copy every interface name and
+		// every method name in the save into the guest, per check.
+		if _, st := fkapi.RemoteCall("fk-callback-demo", "no-such-method"); st != fkapi.StatusOK {
+			fk.Log("nomethod " + itoa(uint32(st)))
+		}
 		// The outer invocation's arguments must still be readable AFTER those two
 		// nested calls, which is the whole point of the mark/release pair.
 		again := ""

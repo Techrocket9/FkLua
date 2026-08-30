@@ -247,6 +247,19 @@ One more ordering fact: it runs **before** `fk_after_load` on a load that has bo
 
 **What it does NOT fire for is the mirror image of `fk_migrate`'s trap**: a dev rebuild that keeps the mod's version raises no `on_configuration_changed` at all. That case reaches `fk_migrate` through the first-outermost-dispatch path instead (see "WHEN those rows happen" below), and this hook stays silent for it, which is correct — nothing about the mod set moved.
 
+### `migrations/*.lua` is not a guest hook, and two facts a Lua author will get wrong
+
+**A mod's own state is the guest's heap, and the heap is migrated by `fk_migrate`.** `migrations/*.lua` — Factorio's Lua migration file, run once per save and tracked by FILENAME — is not FkLua's state-migration mechanism and will not become one. The file type stays available through the include tree with the status of **inline assembly**: permitted, marked, minimised, never generated. `fklua mod` prints one line naming each of them, so the count of hand-written Lua in a repository stays greppable out of its own build output rather than depending on somebody remembering to look. **JSON migrations are a prototype-rename TABLE rather than a program and are deliberately not counted**: there is nothing there a compiler could have replaced.
+
+Measured before the doctrine was written, with a two-phase probe: a Lua migration runs in the mod's own control-stage Lua state with `storage` fully restored, after `on_init` for a newly added mod and before `on_load` and every mod's `on_configuration_changed`; a joining multiplayer client never runs one; and a mod newly added to a save has ALL of its migrations run on that install load. The base game has shipped exactly **one** Lua migration in its whole 1.1-to-2.0 history, the median across ten sampled mods is eleven lines, and none of them needed the two properties only the mechanism has.
+
+Two caveats belong here whether or not a migration hook is ever built, because both are the kind of thing a Lua author carries over unexamined:
+
+- **THE RUNTIME ADOPTS THE SAVED HEAP AT `on_load`, WHICH IS ONE STEP AFTER MIGRATIONS RUN.** So anything dispatched into a guest from a Lua migration runs on the FRESH heap `_initialize` built, and the adoption that follows overwrites whatever it did. A migration that called into a guest to fix its state would be writing into memory about to be replaced, and nothing would say so — which is the strongest single reason the mechanism is not a hook here rather than a matter of taste.
+- **`fk_migrate` TRIGGERS ON THE BUILD STAMP WHERE FACTORIO'S MIGRATIONS TRIGGER ON THE MOD VERSION**, and that is a different predicate from the one a Lua author expects. A version bump that changes no wasm moves no stamp and fires nothing; a dev rebuild, a `--gc` or `--persist` change, or a repackage against another `--api` pin moves the stamp and fires it with the version untouched. The two axes are independent by construction: the stamp is a hash of the module and the pin, and neither reads `info.json`.
+
+What FkLua does owe a mod with historical migrations is that its Lua ones keep working, which they do: they are ordinary included files, they run at Factorio's own moment, and the ecosystem's standard library already routes migration WORK through `on_configuration_changed`, which is the hook above.
+
 ### Batching — `fk.Defer()` and `fk_on_deferred`
 
 **A blueprint paste is P separate dispatches in one tick.** Factorio raises one `on_built_entity` per entity, each from the engine's own loop rather than from inside another event, so `depth` in `fk_mod.lua` goes `0 → 1 → 0` P times. That measurement decides the shape of this feature, and it is why the obvious answer — a hook at `dispatch_done`, where the outermost dispatch already returns — **does not batch anything**: it would fire P times too. Nesting (`create_entity{raise_built=true}` raising from inside a handler) is a different thing, and it is not what a paste is.
