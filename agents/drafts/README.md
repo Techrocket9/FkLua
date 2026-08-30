@@ -6,15 +6,18 @@ its design, its measurements with the exact commands, the alternatives it
 rejected and why, an implementation plan with a file surface and a test plan,
 and a recommendation.
 
-**Nothing here is implemented.** These are the design-and-measure half; the
-charter's rule is that an honest "designed, not shipped, here is why" is an
-acceptable terminal outcome, and two of the four reach it.
+These are the design-and-measure half; the charter's rule is that an honest
+"designed, not shipped, here is why" is an acceptable terminal outcome. The
+verdict column below says where each item's design landed; the SHIPPED markers
+are appended as the implementation rounds close them and the drafts themselves
+stay as written, because they are the record of what was measured and decided,
+not of what the tree now holds.
 
 | | item | verdict |
 |---|---|---|
 | [`r4a`](r4a-bulk-attribute-read.md) | the bulk attribute read | **IMPLEMENT.** 979 → 43 ns per element on the host side, favourable from N = 2, no new member ids and therefore no downstream re-pin. The shape is a new IMPORT rather than a new member kind, because that is what keeps the pruning scan exact. One scoping question for the orchestrator. |
 | [`r4b`](r4b-batched-gui-add.md) | the batched GUI add | **THE PROPOSED FEATURE DOES NOT WORK.** Batching an array of tier-2 specs buys 13%; 86% of the cost is `read_dyn`, which a batch decodes just as often. Not re-marshalling strings buys 12×. Sequencing decision needed, because the artifact it wants is round 2's typed `add`. |
-| [`r4c`](r4c-data-stage-function-splitter.md) | the data-stage function splitter | **THE RECORDED DESIGN CANNOT WORK**, measured: a function that reaches the jump limit has four zero-depth split points and all four are outside the jump's span, for a structural reason. A trampoline relay does work, needs no IR pass and no size estimate, and is ~180 lines. Correct the recorded row either way. |
+| [`r4c`](r4c-data-stage-function-splitter.md) | the data-stage function splitter | **THE RECORDED DESIGN CANNOT WORK**, measured: a function that reaches the jump limit has four zero-depth split points and all four are outside the jump's span, for a structural reason. A trampoline relay does work, needs no IR pass and no size estimate, and is ~180 lines. Correct the recorded row either way. **SHIPPED**: the relay, the chained-goto fix and the corrected row are on master; the guarded placement is what ships and the unreachable-placement refinement is measured-working and deliberately not built. |
 | [`r4d`](r4d-q5-build-time-configuration.md) | Q5, the build-time configuration channel | **LARGELY CLOSED ALREADY.** Two of its three forms are fixed — one by the data stage becoming a guest, demonstrated end to end here, one by an engine prototype both halves of which bind. What is left is doctrine at S. The queue amendment's phrasing does not match the finding. |
 
 ## The measurements
