@@ -9,7 +9,8 @@ The ecosystem's shared library is a set of Lua modules that every mod copies int
 | what you used it for | where it is now |
 |---|---|
 | migration: run something when the mod set changes | `fk_on_configuration_changed`, which is handed the real `ConfigurationChangedData`: which neighbour appeared, disappeared or moved version, and from what |
-| a tick scheduler: run something in N ticks | `fk.Defer()`, a one-shot `on_tick` the runtime registers and tears down again, so an idle guest pays nothing per tick |
+| a tick scheduler: run something once, after this burst | `fk.Defer()`, a one-shot `on_tick` the runtime registers and tears down again, so an idle guest pays nothing per tick |
+| a tick scheduler: run something every N ticks | `fk.OnNthTick(n)` and the `fk_on_nth_tick` export. The engine schedules the period, so the guest is entered once per N rather than on every tick to decide it has nothing to do. Several periods at once; the one that fired is handed back |
 | table helpers: deep copy, deep compare, filter, map | the language. Go and Rust both have them, and neither costs a boundary crossing |
 | geometry: bounding boxes, positions, areas | the language, over the generated `MapPosition` and `BoundingBox` structs |
 | event dispatch: several handlers for one event | the language. One exported `fk_on_event` dispatches on the id you were given |

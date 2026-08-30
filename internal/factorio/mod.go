@@ -513,6 +513,14 @@ var Hooks = []Hook{
 	// hang off the end of a dispatch -- see the deferred-work section of
 	// runtime/lua/fk_mod.lua.
 	{"fk_on_deferred", "fk.defer, flushed once on the next tick", true},
+	// Every n ticks, for as long as the guest keeps the period armed. The member
+	// this replaces -- LuaBootstrap::on_nth_tick -- takes a Lua function, so it
+	// bound green and could never fire; the documented substitute was a
+	// self-re-arming fk.defer() chain costing one dispatch per tick where the
+	// engine's own form costs one per n. The armed set lives in `storage`,
+	// because Factorio saves no event registration. See the periodic section of
+	// runtime/lua/fk_mod.lua.
+	{"fk_on_nth_tick", "fk.on_nth_tick, every n ticks", true},
 	// The callback seam: a console command a guest declared, or a method of a
 	// remote interface it declared, invoked through a Lua closure the HOST
 	// synthesised. An Event, because it is a hook a guest author writes -- and

@@ -101,6 +101,9 @@ func hostPrint(ptr, length uint32)
 //go:wasmimport fk defer
 func hostDefer() uint32
 
+//go:wasmimport fk on_nth_tick
+func hostOnNthTick(n, arm uint32) uint32
+
 //go:wasmimport fk last_error
 func hostLastError(ptr, capacity uint32) uint32
 
@@ -186,6 +189,46 @@ func LastError() string {
 //
 // A guest with no fk_on_deferred export never gets called back.
 func Defer() { hostDefer() }
+
+// OnNthTick asks for this guest's fk_on_nth_tick export to be called every n
+// ticks, until OffNthTick takes it away.
+//
+//	func init() { fk.OnNthTick(600) }
+//
+//	//go:wasmexport fk_on_nth_tick
+//	func onNthTick(n uint32) { if n == 600 { sweep() } }
+//
+// THE PERIOD IS HANDED BACK, so one export serves several timers: arm 60 and
+// 3600 and switch on what arrives. Factorio schedules each period in C++, so a
+// guest polling every 600 ticks is entered once per 600 -- which is the whole
+// difference from the self-re-arming Defer chain, where the guest is entered on
+// all 600 to decide it has nothing to do.
+//
+// THE ARMED SET SURVIVES A SAVE. Factorio saves no event registration, so the
+// periods are recorded in `storage` and re-armed when the save is loaded; a
+// timer armed before a save is still running after it.
+//
+// ARM IT FROM init, not from fk_on_init, for Subscribe's reason and one more of
+// its own: a period armed in fk_on_init exists in the session that created the
+// map, and the save's own record would then be the only thing keeping it -- so
+// it would work, by the wrong mechanism, and stop the day the guest was rebuilt.
+// Arming from init is idempotent and costs one host call per period per load.
+//
+// n must be at least 1: zero is the "every period" spelling on the OffNthTick
+// side, and every-zero-ticks is not a schedule. A guest with no fk_on_nth_tick
+// export is never called back and gets StatusNoMember.
+func OnNthTick(n uint32) uint32 { return hostOnNthTick(n, 1) }
+
+// OffNthTick stops the timer OnNthTick armed for that period.
+//
+// n == 0 stops every period this guest armed, which is Factorio's own reading of
+// script.on_nth_tick(nil): a guest tearing all its timers down does not have to
+// remember which ones it has.
+//
+// The period is unregistered rather than left calling into a handler that
+// returns, so a disarmed guest costs nothing per tick -- and it is taken out of
+// `storage` too, so a save taken afterwards does not bring it back on load.
+func OffNthTick(n uint32) uint32 { return hostOnNthTick(n, 0) }
 
 // Log writes a line to factorio-current.log.
 //

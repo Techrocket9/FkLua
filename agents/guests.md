@@ -274,7 +274,18 @@ Two things about it are not free and are worth knowing before designing around i
 
 Each of these was found by somebody writing a real mod against this runtime, and each is one paragraph because that is all it needs. Filed as fklua-ports' AD8, FTS10, G7, F-LOOP and Q1, plus the `Valid()` shadow at the end, which came out of the first mod to exercise `LuaLazyLoadedValue`.
 
-**There is no `on_nth_tick` binding, and the right answer is `fk.Defer()` calling itself.** `LuaBootstrap::on_nth_tick` takes a Lua function and is unfillable for the same reason `add_command` was (see "The callback seam" in [`agents/abi.md`](abi.md)) — but unlike those two it needs no seam, because the guest already has a one-shot timer. **THAT SENTENCE WAS FALSE FOR AS LONG AS THERE HAVE BEEN BINDING GENERATORS AND IS TRUE SINCE 2026-08-30, which is the whole of the fix.** `on_nth_tick` and its four siblings declare `union(function, nil)`, which `canonicalUnion` cannot type, so all five came out as `handler Value` — bound, required, and fillable only with nil, which is Factorio's UNREGISTER. Four are harmlessly shadowed by FkLua's own hooks; this one presented as a green, plausible member whose every possible call was a silent no-op, and no census row, compile check or document said so. All five defer in both languages now, under the census reason `handler is a Lua function`, so naming one is a compile error rather than a no-op. The HOST table keeps all five, so no member id moved. A guest that wants work every N ticks arms `fk.Defer()` and re-arms it from inside its own `fk_on_deferred`, counting in guest memory:
+**There is no `on_nth_tick` binding, and the answer is `fk.OnNthTick(n)` — a HOOK, since 2026-08-30.** `LuaBootstrap::on_nth_tick` takes a Lua function and is unfillable for the same reason `add_command` was (see "The callback seam" in [`agents/abi.md`](abi.md)). **The sentence this paragraph used to carry — "it needs no seam, because the guest already has a one-shot timer" — was true and was not the whole answer**, and the difference is a dispatch multiplier: `on_nth_tick` and its four siblings declare `union(function, nil)`, which `canonicalUnion` cannot type, so all five came out as `handler Value` — bound, required, and fillable only with nil, which is Factorio's UNREGISTER. Four are harmlessly shadowed by FkLua's own hooks; this one presented as a green, plausible member whose every possible call was a silent no-op, and no census row, compile check or document said so. All five defer in both languages now, under the census reason `handler is a Lua function`, so naming one is a compile error rather than a no-op.
+
+```go
+func init() { fk.OnNthTick(600) }
+
+//go:wasmexport fk_on_nth_tick
+func onNthTick(n uint32) { if n == 600 { sweep() } }
+```
+
+**The period is handed back**, so one export serves several timers — arm 60 and 3600 and switch on what arrives. `fk.OffNthTick(n)` stops one and `fk.OffNthTick(0)` stops every one this guest armed, which is Factorio's own reading of `script.on_nth_tick(nil)`. **The armed set lives in `storage`** and is re-armed on load, in sorted order, for the reason `storage.fk_deferred` exists one mechanism over: Factorio saves no event registration, so a timer armed before a save would otherwise be silently gone after it. **Arm it from `init` rather than from `fk_on_init`**: a period armed there exists in the session that created the map and is kept alive afterwards only by the save's own record, which is the right outcome reached by the wrong mechanism.
+
+**The `fk.Defer()` chain is still correct and is no longer the recommendation.** It costs **one dispatch per tick** where the engine's own form costs one per n — a guest polling every 600 ticks was entered on all 600 to decide it had nothing to do — and a mod that arms and disarms several timers has to multiplex them itself. Where a guest genuinely wants "once, soon, after this burst", `fk.Defer()` is still the answer and this is not:
 
 ```go
 //go:wasmexport fk_on_deferred
@@ -284,7 +295,7 @@ func onDeferred() {
 }
 ```
 
-The unregister-before-dispatch ordering in `arm_deferred` is what makes that safe — a guest re-arming from inside its own flush gets a fresh one-shot rather than having it torn down by a teardown that has not happened yet. **The cost is the one it looks like**: a guest that re-arms unconditionally has an `on_tick` subscription for the life of the mod, which is exactly the permanent cost `fk.Defer()` exists to avoid, so re-arm only while there is something to do.
+The unregister-before-dispatch ordering in `arm_deferred` is what makes that safe — a guest re-arming from inside its own flush gets a fresh one-shot rather than having it torn down by a teardown that has not happened yet. **The cost is the one it looks like**: a guest that re-arms unconditionally has an `on_tick` subscription for the life of the mod, which is exactly the permanent cost `fk.Defer()` exists to avoid.
 
 **Exporting `fk_on_tick` IS the subscription.** All three of the first ports exported it *and* subscribed to `on_tick` through `fk.subscribe`, which is harmless and redundant: `fk_mod.lua` registers `script.on_event(on_tick)` whenever the export is present. The redundant subscription costs a second dispatch per tick and an event descriptor in the shipped table. The same is true of `fk_on_init` and `fk_on_deferred` — **an export is a registration**, and the only things `fk.subscribe` is for are the 219 events that have no export of their own.
 

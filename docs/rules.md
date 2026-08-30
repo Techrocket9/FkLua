@@ -36,6 +36,8 @@ Work that does not fit in a tick is spread by the guest, across ticks it chose. 
 
 There is deliberately no end-of-dispatch hook. Factorio raises one build event per entity from its own loop, so a hook there would fire 200 times and batch nothing.
 
+Work on a schedule rather than after a burst is `fk.OnNthTick(n)` and the `fk_on_nth_tick` export. The engine does the counting, so a guest polling every 600 ticks is entered once per 600 rather than on all of them to decide it has nothing to do; the armed periods survive a save and are re-armed when it is loaded.
+
 ## Allocate on a schedule you chose
 
 A guest's heap is in every save and every multiplayer join, and linear memory never shrinks. Under the collector (`gc = "collected"`, the default) allocation is reclaimed but still costs marking and sweeping out of a paced budget; with the collector off it is permanent.

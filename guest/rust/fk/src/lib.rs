@@ -84,6 +84,8 @@ pub fn print(s: &str) {
 extern "C" {
     #[link_name = "defer"]
     fn fk_defer() -> u32;
+    #[link_name = "on_nth_tick"]
+    fn fk_on_nth_tick_import(n: u32, arm: u32) -> u32;
     #[link_name = "last_error"]
     fn fk_last_error(ptr: u32, cap: u32) -> u32;
 }
@@ -167,6 +169,48 @@ pub fn defer() {
     unsafe {
         fk_defer();
     }
+}
+
+/// Asks for this guest's `fk_on_nth_tick` export to be called every `n` ticks,
+/// until [`off_nth_tick`] takes it away.
+///
+/// ```ignore
+/// #[no_mangle]
+/// pub extern "C" fn _initialize() { fk::on_nth_tick(600); }
+///
+/// #[no_mangle]
+/// pub extern "C" fn fk_on_nth_tick(n: u32) { if n == 600 { sweep(); } }
+/// ```
+///
+/// THE PERIOD IS HANDED BACK, so one export serves several timers: arm 60 and
+/// 3600 and match on what arrives. Factorio schedules each period in C++, so a
+/// guest polling every 600 ticks is entered once per 600 -- which is the whole
+/// difference from the self-re-arming [`defer`] chain, where the guest is
+/// entered on all 600 to decide it has nothing to do.
+///
+/// THE ARMED SET SURVIVES A SAVE. Factorio saves no event registration, so the
+/// periods are recorded in `storage` and re-armed when the save is loaded.
+///
+/// ARM IT AT LOAD, not from `fk_on_init`: a period armed there exists in the
+/// session that created the map and nowhere else by its own doing.
+///
+/// `n` must be at least 1: zero is the "every period" spelling on the
+/// [`off_nth_tick`] side. A guest with no `fk_on_nth_tick` export is never
+/// called back.
+pub fn on_nth_tick(n: u32) -> u32 {
+    unsafe { fk_on_nth_tick_import(n, 1) }
+}
+
+/// Stops the timer [`on_nth_tick`] armed for that period.
+///
+/// `n == 0` stops every period this guest armed, which is Factorio's own reading
+/// of `script.on_nth_tick(nil)`.
+///
+/// The period is unregistered rather than left calling into a handler that
+/// returns, and it is taken out of `storage` too, so a save taken afterwards
+/// does not bring it back on load.
+pub fn off_nth_tick(n: u32) -> u32 {
+    unsafe { fk_on_nth_tick_import(n, 0) }
 }
 
 // ---------------------------------------------------------------------------

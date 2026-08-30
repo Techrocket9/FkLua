@@ -661,6 +661,26 @@ The second queued round: the widest TEMPTATIONS rather than the blocks. Each ite
 
 *Red-proven twice: inverting the predicate's mandatory term reports "no struct matched" at all five pins by name, and disabling the RUST emitter alone reports `go emitted readers for 1 structs and rust for 0` at all five — which is the AD5 half, and is why the count is compared rather than assumed.* Detail: [`agents/abi.md`](agents/abi.md), "A struct that is a BOX around one tier-2 value".
 
+### The seam round (2026-08-30) — round 3 of the temptations survey
+
+The third queued round: the M items whose designs were already in hand, plus the
+queue's own two amendments and the folded 4d doctrine work. Each item is one
+subsection below and each shipped with its own red proof.
+
+#### A first-class periodic hook — `fk.on_nth_tick`
+
+**Round 1 deferred `LuaBootstrap::on_nth_tick` as unfillable and left a whole genre on a substitute that costs one dispatch per tick where the engine's own form costs one per N.** A guest polling every 600 ticks was entered on all 600 to decide it had nothing to do, and a mod arming and disarming several timers (one audited mod does, at nine sites) had to multiplex them itself. `fk.on_nth_tick` is the hook that replaces the member: `script.on_nth_tick` schedules the period in C++ and the guest is not entered at all on the other 599.
+
+**ONE IMPORT WITH TWO OPERANDS, WHICH IS THE ENGINE'S OWN SHAPE.** `fk.on_nth_tick(n, arm)`: Factorio spells the same two facts as `script.on_nth_tick(tick, handler)`, where a handler registers, nil unregisters that period, and a nil tick as well unregisters every period — so `arm == 0` is that nil handler and `(0, 0)` is that nil tick. An arm/disarm PAIR of imports was the alternative and it is the wrong answer by round 2's own decision frame: a second import is for two forms that decode DIFFERENT BLOCKS (`fk.call_typed`), and these two carry the same two numbers to the same registration. Guest-side that is `fk.OnNthTick(n)` / `fk.OffNthTick(n)` and `on_nth_tick` / `off_nth_tick`, in `guest/*/fk` beside `Defer` — **not in the generated bindings**, because it depends on nothing the description carries and a hand-written library that imported `fkapi` would drag the pin into a consumer that only wanted a timer (`fklog`'s rule).
+
+**SEVERAL PERIODS AT ONCE, and the guest is handed the one that fired**, so one export serves all of them exactly as one `fk_on_call` serves every command and every remote method. Arming period 0 is `ERR_BAD_ARGS` rather than passed through: zero already means "every period" on the disarm side, every-zero-ticks is not a schedule, and Factorio's own answer to `on_nth_tick(0, f)` is a raise.
+
+**THE ARMED SET IS IN `storage`, AND IT IS RE-ARMED SORTED.** Factorio saves no event registration, so a period armed before a save would otherwise be silently gone after it — `storage.fk_deferred`'s rule one mechanism over. The sort is what that mechanism never had to think about, having exactly one registration: `pairs()` over a numeric-keyed table is not an order this runtime may bet on, and two peers registering the same periods in two orders would be asking Factorio to dispatch them in two orders on a tick that is a multiple of both.
+
+**An idle guest registers nothing**, which is the standing property every one-shot in `fk_mod.lua` protects and is the first line of the test. **No census row**, and that is a judgement rather than an omission: the census counts what a DESCRIPTION produced, and what would have caught this hook's absence is the `Hooks` two-way mirror — `fk_on_nth_tick` is in that table, so `TestEveryReportedHookIsActuallyRegistered` and `TestEveryExportControlLuaCallsIsListedInHooks` fail if either half moves alone.
+
+*Red-proven three times, each firing something different: the load-path re-arm removed (an armed period is gone after a save), the disarm leaving its `storage` flag behind (`after disarm [60,180]` where the rig disarmed one — the exact class the deferred flush's design notes warn about), and the re-arm walking in reverse rather than sorted order (`order [180,60]`).*
+
 ### Guests (M4, M8, M10)
 
 **TinyGo builds at `-opt=2`, not its default `-opt=z`.** That default optimises for SIZE, which is the one cost this target does not have — the day-0 probe measured Factorio parsing 4 MB of Lua in 106 ms and a chunk never appears in a save. It was the single largest win of the M11 perf pass and it is one flag: `real_names` **0.577×**, `real_grid` 0.771×, `pure_sum` 0.770×, `pure_dot` 0.847×, `real_entities` 0.958×, against `-opt=z` through the same compiler. `pure_prng` is ~2% slower and is the only kernel that loses. It also retired a claim: Rust used to beat TinyGo everywhere by 1.05×–1.46×, which was rustc `-O3` measured against TinyGo `-Oz`.

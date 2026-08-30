@@ -34,7 +34,7 @@ local instance
 -- `function subscribe(...)` further down would define a global instead, and the
 -- handler would call a nil `dispatch_done` at the first event.
 local subscribe, dispatch_done, on_event, arm_deferred, arm_gc
-local register_callback, remote_call
+local register_callback, remote_call, set_nth_tick
 
 -- ---------------------------------------------------------------------------
 -- defines, resolved BY NAME at load.
@@ -131,6 +131,14 @@ local imports = {
     -- deferred-work section below: this is how a guest batches across the many
     -- separate dispatches one tick can deliver.
     defer = function() return arm_deferred() end,
+    -- on_nth_tick(n, arm): ask for fk_on_nth_tick(n) to be called every n ticks,
+    -- or stop asking. THE ENGINE'S OWN SHAPE, one operand over -- Factorio's
+    -- script.on_nth_tick(tick, handler) registers with a handler, unregisters
+    -- with nil, and unregisters EVERY period when the tick is nil too -- so
+    -- `arm == 0` is that nil handler and `n == 0, arm == 0` is that nil tick.
+    -- One import rather than an arm/disarm pair because both forms carry the
+    -- same two facts to the same registration; see the periodic section below.
+    on_nth_tick = function(n, arm) return set_nth_tick(n, arm) end,
     -- Ask for the guest's collector to be STEPPED until it finishes: arm the
     -- write barrier now, and run one bounded fk_gc_step per tick from a
     -- one-shot on_tick, tearing the registration down again when the collection
@@ -1155,6 +1163,126 @@ function arm_deferred()
 end
 
 -- ---------------------------------------------------------------------------
+-- The PERIODIC hook -- fk_on_nth_tick(n), every n ticks.
+--
+-- WHY IT IS A HOOK RATHER THAN A MEMBER. LuaBootstrap::on_nth_tick takes a Lua
+-- FUNCTION, which is a value a wasm guest has no way to make: the generated
+-- binding was a `handler Value` whose only expressible argument is nil, i.e.
+-- Factorio's UNREGISTER, so every possible call was a successful no-op. It is
+-- DEFERRED in both guest backends now (Member.Unfillable), and this is what
+-- replaces it -- the same answer the callback seam gives for add_command, one
+-- step simpler because there is no descriptor and no id space: the host
+-- synthesises the closure and the export is the entry.
+--
+-- WHY IT IS NOT THE DEFERRED FLUSH. The documented substitute was a
+-- self-re-arming fk.defer() chain, which works and costs ONE DISPATCH PER TICK
+-- where the engine's own form costs one per n: a guest polling every 600 ticks
+-- pays 600 dispatches to do one piece of work. script.on_nth_tick is C++-side
+-- scheduling and the guest is not entered at all on the other 599.
+--
+-- ONE IMPORT, TWO OPERANDS, WHICH IS THE ENGINE'S OWN SHAPE. `n` is the period
+-- and `arm` says whether to have one. Factorio spells the same two facts as
+-- script.on_nth_tick(tick, handler): a handler registers, nil unregisters that
+-- period, and nil for the tick as well unregisters every period. So arm == 0 is
+-- that nil handler and (0, 0) is that nil tick, and a guest that wants to stop
+-- one timer of several says so by naming it. An arm/disarm PAIR of imports was
+-- the alternative and it is the wrong seam decision by this repo's own frame:
+-- a second import is for two forms that decode DIFFERENT BLOCKS (fk.call_typed),
+-- and these two carry the same two numbers to the same registration.
+--
+-- SEVERAL PERIODS AT ONCE, because the engine allows it and a mod that wants
+-- both a 60-tick poll and a 3,600-tick sweep should not have to multiplex them
+-- itself -- which is the exact awkwardness the defer chain imposes. The guest is
+-- handed the period that fired, so one export serves all of them, exactly as one
+-- fk_on_call serves every command and every remote method.
+--
+-- FACTORIO DOES NOT SAVE EVENT REGISTRATIONS, so the armed set lives in
+-- `storage` and the load path re-arms from it -- the same rule and the same
+-- mechanism as storage.fk_deferred, and the same defect if it is skipped: a
+-- guest that armed a timer, saved, and loaded would find it silently gone.
+--
+-- ...AND THE SET IS RE-ARMED IN SORTED ORDER, which the deferred flush does not
+-- have to think about because it has exactly one registration. `pairs()` over a
+-- numeric-keyed table is not an order this file may bet on, and two peers that
+-- registered the same periods in two orders would be asking Factorio to dispatch
+-- them in two orders on a tick that is a multiple of both. Sorting is one sort
+-- per load and removes the question.
+--
+-- AN IDLE GUEST PAYS NOTHING, which is the standing property every one-shot here
+-- protects: nothing is registered until a guest arms a period, and a period
+-- disarmed is unregistered rather than left calling into a handler that returns.
+local nth_armed = {}
+
+local function run_nth_tick(n)
+  return function() dispatch(E.fk_on_nth_tick, n) end
+end
+
+-- Re-registering an already-armed period would REPLACE Factorio's handler with
+-- an identical one, which is harmless and is still a host call per arm; a guest
+-- re-arming from its own handler is the ordinary shape, so this is idempotent
+-- the way arm_deferred is.
+local function arm_nth(n)
+  if nth_armed[n] then return end
+  nth_armed[n] = run_nth_tick(n)
+  script.on_nth_tick(n, nth_armed[n])
+end
+
+local function disarm_nth(n)
+  if not nth_armed[n] then return end
+  nth_armed[n] = nil
+  script.on_nth_tick(n, nil)
+end
+
+function set_nth_tick(n, arm)
+  if not E.fk_on_nth_tick then return H.ERR_NO_MEMBER end
+  n = n or 0
+  -- ARMING PERIOD ZERO IS REFUSED rather than passed through. Zero already means
+  -- "every period" on the disarm side, and "every 0 ticks" is not a schedule --
+  -- Factorio's own answer to on_nth_tick(0, f) is a raise, and a guest's
+  -- arithmetic producing a 0 should come back as a status rather than as a mod
+  -- that will not load.
+  if arm ~= nil and arm ~= 0 then
+    if n <= 0 then return H.ERR_BAD_ARGS end
+    arm_nth(n)
+    if storage then
+      local s = storage.fk_nth
+      if s == nil then s = {}; storage.fk_nth = s end
+      s[n] = true
+    end
+    return H.OK
+  end
+  if n <= 0 then
+    -- EVERY period, which is Factorio's own nil-tick reading.
+    for k in pairs(nth_armed) do script.on_nth_tick(k, nil) end
+    nth_armed = {}
+    if storage then storage.fk_nth = nil end
+    return H.OK
+  end
+  disarm_nth(n)
+  if storage and storage.fk_nth then
+    storage.fk_nth[n] = nil
+    -- The table is cleared outright when the last period goes, so a save carries
+    -- no empty table and `storage.fk_nth` reads as "nothing armed" the way
+    -- storage.fk_deferred does. A leftover empty table is what would make the
+    -- load path re-arm nothing and still look armed.
+    if next(storage.fk_nth) == nil then storage.fk_nth = nil end
+  end
+  return H.OK
+end
+
+-- Re-arm after a load, in sorted order. Separate from set_nth_tick because the
+-- state is already in `storage` and writing it back from here would be a write
+-- from on_load -- legal for this table, since it is what the save carried, and
+-- pointless.
+local function rearm_nth_ticks()
+  if not E.fk_on_nth_tick or not storage or not storage.fk_nth then return end
+  local ns = {}
+  for n in pairs(storage.fk_nth) do ns[#ns + 1] = n end
+  table.sort(ns)
+  for i = 1, #ns do arm_nth(ns[i]) end
+end
+
+-- ---------------------------------------------------------------------------
 -- Instantiation and event wiring.
 -- ---------------------------------------------------------------------------
 
@@ -1947,6 +2075,9 @@ local function after_load()
     deferred_armed = true
     on_event(defines.events.on_tick, flush_deferred)
   end
+  -- The same rule one mechanism over: a period armed before the save is armed
+  -- again after it, in sorted order. See the periodic section above.
+  rearm_nth_ticks()
   -- A COLLECTION CAN NOW BE HALF DONE WHEN A SAVE IS TAKEN, which nothing before
   -- stage C could be. The collector's own state -- phase, mark bitmap, gray
   -- stack, sweep cursor, free runs -- is all in linear memory and came back with
@@ -1973,7 +2104,7 @@ local function after_load()
   arm_after_load()
 end
 
-if persisting or E.fk_on_deferred or E.fk_after_load or GC then
+if persisting or E.fk_on_deferred or E.fk_after_load or GC or E.fk_on_nth_tick then
   script.on_load(after_load)
 end
 
