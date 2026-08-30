@@ -641,6 +641,16 @@ The second queued round: the widest TEMPTATIONS rather than the blocks. Each ite
 
 *Red-proven four times: `F1`'s carry removed in Go (9.96 prints 9.10), the SAME carry removed in RUST ALONE (the mirror catches a one-language divergence, which is the whole point of it), every map key forced into the `[k]` form, and `Dump` answering the destination's size instead of what it wrote (the line runs past its own end into the buffer's stale bytes).* Detail: [`agents/guests.md`](agents/guests.md), "The line builder is a LIBRARY now".
 
+#### The behavioural contract moves into `docs/`
+
+**An author does not defect because Go is verbose; they defect after a desync whose rule was written down, measured, and filed under maintainer notes.** The contract lived in `CLAUDE.md` and `agents/`, which document what a maintainer needs; `docs/` documented artifacts. Three pages close that, and the GROUPING is a decision rather than the survey's list transcribed:
+
+- **[`docs/rules.md`](docs/rules.md)** is the survey's rules page: peer-locality of load hooks and the general form (no peer-local signal may change guest state), iteration determinism, constant-id pruning, the atomic tick, and allocation discipline with the heap-budget headline and the measured doubling stall. It ends with what is CHECKED for you, because a rules page that lists only obligations reads as a longer list than it is.
+- **[`docs/debugging.md`](docs/debugging.md)** is the debugging page: the log, `fk.Print`, `fk.LastError`, `Value.Dump`, `fklog`, and the loop that answers most questions without launching the game (driving a packaged mod under `bin/lua52f` with stubbed globals). Plus the three load failures that account for most of them, and why instrument mode is out of scope.
+- **[`docs/from-lua.md`](docs/from-lua.md)** carries THREE of the survey's items, and putting them together is the decision: the standard-library mapping table with the honest prototype-fragment residual, the **randomness** note (`create_random_generator` binds and one shipped port replaced randomness with a modulo on the belief that it did not), and the **handle-retention** note (retaining across a save is the normal path; the first consumer's re-find-everything rule is its own architectural choice). All three are one thing from a reader's side -- a Lua habit landing somewhere -- and three pages would have been three places to look.
+
+**Every Go snippet in all four pages is COMPILED BY TINYGO rather than reviewed**, which is how the round found three wrong ones before they shipped: `LuaRandomGenerator.Call` takes pointers, `Object` has `Valid()` and not `IsValid()`, and `LuaSurface.SetTiles` has seven parameters. A worked GUI example was verified the same way. The docs-style grep check is clean on all four.
+
 #### A mod setting arrives typed — `IsDynValueStruct`
 
 **`ModSetting` is a box around a tagged union, so a guest reading its own boolean setting switched on a tag to find out whether it was on.** `Bool`/`Num`/`Str`/`Obj` and `as_bool`/`as_num`/`as_str`/`as_obj` delegate to the accessors above and inherit their contract exactly: absent and mismatched both answer not-ok, and nothing coerces.
