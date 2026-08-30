@@ -739,6 +739,24 @@ A shape-B union (one class plus scalar identifiers) collapses to a HANDLE in a m
 
 `agents/drafts/r4b-batched-gui-add.md` measures that `fk.batch_add`'s spec block and this one are **the same artifact**, and warns that two shapes for one member would be this repo's most-repeated failure silently. This block is that artifact: `LayoutStruct`'s ordinary output, `(ptr, len)` strings, presence bytes where `Placed.HasOffset` puts them. A batch is `count` copies of it plus a string table and a parent column, and 4b's own note says the residual is then ~250 lines rather than ~600. Nothing here forecloses it.
 
+### The description's PROSE reaches the bindings, and the docs render the parameter lists
+
+**The generator emitted none of the description's member prose, for as long as it has existed, and the docs renderer showed no parameter lists.** So `LuaGuiElement::add`'s 341 possible key names appeared nowhere in the guest's language at all, and a GUI author had the Factorio wiki or nothing.
+
+**`Member.Doc`, filled by a POST-PASS rather than threaded through the walk.** A member is built in eight places in `GenerateMembers` — a method, four attribute kinds, the custom-table handle variant, the index operator and its write half — and eight assignments of one fact is the shape this repo keeps meeting. `attachDocs` is one index and one loop, keyed on **(class, name, is-it-a-method)**: a class may declare a method and an attribute of the same name (which is what `memberRename` exists for), so a key that dropped the last term would hand one of them the other's prose.
+
+**FIRST SENTENCE, and the policy is a measurement.** The full prose of every member is **324,058 bytes** at the GA pin against **148,401** for the first sentences, and what the later sentences carry is mostly examples and cross-references the docs renderer shows in full anyway. A sentence ends at `. ` and **not at every `.`**, because the descriptions are full of `defines.events`, `1.0` and `e.g.` and cutting at the first period truncates a third of them mid-clause. **3,566 of 4,262 members** carry one at the GA pin.
+
+**`// <Name>: <sentence>` in Go and a bare `/// <sentence>` in Rust.** The Go form is a deliberate deviation from the convention that wants the prose to continue the identifier grammatically: Factorio's descriptions are not written that way, and bending them into it would mean rewriting somebody else's sentences at generation time — which is how a doc comment stops being the description and starts being a claim.
+
+**BACKTICKS ARE REPLACED IN GO AND KEPT IN RUST**, which is one sentence rendered two ways under a hard constraint on one side rather than a drift. `TestNoBacktickReachesTheGeneratedSources` is a standing gate — the generated Go package is carried through a raw string downstream, so a backtick arriving from data would close it — and this is the first thing that ever fed it description prose. Rust's `///` is markdown and keeps them. A single quote rather than nothing, so `` `true` `` reads as `'true'`.
+
+**It costs SOURCE and nothing else**: Go `3,690,687 → 3,986,356 B (+8.0%)`, Rust `4,258,440 → 4,497,829 B (+5.6%)`, and **no census row moves**. Nothing here reaches a packaged mod — `fk_module.lua` is compiled from the wasm, and `Member.Doc` is deliberately read by neither `LuaSourceWith` nor `APISignature`, which is asserted rather than assumed.
+
+**`fklua docs` renders the parameter list, and for a variant-group method it renders the GROUPS.** Types are the description's own spelling through `Type.String`, not the generated Go or Rust one: a reader who wants the binding's type has the binding, and what they cannot get anywhere else is what Factorio calls it. The shared/variant split is named the way the typed-args form names it, so the reference and the bindings say one thing one way, and the group table says outright that those fields go in `extra`.
+
+*Red-proven three times: dropping `attachDocs`' attribute arm takes coverage from 3,566 to 914 and fails the floor by name; cutting at every period truncates `defines.events` and `1.0`; and removing the `writeParams` call reports all five missing renderings.*
+
 ### A dictionary field inside a struct — and it is a SLICE of pairs
 
 `goStructs.add` took scalars, structs and arrays, and one refusal took three things down with it: the **5 deferred event payloads** (`on_built_entity`, `on_robot_built_entity`, `on_space_platform_built_entity`, `script_raised_revive`, `on_research_cancelled` — all blocked on `tags`, which is `dictionary[string → any]`), `MapGenSettings` and therefore `create_surface`'s optional argument, and 12 members blocked by a struct blocked by one of those.

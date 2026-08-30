@@ -1069,6 +1069,12 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 	// three overlapping rules (optType, paramType, the Into destination) and
 	// stating them twice is how the two copies drift.
 	sig = rustSig{Params: params, Args: callArgs, RetType: ret}
+	// THE DESCRIPTION'S OWN PROSE, FIRST. gogen.go's twin carries the argument;
+	// what differs here is only that a Rust doc comment does not want the
+	// identifier repeated in it, so the sentence stands alone.
+	for _, l := range wrapComment(m.Doc, 72) {
+		w("    /// %s\n", l)
+	}
 	if typed {
 		w("    /// `%s` with its SHARED parameters spelled out instead of\n", rustName(m.Name))
 		w("    /// hand-built as tier-2 keys. Same member, same result; the\n")

@@ -45,6 +45,176 @@ The write replaces the whole `ModSetting` table, which is why the value is a map
 
 Writing an absent value to a `LuaFluidBox` clears it, which is Factorio's own behaviour for `fluidbox[n] = nil`. New fluid boxes cannot be added or removed this way and the index must be in bounds.
 
+## Tier-2 values, and reading one back
+
+Where the API's type is a union, a `LocalisedString`, or anything else with no fixed layout, the bindings use one self-describing type: `Value` in Go, `Value` in Rust. Seven constructors build one (`OfString`, `OfNumber`, `OfBool`, `OfObject`, `OfArray`, `OfMap`, `OfNil`; `Value::Str` and its siblings in Rust), and a matching set of accessors reads one back.
+
+There are two families and the split is what lets one of them chain. A lookup answers with a value whose miss is nil, so a chain over a shape that may not be there is one expression:
+
+```go
+count := v.Get("filters").At(0).Get("count").NumOr(0)
+```
+
+A read answers with a comma-ok in Go and an `Option` in Rust, so a caller who needs to know whether the value was there says so:
+
+```go
+name, ok := v.Get("name").AsStr()
+```
+
+| what | Go | Rust |
+|---|---|---|
+| look up, chains | `Get(key)`, `GetKey(value)`, `At(i)` | `get(key)`, `get_key(value)`, `at(i)` |
+| read, may fail | `AsBool`, `AsNum`, `AsStr`, `AsObj` | `as_bool`, `as_num`, `as_str`, `as_obj` |
+| read with a default | `BoolOr`, `NumOr`, `StrOr`, `ObjOr` | `bool_or`, `num_or`, `str_or`, `obj_or` |
+| the rest | `Has(key)`, `Len()`, `IsNil()` | `has(key)`, `len()`, `is_empty()`, `is_nil()` |
+
+Nothing coerces. `AsNum` on a string answers not-ok rather than parsing it, because the tag is what the host said the value is. `Len` is the one exception and it answers 0 for a scalar. `Get` cannot tell a missing key from a key that is present and nil; `Has` is what answers that, and it matters at a small fraction of call sites because Factorio's own option tables read the two the same way.
+
+`At` is zero-based. The one-based Lua index the host read the array out of does not come with it.
+
+## Option tables, and typed arguments
+
+Most methods that take an option table get a generated struct: `surface.CreateSurface(name, &fkapi.MapGenSettings{...})`. A handful do not, because their table is a discriminated union: the fields it accepts depend on the value of one of them. `LuaGuiElement::add` is the largest, with 21 variant groups at the default pin.
+
+Those methods take one `Value`, and they also have a second form whose shared parameters are a typed struct:
+
+```go
+// The tier-2 form. Every key is a string you got right or did not.
+btn, err := screen.Add(fkapi.OfMap(
+    fkapi.KeyValue{Key: fkapi.OfString("type"), Val: fkapi.OfString("button")},
+    fkapi.KeyValue{Key: fkapi.OfString("name"), Val: fkapi.OfString("launch")},
+))
+
+// The typed form. Same member, same result, and the compiler knows the fields.
+btn, err := screen.AddTyped(fkapi.LuaGuiElementAddArgs{
+    Type: "button",
+    Name: str("launch"),
+}, nil)
+```
+
+The second argument is the variant tail: the keys that belong to one variant group and therefore have no field. Pass `nil` when there are none.
+
+```go
+icon, err := screen.AddTyped(fkapi.LuaGuiElementAddArgs{
+    Type: "sprite-button",
+    Name: str("icon"),
+}, val(fkapi.OfMap(
+    fkapi.KeyValue{Key: fkapi.OfString("sprite"), Val: fkapi.OfString("item/iron-plate")},
+)))
+```
+
+The tail is applied over the struct, so it can also override a field the struct set. That is deliberate: a shared parameter and a variant-group parameter are allowed to share a name (`LuaSurface::create_entity` has one), and a tail that could not override would not be an escape hatch.
+
+The typed form is also cheaper on the host, because a flat block is read at known offsets where a tier-2 map is a walk over tagged key and value pairs. Measured host-side on one GUI element built both ways, on Lua 5.2.1: 0.74x for a row carrying two `LocalisedString` fields, and 0.40x for one whose five fields all have a fixed layout. The spread is the reason: a shared parameter whose type is itself a union stays a tier-2 slot inside the block, so it costs what it cost before.
+
+Which shared parameters a method has, and what each variant group accepts, are in the generated reference (`fklua docs`), with the types spelled the way Factorio spells them.
+
+## Building a GUI
+
+A GUI is built by adding elements to `player.gui.screen` (or `.top`, `.left`, `.center`, `.relative`, `.goal`), reading events back through the `on_gui_*` family, and finding elements again by name.
+
+```go
+package main
+
+import (
+    "github.com/Techrocket9/fklua/guest/go/fk"
+    "github.com/Techrocket9/fklua/guest/go/fkapi"
+)
+
+func str(s string) *string           { return &s }
+func val(v fkapi.Value) *fkapi.Value { return &v }
+
+func init() {
+    fkapi.Subscribe(fkapi.EventOnGuiClick)
+}
+
+// openWindow builds a titled frame with one button in it.
+func openWindow(playerIndex uint32) {
+    p, err := fkapi.Game.GetPlayer(fkapi.OfNumber(float64(playerIndex)))
+    if err != nil || p == nil {
+        return
+    }
+    gui, err := fkapi.LuaPlayer{Object: *p}.Gui()
+    if err != nil {
+        return
+    }
+    screen, err := fkapi.LuaGui{Object: gui}.Screen()
+    if err != nil {
+        return
+    }
+    root := fkapi.LuaGuiElement{Object: screen}
+
+    frame, err := root.AddTyped(fkapi.LuaGuiElementAddArgs{
+        Type:    "frame",
+        Name:    str("my-window"),
+        Caption: val(fkapi.OfString("Status")),
+    }, nil)
+    if err != nil {
+        fk.Log("gui: " + err.Error())
+        return
+    }
+    _, err = fkapi.LuaGuiElement{Object: frame}.AddTyped(fkapi.LuaGuiElementAddArgs{
+        Type:    "button",
+        Name:    str("my-window-close"),
+        Caption: val(fkapi.OfString("Close")),
+        Style:   str("red_back_button"),
+    }, nil)
+    if err != nil {
+        fk.Log("gui: " + err.Error())
+    }
+}
+
+//go:wasmexport fk_on_event
+func onEvent(id, ptr uint32) {
+    if id != fkapi.EventOnGuiClick {
+        return
+    }
+    ev := fkapi.ReadOnGuiClick(ptr)
+    name, err := fkapi.LuaGuiElement{Object: ev.Element}.Name()
+    if err != nil || name != "my-window-close" {
+        return
+    }
+    // The frame is found again by name under the same parent it was added to.
+    // Nothing is stored between events: a handle from one event is not valid in
+    // the next unless it was retained.
+    p, err := fkapi.Game.GetPlayer(fkapi.OfNumber(float64(ev.PlayerIndex)))
+    if err != nil || p == nil {
+        return
+    }
+    gui, err := fkapi.LuaPlayer{Object: *p}.Gui()
+    if err != nil {
+        return
+    }
+    screen, err := fkapi.LuaGui{Object: gui}.Screen()
+    if err != nil {
+        return
+    }
+    // The index operator, `screen["my-window"]`. It answers an absent element
+    // with no object rather than with an error.
+    w, err := fkapi.LuaGuiElement{Object: screen}.Get(fkapi.OfString("my-window"))
+    if err != nil {
+        return
+    }
+    if w != nil {
+        _ = fkapi.LuaGuiElement{Object: *w}.Destroy()
+    }
+}
+
+func main() {}
+```
+
+Three things about that are worth stating rather than inferring.
+
+Element count equals call count. `add` takes no children, so a window of N elements is N host calls at about 12.5 µs each. A 50-row table rebuilt every tick is not affordable; rebuild on change, and update the elements you have rather than destroying the window.
+
+Handles do not survive the event. `ev.Element` is valid inside the handler that received it and not afterwards. `Retain()` promotes one if a window really has to be remembered across events, and `Release()` gives it back; finding the element again by name costs a call and no bookkeeping.
+
+Restyling at runtime goes through the `style` attribute, which takes a style prototype's name as a tier-2 string:
+
+```go
+err := fkapi.LuaGuiElement{Object: btn}.SetStyle(fkapi.OfString("green_button"))
+```
+
 ## Global functions
 
 Three of Factorio's functions belong to no class: `log`, `localised_print` and `table_size`. They bind as package-level functions, `Log`, `LocalisedPrint` and `TableSize` in Go and `log`, `localised_print` and `table_size` in Rust, and each takes one tier-2 value.

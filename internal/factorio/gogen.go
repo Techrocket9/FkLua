@@ -1139,6 +1139,31 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 		}
 		retType = "(" + strings.Join(rts, ", ") + ", error)"
 	}
+	// THE DESCRIPTION'S OWN PROSE, FIRST, because it is what the reader came for
+	// and every note below it is about a variant of the member rather than about
+	// the member. Empty for the ~700 members the description says nothing about,
+	// which is the honest rendering of nothing to say.
+	//
+	// `<Name>: <sentence>` rather than Go's `<Name> <verb>s ...`, and that is a
+	// deliberate deviation: the convention wants the prose to continue the
+	// identifier grammatically, and Factorio's descriptions are not written that
+	// way. Bending them into it would mean rewriting somebody else's sentences
+	// at generation time, which is exactly how a doc comment stops being the
+	// description and starts being a claim.
+	//
+	// THE BACKTICKS ARE REPLACED, in the GO emission and not in Member.Doc,
+	// because the constraint is Go's alone: the generated package is carried
+	// through a raw string downstream, so a backtick arriving from data would
+	// close it -- TestNoBacktickReachesTheGeneratedSources is the standing gate
+	// and this is the first thing that ever fed it description prose. Rust's
+	// /// is markdown and keeps them, which is one sentence rendered two ways
+	// under a hard constraint on one side rather than a drift.
+	//
+	// A single quote rather than nothing, so `true` reads as 'true' and the
+	// author's own emphasis survives.
+	for _, l := range wrapComment(name+": "+strings.ReplaceAll(m.Doc, "`", "'"), 76) {
+		w("// %s\n", l)
+	}
 	if typed {
 		w("// %s is %s with its SHARED parameters spelled out instead of\n",
 			name, exportName(m.Name))
@@ -1487,6 +1512,36 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 
 // operatorDoc renders OperatorProse as a Go doc comment, or nothing when the
 // member is not an operator.
+// wrapComment breaks one line of prose onto lines of at most `width` columns,
+// on spaces, and answers nothing at all for an empty string.
+//
+// A WORD LONGER THAN THE WIDTH IS NOT BROKEN: the descriptions carry
+// `defines.events.on_player_changed_surface` and URLs, and a hyphenated break
+// inside one would be a doc comment that cannot be pasted back into code.
+func wrapComment(s string, width int) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.HasSuffix(s, ": ") {
+		return nil
+	}
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= width:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
+}
+
 func operatorDoc(typeName string, m Member, name string) string {
 	lines := OperatorProse(typeName, m, name)
 	if len(lines) == 0 {

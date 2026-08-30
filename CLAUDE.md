@@ -615,6 +615,20 @@ The second queued round: the widest TEMPTATIONS rather than the blocks. Each ite
 
 **And the mirror found a pre-existing cross-language defect on its first run.** An optional CONTAINER field of a generated struct set its presence byte UNCONDITIONALLY in Rust and only when non-nil in Go, so `tags = {}` reached the engine from a Rust guest where a Go guest sent no `tags` key at all — the two backends calling the engine differently from the same spec, which is the AD5 shape. Latent until this round, because nothing here had ever encoded one. **Empty means absent in Rust now**, and it has to: Go's optional container keeps its own nilable type so nil is absent and an empty slice is present-and-empty, while a `BTreeMap` and a `Vec` have no nil and cannot say both — and of the two readings, absent is the one this ABI's own rule names. A Rust guest wanting an empty container sent has no expression for it; that is a stated residual and closing it means `Option<BTreeMap<..>>` in the generated struct.
 
+#### The description's prose reaches the bindings, and the docs render the fields
+
+**Neither generator emitted a word of the description's member prose, and the docs renderer showed no parameter lists** — so `add`'s 341 possible key names appeared nowhere in the guest's language, which is one of the four facts the survey stacks into "the strongest temptation in the survey". `Member.Doc` is filled by a POST-PASS keyed on (class, name, is-it-a-method), because a member is built in eight places and eight assignments of one fact is this file's most-repeated failure shape.
+
+**FIRST SENTENCE, and the policy is a measurement**: 324,058 bytes of full prose against 148,401 of first sentences at the GA pin, with the later sentences carrying examples the docs renderer shows in full anyway. A sentence ends at `. ` and **not at every `.`** — the descriptions are full of `defines.events` and `1.0`. **3,566 of 4,262 members** carry one.
+
+**Backticks are replaced in GO and kept in RUST**, which is one sentence rendered two ways under a hard constraint on one side: `TestNoBacktickReachesTheGeneratedSources` is a standing gate because the generated Go package is carried through a raw string downstream, and this is the first thing that ever fed it description prose. Rust's `///` is markdown.
+
+**It costs SOURCE and nothing else** — Go **+8.0%**, Rust **+5.6%**, **no census row moves**, and nothing reaches a packaged mod: `fk_module.lua` is compiled from the wasm, and `Member.Doc` is read by neither `LuaSourceWith` nor `APISignature`, which is asserted both ways rather than assumed.
+
+**And `fklua docs` renders the parameter list, plus the VARIANT GROUPS for the members that have them**, with types in the description's own spelling and the group table saying outright that those fields go in the typed form's `extra`. A worked GUI example landed beside it in [`docs/factorio-api.md`](docs/factorio-api.md) — a window, a click handler, finding the element again by name — **and it is compiled by TinyGo rather than reviewed**, which caught one wrong return type in it before it shipped.
+
+*Red-proven three times: dropping `attachDocs`' attribute arm takes coverage from 3,566 to 914 and fails the floor by name, cutting at every period truncates `defines.events` and `1.0`, and removing the `writeParams` call reports all five missing renderings.* Detail: [`agents/abi.md`](agents/abi.md), "The description's PROSE reaches the bindings".
+
 #### A mod setting arrives typed — `IsDynValueStruct`
 
 **`ModSetting` is a box around a tagged union, so a guest reading its own boolean setting switched on a tag to find out whether it was on.** `Bool`/`Num`/`Str`/`Obj` and `as_bool`/`as_num`/`as_str`/`as_obj` delegate to the accessors above and inherit their contract exactly: absent and mismatched both answer not-ok, and nothing coerces.

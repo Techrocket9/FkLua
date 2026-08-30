@@ -131,6 +131,7 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 			if d := oneLine(memberDescription(descByClass[cls], m)); d != "" {
 				fmt.Fprintf(&b, "%s\n\n", d)
 			}
+			writeParams(&b, descByClass[cls], m, opt.Names)
 		}
 	}
 
@@ -161,6 +162,89 @@ func Docs(a *API, r Report, evs EventReport, opt DocOptions) string {
 		}
 	}
 	return b.String()
+}
+
+// writeParams renders a method's PARAMETER LIST and its VARIANT-GROUP FIELDS.
+//
+// The generator emits the parameters as a struct or as positional arguments,
+// and the reader can see the names in the bindings either way -- except for the
+// handful of members whose parameter table is a discriminated union, where the
+// variant tail is a tier-2 map and its 341 possible key names for
+// LuaGuiElement::add alone appear NOWHERE in the guest's language. A GUI author
+// looking for what a sprite-button accepts had the Factorio wiki and nothing
+// else. That is the gap this closes, and it closes it for every member at once
+// rather than for the four, because a table of names and types beside a
+// signature is what a reference is.
+//
+// TYPES ARE THE DESCRIPTION'S OWN SPELLING, through Type.String, not the
+// generated Go or Rust one. A reader who wants the binding's type has the
+// binding; what they cannot get anywhere else is what Factorio calls it.
+func writeParams(b *strings.Builder, c Class, m Member, names map[string]string) {
+	meth, ok := methodOf(c, m)
+	if !ok {
+		return
+	}
+	ps := append([]Parameter(nil), meth.Parameters...)
+	sort.SliceStable(ps, func(i, j int) bool { return ps[i].Order < ps[j].Order })
+	if len(ps) > 0 {
+		if len(meth.VariantGroups) > 0 {
+			// SHARED is the word the typed-args form uses for exactly this set,
+			// so the docs and the bindings name one thing one way.
+			b.WriteString("Shared parameters:\n\n")
+		} else {
+			b.WriteString("Parameters:\n\n")
+		}
+		writeParamTable(b, ps)
+	}
+	if len(meth.VariantGroups) == 0 {
+		return
+	}
+	gs := append([]VariantGroup(nil), meth.VariantGroups...)
+	sort.SliceStable(gs, func(i, j int) bool { return gs[i].Name < gs[j].Name })
+	fmt.Fprintf(b, "Variant groups (%d), selected by the table's discriminant. "+
+		"These have no field in the typed argument block and go in `extra`:\n\n",
+		len(gs))
+	for _, g := range gs {
+		fmt.Fprintf(b, "**`%s`**", g.Name)
+		if d := oneLine(g.Description); d != "" {
+			fmt.Fprintf(b, " — %s", d)
+		}
+		b.WriteString("\n\n")
+		gp := append([]Parameter(nil), g.Parameters...)
+		sort.SliceStable(gp, func(i, j int) bool { return gp[i].Order < gp[j].Order })
+		writeParamTable(b, gp)
+	}
+}
+
+func writeParamTable(b *strings.Builder, ps []Parameter) {
+	if len(ps) == 0 {
+		return
+	}
+	b.WriteString("| name | type | | description |\n|---|---|---|---|\n")
+	for _, p := range ps {
+		req := "required"
+		if p.Optional {
+			req = "optional"
+		}
+		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n",
+			p.Name, p.Type.String(), req, oneLine(p.Description))
+	}
+	b.WriteString("\n")
+}
+
+// methodOf finds the description's method for a member, and reports false for
+// anything that is not one -- an attribute, an operator, or a member of a class
+// the description no longer declares.
+func methodOf(c Class, m Member) (Method, bool) {
+	if m.Kind != MemberCall {
+		return Method{}, false
+	}
+	for _, x := range c.Methods {
+		if x.Name == m.Name {
+			return x, true
+		}
+	}
+	return Method{}, false
 }
 
 func kindWord(k int) string {

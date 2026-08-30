@@ -55,8 +55,18 @@ type Member struct {
 	// than "leave the argument out", and M.call's trailing-argument trim already
 	// means the second thing.
 	Optional bool
-	Args     []FieldSpec
-	Rets     []FieldSpec
+	// Doc is the DESCRIPTION's own prose for this member, flattened onto one
+	// line and cut at its first sentence -- see FirstSentence for the policy and
+	// the measurement behind it.
+	//
+	// GUEST-SIDE ONLY. It is emitted as a doc comment by both binding
+	// generators and rendered by `fklua docs`, and it deliberately does NOT
+	// reach the packaged member table: that table ships inside every mod, and
+	// 148 KB of prose no host call reads would be paid by every player on every
+	// load. Neither LuaSourceWith nor APISignature looks at it.
+	Doc  string
+	Args []FieldSpec
+	Rets []FieldSpec
 	// TypedArgs is a SECOND argument list for the same member id, and only a
 	// method whose parameter table is a discriminated union has one.
 	//
@@ -1325,8 +1335,83 @@ func GenerateMembers(a *API) Report {
 	for i := range r.Members {
 		r.Members[i].ID = i + 1 // 1-based, matching the Lua table
 	}
+	attachDocs(a, &r)
 	r.Omitted, r.OmittedBy = m.omissions()
 	return r
+}
+
+// attachDocs fills every member's Doc from the description's own prose.
+//
+// A POST-PASS RATHER THAN A FIELD THREADED THROUGH THE WALK ABOVE, because a
+// member is built in eight places up there -- a method, four attribute kinds,
+// the custom-table handle variant, the index operator and its write half -- and
+// eight assignments of one fact is the shape this repo keeps meeting. One index,
+// one loop, and a member the description has nothing to say about keeps an empty
+// Doc rather than a placeholder.
+//
+// THE KEY IS (class, name, IS IT A METHOD). A class may declare a method and an
+// attribute of the same name, which is what memberRename exists for one file
+// over, so a key that dropped the last term would hand one of them the other's
+// prose.
+func attachDocs(a *API, r *Report) {
+	docs := map[string]string{}
+	for _, c := range a.Classes {
+		for _, meth := range c.Methods {
+			docs[c.Name+"::"+meth.Name+"/m"] = meth.Description
+		}
+		for _, at := range c.Attributes {
+			docs[c.Name+"::"+at.Name+"/a"] = at.Description
+		}
+		for _, op := range c.Operators {
+			// An operator is a member with no name a caller writes, so its
+			// prose is the only thing saying what obj[k] means on this class.
+			docs["::"+c.Name+"/"+op.Name] = op.Description
+		}
+	}
+	for _, gf := range a.GlobalFunctions {
+		docs["::"+gf.Name+"/m"] = gf.Description
+	}
+	for i := range r.Members {
+		m := &r.Members[i]
+		var d string
+		switch m.Kind {
+		case MemberCall, MemberGlobalFunc:
+			d = docs[m.Class+"::"+m.Name+"/m"]
+		case MemberIndex, MemberIndexSet, MemberLen, MemberSelf:
+			d = docs["::"+m.Class+"/"+m.Name]
+		default:
+			d = docs[m.Class+"::"+m.Name+"/a"]
+		}
+		m.Doc = FirstSentence(d)
+	}
+}
+
+// FirstSentence flattens the description's prose onto one line and keeps its
+// first sentence.
+//
+// FIRST SENTENCE RATHER THAN THE WHOLE THING, and the policy is a measurement:
+// the full prose of every member is 324,058 bytes at the GA pin against 148,401
+// for the first sentences, and what the second and later sentences carry is
+// mostly examples and cross-references that the docs renderer shows in full
+// anyway. The generated bindings are SOURCE -- nothing here reaches the packaged
+// Lua, which is compiled from the wasm -- so what this costs is a bigger file to
+// compile and a reader who has the sentence they needed at the call site.
+//
+// The API's own [link](runtime:Foo) markup and its newlines are stripped by
+// oneLine, which the docs renderer has always used for the same reason: it is
+// not markdown any renderer here understands, and stripping the scheme leaves a
+// readable label rather than a dead link.
+func FirstSentence(s string) string {
+	s = oneLine(s)
+	// A sentence ends at `. ` and not at every `.`: the descriptions are full of
+	// `defines.events`, `1.0` and `e.g.`, and cutting at the first period would
+	// truncate a third of them mid-clause.
+	for i := 0; i+1 < len(s); i++ {
+		if (s[i] == '.' || s[i] == '!' || s[i] == '?') && s[i+1] == ' ' {
+			return s[:i+1]
+		}
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
