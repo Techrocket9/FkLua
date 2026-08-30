@@ -83,15 +83,27 @@ func TestTheGlobalFunctionsAreBound(t *testing.T) {
 	}
 
 	// THE ID ORDER, which is not decoration. Member ids are dense indices into
-	// the report's slice, so a global function inserted anywhere but the END
-	// renumbers every member below it -- an 8,000-line golden diff with the real
-	// change somewhere inside it. They are appended, so these are the last three
-	// ids in the table and nothing before them moved.
+	// the report's slice, so a global function inserted anywhere but AFTER EVERY
+	// CLASS renumbers every member below it -- an 8,000-line golden diff with the
+	// real change somewhere inside it.
+	//
+	// THE PROPERTY IS "AFTER EVERY CLASS" AND NOT "LAST IN THE TABLE", and the
+	// difference arrived with the method handle twins. Appending is PER ROUND:
+	// each family goes after everything that existed when it was added, so the
+	// global functions sit after every class member and the twins sit after them,
+	// and no id that existed when either landed moved. Asserting "the last three"
+	// would have made the next appended family look like a defect in this one.
+	var lastClass int
+	for _, m := range r.Members {
+		if m.Class != "" && m.Kind != MemberCallHandle && m.ID > lastClass {
+			lastClass = m.ID
+		}
+	}
 	for _, name := range theGlobalFunctions {
-		if m, ok := byName[name]; ok && m.ID <= len(r.Members)-len(theGlobalFunctions) {
-			t.Errorf("%s has id %d of %d members: the global functions are "+
-				"appended AFTER every class so that adding one cannot renumber "+
-				"anything", name, m.ID, len(r.Members))
+		if m, ok := byName[name]; ok && m.ID <= lastClass {
+			t.Errorf("%s has id %d and the last class member has %d: the global "+
+				"functions are appended AFTER every class so that adding one cannot "+
+				"renumber anything", name, m.ID, lastClass)
 		}
 	}
 }

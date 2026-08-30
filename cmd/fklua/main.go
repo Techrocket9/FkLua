@@ -2613,6 +2613,14 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 	fmt.Printf("  %4d of those readable attributes are a LuaCustomTable and get a\n",
 		bound[factorio.MemberGetHandle])
 	fmt.Println("       SECOND, handle-returning member beside the materialising one.")
+	// ...AND THE METHOD HALF, which is the same gap and was the half kind 7 left
+	// open: eleven members RETURN a LuaCustomTable and each materialised its
+	// whole result per call. On its own line for the reason the one above has
+	// one, and counted separately in the census for the same reason -- folding
+	// the two would make the day this landed read as an attribute count moving.
+	fmt.Printf("  %4d METHODS return a LuaCustomTable and get the same twin, which is\n",
+		bound[factorio.MemberCallHandle])
+	fmt.Println("       what makes an index lookup on the result reachable at all.")
 	// THE INDEX OPERATORS' WRITE HALF, which is the one member count here the
 	// description cannot be asked for: an operator carries a read_type and never
 	// a write_type, so what `obj[k] = v` exists for is PROSE, read through an
@@ -2622,11 +2630,11 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 		bound[factorio.MemberIndexSet])
 	fmt.Println("       allowlist in gen.go: the description declares no write side for one.")
 	// And the sum, stated, because a decomposition nobody adds up is a list.
-	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d + %d + %d is the same number.\n",
+	fmt.Printf("  %4d members in the table, and %d + %d + %d + %d + %d + %d + %d + %d + %d is the same number.\n",
 		len(r.Members), bound[factorio.MemberCall], bound[factorio.MemberGet],
 		bound[factorio.MemberSet], bound[factorio.MemberGetEq], nOps,
 		bound[factorio.MemberGetHandle], bound[factorio.MemberIndexSet],
-		bound[factorio.MemberGlobalFunc])
+		bound[factorio.MemberGlobalFunc], bound[factorio.MemberCallHandle])
 	// The identity the census carries, printed where the numbers are. It closes
 	// exactly, in both languages, and TestTheCensusMemberArithmeticCloses is
 	// what keeps it closing -- it did NOT close until the string-enum constants

@@ -28,6 +28,16 @@ Some Factorio classes are used through Lua operators rather than named members: 
 
 Reaching one on a `LuaCustomTable` takes two calls, and that is the cheap way round. An attribute such as `force.technologies` is a custom table, so reading it whole materializes every entry across the boundary; `TechnologiesRaw()` hands back the handle instead and `Get(key)` reads the one entry you wanted.
 
+**A method that returns a custom table has the same twin.** The filtered prototype getters and `get_player_settings` return one, so `GetEntityFilteredRaw(filters)` (Rust: `get_entity_filtered_raw`) hands back the handle and the lookup is a second call, where the plain form copies every matching prototype into the guest first. Both forms stay: the materializing read is the right answer for iterating the whole result, and the handle is the right answer for a point lookup.
+
+```go
+raw, err := fkapi.Prototypes.GetEntityFilteredRaw(filters)
+if err != nil {
+    return
+}
+proto, err := fkapi.LuaCustomTable{Object: raw}.Get(fkapi.OfString("iron-chest"))
+```
+
 Two of those operators have a write half, `Set(key, value)`, because Factorio documents an assignment through them: a `LuaCustomTable` holding mod settings, and a `LuaFluidBox`. Writing a mod setting is the reason it exists, and it is the only way a mod changes its own runtime-global setting:
 
 ```go

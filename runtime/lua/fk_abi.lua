@@ -304,6 +304,23 @@ M.IDXSET = 8      -- obj[k] = v  the __newindex operator
 -- report_missing, exactly as a removed member of a class is -- which is what
 -- generic dispatch buys and what a per-function import would not.
 M.GFUNC = 9       -- log(...), localised_print(...), table_size(...)
+-- CALLH is GETH for a METHOD: call obj:method(...) and hand back the OBJECT
+-- rather than a copy of what is in it.
+--
+-- It closes the half of "nothing in the API returns a LuaCustomTable" that kind
+-- 7 left open. Eleven members RETURN one at every committed pin -- the ten
+-- filtered prototype getters and LuaSettings::get_player_settings -- and each
+-- materialised its whole result per call, so a point lookup through
+-- get_entity_filtered copied thousands of prototypes into the guest heap.
+--
+-- It needs no branch of its own for GETH's reason exactly: the call is
+-- identical and everything that differs is in the declared return kind, which
+-- write_value has always dispatched on. So it shares CALL's fall-through below
+-- and this line is the whole of its cost here. It is a KIND rather than "a CALL
+-- whose return is a handle" because the BINDING GENERATORS need to know which of
+-- the two members they are looking at, and inferring it from the return's shape
+-- would be a rule derived where a kind is a statement.
+M.CALLH = 10      -- obj:method(...), as a handle
 --
 -- EQ exists so a guest can ask `entity.name == "transport-belt"` WITHOUT the
 -- name ever crossing into guest memory. The comparison is one Lua `==` on a

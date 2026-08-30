@@ -1226,7 +1226,7 @@ pub extern "C" fn fk_api_pin_2_0_77() {}
 // the same pin. Language-independent: a Go guest generated from this
 // description carries the same name.
 #[no_mangle]
-pub extern "C" fn fk_api_sig_be51c0c62aca() {}
+pub extern "C" fn fk_api_sig_a130c3ec9c74() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
 // free functions here for that reason. fk_call's handle operand is
@@ -45549,6 +45549,196 @@ impl LuaPrototypes {
         Ok(v0)
     }
 
+    pub fn get_achievement_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4263, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_decorative_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4264, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_entity_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4265, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_equipment_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4266, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_fluid_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4267, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_item_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4268, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_mod_setting_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4269, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_recipe_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4270, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_technology_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4271, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_tile_filtered_raw(&self, filters: &[Value]) -> Result<Object, Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 8];
+        let mut r = [0u8; 4];
+        let pfilters = galloc((filters.len() * 16) as u32);
+        for (i, e) in filters.iter().enumerate() {
+            let d = unsafe { core::slice::from_raw_parts_mut((pfilters as usize + i * 16) as *mut u8, 16) };
+            write_dyn(&mut d[0..], e);
+        }
+        wr_u32(&mut a[..], 0, pfilters);
+        wr_u32(&mut a[..], 4, filters.len() as u32);
+        let st = unsafe { fk_call(self.0.0, 4272, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
 }
 
 /// A handle to a `LuaProxyContainerControlBehavior`.
@@ -52783,6 +52973,18 @@ impl LuaSettings {
     pub fn startup_raw(&self) -> Result<Object, Status> {
         let mut r = [0u8; 4];
         let st = unsafe { fk_call(self.0.0, 3486, 0, r.as_mut_ptr() as u32) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        let v0 = Object(rd_u32(&r[..], 0));
+        Ok(v0)
+    }
+
+    pub fn get_player_settings_raw(&self, player: Object) -> Result<Object, Status> {
+        let mut a = [0u8; 4];
+        let mut r = [0u8; 4];
+        wr_u32(&mut a[..], 0, player.0);
+        let st = unsafe { fk_call(self.0.0, 4273, a.as_ptr() as u32, r.as_mut_ptr() as u32) };
         if st != 0 {
             return Err(Status(st));
         }

@@ -258,6 +258,37 @@ const (
 	// hold. A 0 that is WRITTEN DOWN is a decision, and this is the decision
 	// coming due.
 	MemberGlobalFunc = 9
+
+	// MemberCallHandle is MemberGetHandle for a METHOD: it calls the member and
+	// returns the OBJECT rather than a copy of what is in it.
+	//
+	// Kind 7 closed the ATTRIBUTE half of "nothing in the API returns a
+	// LuaCustomTable" and left the METHOD half open, which is eleven members at
+	// every committed pin: the ten filtered prototype getters
+	// (LuaPrototypes::get_entity_filtered and its nine siblings) and
+	// LuaSettings::get_player_settings. Each of those materialises its whole
+	// result per call -- get_entity_filtered over a broad filter is thousands of
+	// prototypes into the guest heap to look one up -- and each is the shape a
+	// prototype browser is made of.
+	//
+	// A SECOND MEMBER OVER THE SAME METHOD, which is kind 7's own argument
+	// unchanged: the materialising read is the right answer for iterating and is
+	// what an existing guest calls, this is the right answer for a point lookup
+	// through the index operator, and which one a guest wants is a question about
+	// the guest. It is a real member with its own id for kind 7's reason too --
+	// the HOST does different work, writing a handle where it wrote a
+	// (ptr, count) -- and unlike `<Name>Into` it therefore cannot share one.
+	//
+	// A KIND RATHER THAN "A CALL WHOSE RETURN IS A HANDLE". The two members are
+	// identical in the ABI -- MemberCallHandle shares MemberCall's line in
+	// M.invoke the way MemberGetHandle shares MemberGet's, because everything that
+	// differs is in the declared return kind that write_value has always
+	// dispatched on -- so the kind buys nothing at run time and everything at
+	// GENERATE time: the naming switch has to know which of the two members it is
+	// looking at, and inferring that from the return's shape would be a rule
+	// derived where a kind is a statement. It is also what makes the twin
+	// countable, which is the F-IDX lesson.
+	MemberCallHandle = 10
 )
 
 // IsOperator reports the three kinds that are Lua metamethods rather than named
@@ -518,6 +549,24 @@ func typeCanBeAFunction(t Type) bool {
 // deliberately erases it -- the two marshal identically -- which is why this
 // asks the description again rather than looking at the FieldSpec.
 func isCustomTable(t Type) bool { return t.Complex == "LuaCustomTable" }
+
+// methodNamed finds the description's own Method behind a built member, so the
+// twin pass can ask about the DECLARED return type rather than about what
+// mapType made of it -- the same distinction isCustomTable exists for.
+func methodNamed(a *API, class, name string) (Method, bool) {
+	for _, c := range a.Classes {
+		if c.Name != class {
+			continue
+		}
+		for _, m := range c.Methods {
+			if m.Name == name {
+				return m, true
+			}
+		}
+		return Method{}, false
+	}
+	return Method{}, false
+}
 
 // Skip records a member that could not be expressed, and why.
 type Skip struct {
@@ -1331,6 +1380,45 @@ func GenerateMembers(a *API) Report {
 		mem.Kind = MemberGlobalFunc
 		r.Members = append(r.Members, mem)
 	}
+
+	// THE METHOD TWINS, AFTER EVERYTHING, and after for the reason the global
+	// functions are: member ids are dense indices into this slice, so a member
+	// inserted beside the method it twins would renumber every member below it in
+	// the class and every class after it -- thousands of moved constants in the
+	// golden diff with the real change somewhere in the middle, and a stale
+	// downstream wasm calling a different function on every id it holds.
+	// Appending leaves every existing id exactly where it was.
+	//
+	// A SECOND PASS OVER THE METHODS ALREADY BUILT rather than a second walk of
+	// the description: `r.Members` is the authority on what actually became a
+	// member, so a method that was skipped or deferred cannot grow a twin, and the
+	// twin's own arguments are the ones buildMethod produced rather than a second
+	// mapping of the same parameters that could disagree with it.
+	//
+	// The gate is the DESCRIBED return type being a LuaCustomTable, exactly as it
+	// is for the attribute half: KindDict is also what a plain dictionary maps to,
+	// and a plain dictionary is a Lua table with no handle behind it.
+	var twins []Member
+	for _, mem := range r.Members {
+		if mem.Kind != MemberCall || len(mem.Rets) != 1 {
+			continue
+		}
+		meth, ok := methodNamed(a, mem.Class, mem.Name)
+		if !ok || len(meth.ReturnValues) != 1 ||
+			!isCustomTable(meth.ReturnValues[0].Type) {
+			continue
+		}
+		t := mem
+		t.Kind = MemberCallHandle
+		t.Rets = []FieldSpec{{Name: "r0", Kind: KindHandle,
+			Optional: mem.Rets[0].Optional}}
+		// The TYPED argument list is dropped: none of these eleven has a variant
+		// group, so it is always nil here, and carrying one would mean a second
+		// typed binding over a member whose only difference is what comes back.
+		t.TypedArgs = nil
+		twins = append(twins, t)
+	}
+	r.Members = append(r.Members, twins...)
 
 	for i := range r.Members {
 		r.Members[i].ID = i + 1 // 1-based, matching the Lua table

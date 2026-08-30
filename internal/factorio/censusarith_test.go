@@ -87,9 +87,9 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	sum := byKind[MemberCall] + byKind[MemberGet] + byKind[MemberSet] +
 		byKind[MemberGetEq] + byKind[MemberIndex] + byKind[MemberLen] +
 		byKind[MemberSelf] + byKind[MemberGetHandle] + byKind[MemberIndexSet] +
-		byKind[MemberGlobalFunc]
+		byKind[MemberGlobalFunc] + byKind[MemberCallHandle]
 	if sum != host {
-		t.Errorf("the nine accounted kinds sum to %d against %d members: a kind "+
+		t.Errorf("the ten accounted kinds sum to %d against %d members: a kind "+
 			"exists that no line of the deferral report mentions", sum, host)
 	}
 
@@ -112,6 +112,10 @@ func TestTheCensusMemberArithmeticCloses(t *testing.T) {
 	if cen.CustomTableHandles != byKind[MemberGetHandle] {
 		t.Errorf("census.json: custom_table_handle_members %d, generator %d",
 			cen.CustomTableHandles, byKind[MemberGetHandle])
+	}
+	if cen.CustomTableHandleMethods != byKind[MemberCallHandle] {
+		t.Errorf("census.json: custom_table_handle_methods %d, generator %d",
+			cen.CustomTableHandleMethods, byKind[MemberCallHandle])
 	}
 	if cen.IndexSetters != byKind[MemberIndexSet] {
 		t.Errorf("census.json: index_setter_members %d, generator %d",

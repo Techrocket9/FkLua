@@ -120,6 +120,22 @@ type CensusData struct {
 	// (`operators_bound` above), met from inside the generator instead of
 	// outside it.
 	CustomTableHandles int `json:"custom_table_handle_members"`
+	// CustomTableHandleMethods is the same twin over a METHOD that RETURNS a
+	// LuaCustomTable -- `GetEntityFilteredRaw()` beside `GetEntityFiltered()`.
+	// See MemberCallHandle.
+	//
+	// A SECOND ROW RATHER THAN A WIDENING OF THE ONE ABOVE, because the two
+	// answer different questions about the same gap: kind 7 counts the
+	// attributes that carry a LuaCustomTable and kind 10 the methods that return
+	// one, and they were closed a round apart. Folding them would have made the
+	// day the method half landed look like an attribute count that moved, which
+	// is the reading a version diff would take.
+	//
+	// It is 11 at every committed pin -- the ten filtered prototype getters and
+	// LuaSettings::get_player_settings -- and it read a written-down zero
+	// nowhere at all before this round, which is the failure shape this file
+	// exists to prevent.
+	CustomTableHandleMethods int `json:"custom_table_handle_methods"`
 	// IndexSetters is the WRITE half of an index operator -- `obj[k] = v`, a
 	// second member over an operator `operators_bound` already counts. See
 	// MemberIndexSet and indexWriteHalf.
@@ -352,6 +368,9 @@ func TakeCensus(a *API) (CensusData, error) {
 		if m.Kind == MemberGetHandle {
 			c.CustomTableHandles++
 		}
+		if m.Kind == MemberCallHandle {
+			c.CustomTableHandleMethods++
+		}
 		if m.Kind == MemberIndexSet {
 			c.IndexSetters++
 		}
@@ -493,6 +512,8 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("operators bound", old.OperatorsBound, c.OperatorsBound)
 	cmp("global functions bound", old.GlobalFunctionsBound, c.GlobalFunctionsBound)
 	cmp("LuaCustomTable handle members", old.CustomTableHandles, c.CustomTableHandles)
+	cmp("LuaCustomTable handle methods", old.CustomTableHandleMethods,
+		c.CustomTableHandleMethods)
 	cmp("index-assign members", old.IndexSetters, c.IndexSetters)
 	cmp("typed-arg members", old.TypedArgMembers, c.TypedArgMembers)
 	cmp("typed-arg bindings", old.TypedVariantBindings, c.TypedVariantBindings)

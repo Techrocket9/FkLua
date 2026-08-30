@@ -1251,7 +1251,7 @@ func fkAPIPin() {}
 // Language-independent: a Rust guest generated from this description
 // carries the same name.
 //
-//go:wasmexport fk_api_sig_be51c0c62aca
+//go:wasmexport fk_api_sig_a130c3ec9c74
 func fkAPISig() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
@@ -50182,6 +50182,206 @@ func (o LuaPrototypes) VirtualSignalRaw() (Object, error) {
 	return v0, nil
 }
 
+// GetAchievementFilteredRaw:
+func (o LuaPrototypes) GetAchievementFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4263, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetDecorativeFilteredRaw:
+func (o LuaPrototypes) GetDecorativeFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4264, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetEntityFilteredRaw:
+func (o LuaPrototypes) GetEntityFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4265, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetEquipmentFilteredRaw:
+func (o LuaPrototypes) GetEquipmentFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4266, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetFluidFilteredRaw:
+func (o LuaPrototypes) GetFluidFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4267, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetItemFilteredRaw:
+func (o LuaPrototypes) GetItemFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4268, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetModSettingFilteredRaw:
+func (o LuaPrototypes) GetModSettingFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4269, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetRecipeFilteredRaw:
+func (o LuaPrototypes) GetRecipeFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4270, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetTechnologyFilteredRaw:
+func (o LuaPrototypes) GetTechnologyFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4271, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetTileFilteredRaw:
+func (o LuaPrototypes) GetTileFilteredRaw(filters []Value) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[8]byte)(block(8))
+	r := (*[4]byte)(block(4))
+	pfilters := fkAlloc(uint32(len(filters)) * 16)
+	for i := range filters {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pfilters)+uintptr(i)*16)), 16)
+		writeDyn(&d[0], filters[i])
+	}
+	*(*uint32)(unsafe.Pointer(&a[0])) = pfilters
+	*(*uint32)(unsafe.Pointer(&a[4])) = uint32(len(filters))
+	if st := hostCall(o.h, 4272, ptr(&a[0]), ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
 // LuaProxyContainerControlBehavior wraps a handle to a LuaProxyContainerControlBehavior.
 type LuaProxyContainerControlBehavior struct{ Object }
 
@@ -57983,6 +58183,20 @@ func (o LuaSettings) StartupRaw() (Object, error) {
 	defer allocRelease(mark)
 	r := (*[4]byte)(block(4))
 	if st := hostCall(o.h, 3486, 0, ptr(&r[0])); st != 0 {
+		return Object{}, Status(st)
+	}
+	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}
+	return v0, nil
+}
+
+// GetPlayerSettingsRaw:
+func (o LuaSettings) GetPlayerSettingsRaw(player Object) (Object, error) {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[4]byte)(block(4))
+	r := (*[4]byte)(block(4))
+	*(*uint32)(unsafe.Pointer(&a[0])) = player.h
+	if st := hostCall(o.h, 4273, ptr(&a[0]), ptr(&r[0])); st != 0 {
 		return Object{}, Status(st)
 	}
 	v0 := Object{*(*uint32)(unsafe.Pointer(&r[0]))}

@@ -929,10 +929,10 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 		name = "call"
 	case m.Kind == MemberSet:
 		name = "set_" + name
-	case m.Kind == MemberGetHandle:
-		// The HANDLE variant of an attribute read. Suffixed rather than given a
-		// name of its own so the two sit together in the generated file: see
-		// gogen.go, same suffix, same reason.
+	case m.Kind == MemberGetHandle, m.Kind == MemberCallHandle:
+		// The HANDLE variant of an attribute read, or of a METHOD call. Suffixed
+		// rather than given a name of its own so the two sit together in the
+		// generated file: see gogen.go, same suffix, same reason.
 		name += "_raw"
 	case m.Kind == MemberGetEq:
 		// `entity.name_is("transport-belt")`, reading as the predicate it is.

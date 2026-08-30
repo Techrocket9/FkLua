@@ -1075,11 +1075,12 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 		name = "Call"
 	case m.Kind == MemberSet:
 		name = "Set" + name
-	case m.Kind == MemberGetHandle:
-		// The HANDLE variant of an attribute read. Suffixed rather than given a
-		// name of its own so the two sit together in the generated file and in
-		// any listing: TechnologiesRaw is next to Technologies, and a reader
-		// looking for one finds the other.
+	case m.Kind == MemberGetHandle, m.Kind == MemberCallHandle:
+		// The HANDLE variant of an attribute read, or of a METHOD call. Suffixed
+		// rather than given a name of its own so the two sit together in the
+		// generated file and in any listing: TechnologiesRaw is next to
+		// Technologies and GetEntityFilteredRaw next to GetEntityFiltered, and a
+		// reader looking for one finds the other.
 		name += "Raw"
 	case m.Kind == MemberGetEq:
 		// `entity.NameIs("transport-belt")`. The suffix reads as the predicate

@@ -22,12 +22,13 @@
   "operators_bound": 9,
   "global_functions_bound": 3,
   "custom_table_handle_members": 58,
+  "custom_table_handle_methods": 11,
   "index_setter_members": 1,
   "typed_arg_members": 4,
   "typed_variant_bindings": 4,
   "table_shaped_concepts": 345,
   "pure_string_enum_concepts": 46,
-  "host_members_bound": 4837,
+  "host_members_bound": 4848,
   "host_members_skipped": 4,
   "host_skips_by_reason": {
     "callback parameter": 3,
@@ -40,7 +41,7 @@
   "host_events_bound": 223,
   "event_scratch_bytes": 128,
   "hook_payload_fields": 6,
-  "go_members_bound": 4832,
+  "go_members_bound": 4843,
   "go_members_deferred": 5,
   "go_deferrals_by_reason": {
     "handler is a Lua function": 5
@@ -54,7 +55,7 @@
   "go_define_accessors": 1183,
   "go_event_payloads_deferred": 0,
   "go_event_deferrals_by_reason": {},
-  "rust_members_bound": 4832,
+  "rust_members_bound": 4843,
   "rust_members_deferred": 5,
   "rust_deferrals_by_reason": {
     "handler is a Lua function": 5
