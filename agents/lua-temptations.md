@@ -131,8 +131,8 @@ The census cannot see most of what this survey found: a member that binds and ca
 
 ## The queue (2026-08-26)
 
-The four rounds above are executable work. **ROUND 1 IS SHIPPED (2026-08-30)**
-and the other three are queued. Amendments since the survey was written, folded
+The four rounds above are executable work. **ROUNDS 1 AND 2 ARE SHIPPED
+(2026-08-30)** and the other two are queued. Amendments since the survey was written, folded
 into their rounds:
 
 - **Round 1 SHIPPED on 2026-08-30**, and its record is CLAUDE.md's "The
@@ -165,8 +165,55 @@ into their rounds:
     `fklua lock --check`'s question, and the wasm is in neither -- an author who
     regenerated, re-locked and did not rebuild has a current lock and a stale
     wasm, which IS the reported defect.
-- **Round 2** gains the typed `ModSetting` accessors (Bool/Number/String over
-  the untyped Value field).
+- **Round 2 SHIPPED on 2026-08-30**, and its record is CLAUDE.md's "The
+  GUI-and-hands round". All six items landed, including the `ModSetting`
+  accessors this line was an amendment for. What landed, and where it deviated
+  from what this survey proposed:
+  - **`Value` accessors** in both languages -- two families, a lookup that
+    chains through a nil miss and a comma-ok/Option read, plus `Has`, `Len`,
+    `IsNil` and the `Or` defaults. Nothing coerces. No census row: they are in
+    the generated PREAMBLE, so the instrument is an end-to-end guest test in
+    both languages against one transcript;
+  - **typed args for the variant-defeated members**, and this is where the
+    survey's own framing moved. It filed them as ergonomics; round 4b's
+    measurement says the WIRE FORM is a 3.3x host-side difference, so the
+    shared parameters cross as a TIER-1 BLOCK plus one optional tier-2 slot for
+    the variant tail, over the SAME member id, through a second import
+    (`fk.call_typed`). Measured on the shipped path at **0.735x for the audited
+    GUI row and 0.399x for a row with nothing union-typed in it** -- the range
+    is what a union-typed shared parameter costs, since it stays a tier-2 slot
+    inside the block. The block is `LayoutStruct`'s ordinary output, which is
+    what 4b's residual needs;
+  - **the description's prose as doc comments**, first sentence, 3,566 of 4,262
+    members, +8.0% of the Go bindings and +5.6% of the Rust; and **parameter
+    lists and variant-group fields in `fklua docs`**, with a worked GUI example
+    beside it in `docs/factorio-api.md`;
+  - **`fklog` in both guest trees**, then **`Value.Dump`** in the fkapi
+    preamble writing into a borrowed buffer. The split is the coupling: fklog
+    depends on `fk` alone so it cannot drag the API pin into a consumer, and
+    the two meet over a `[]byte` and a count. Parity is a shared golden,
+    because nothing generates either copy and the census cannot see them;
+  - **the docs relocation**, as THREE pages rather than five: `docs/rules.md`,
+    `docs/debugging.md`, and `docs/from-lua.md` carrying the stdlib mapping
+    table, the randomness note and the handle-retention note together, because
+    from a reader's side those are one thing;
+  - **typed `ModSetting` accessors**, from a rule over the LAYOUT (one
+    mandatory dyn field) rather than a name list.
+
+  Three things it found that were not on anyone's list. An optional CONTAINER
+  field of a generated struct set its presence byte unconditionally in RUST and
+  conditionally in GO, so the two backends called the engine differently from
+  one spec -- the AD5 shape, latent because nothing here had ever encoded one,
+  and found by the typed-args mirror on its first run. The generator's comment
+  naming "the four" variant-group methods has been wrong since 2.1.16, where
+  there are five. And a tier-2 NUMBER is dearer to decode than a short string,
+  because a number is a double read through `ldf64` where a six-byte string
+  takes `read_string`'s fast path.
+
+  Member ids did not move and `host_members_bound` did not move. `fk_api_sig_*`
+  did, `ed025ff06828` -> `be51c0c62aca`, identically in both languages, because
+  the typed block is part of the wire and is folded into the digest --
+  **so a downstream consumer needs a rebuild, not a re-pin.**
 - **Round 3** gains the verify-then-publish of the simulation bridge recipe
   (`SimulationDefinition.mods` plus a remote call into the seam; assembled
   from documented pieces, never probed end to end), and the diff blind spot
