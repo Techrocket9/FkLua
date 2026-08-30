@@ -351,6 +351,15 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 		// deferred and counted rather than silently dropped.
 		seen := map[string]bool{}
 		for _, m := range byClass[cls] {
+			// A MEMBER NO GUEST CAN CALL USEFULLY IS DEFERRED RATHER THAN BOUND.
+			// See Member.Unfillable: the host binds all five, the marshalling is
+			// right, and there is nothing a guest can put in the argument -- so
+			// this turns a green function whose every call is a silent no-op into
+			// a compile error naming the reason.
+			if m.Unfillable != "" {
+				out.defer1(m.Unfillable)
+				continue
+			}
 			src, name, sig, why, ok := goMember(structs, typeName, m)
 			if !ok {
 				out.defer1(why)

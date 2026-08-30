@@ -35,10 +35,11 @@
   "fields_omitted_by_reason": {},
   "host_events_bound": 219,
   "event_scratch_bytes": 128,
-  "go_members_bound": 4260,
-  "go_members_deferred": 2,
+  "go_members_bound": 4255,
+  "go_members_deferred": 7,
   "go_deferrals_by_reason": {
-    "Go name collides with another member of the class": 2
+    "Go name collides with another member of the class": 2,
+    "handler is a Lua function": 5
   },
   "go_literals_deferred": 1,
   "go_literal_deferrals_by_reason": {
@@ -49,10 +50,11 @@
   "go_define_accessors": 1137,
   "go_event_payloads_deferred": 0,
   "go_event_deferrals_by_reason": {},
-  "rust_members_bound": 4260,
-  "rust_members_deferred": 2,
+  "rust_members_bound": 4255,
+  "rust_members_deferred": 7,
   "rust_deferrals_by_reason": {
-    "Rust name collides with another member of the class": 2
+    "Rust name collides with another member of the class": 2,
+    "handler is a Lua function": 5
   },
   "rust_literals_deferred": 1,
   "rust_literal_deferrals_by_reason": {

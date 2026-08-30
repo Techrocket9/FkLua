@@ -57,6 +57,30 @@ type Member struct {
 	Optional bool
 	Args     []FieldSpec
 	Rets     []FieldSpec
+	// Unfillable is set when the HOST can bind this member and no GUEST can ever
+	// call it usefully. It carries the reason a guest generator defers on.
+	//
+	// The distinction from a Skip is the whole point, and it is why this is a
+	// field on Member rather than a refusal in buildMethod. A skip is a member
+	// the marshalling layer could not express: it never reaches the table,
+	// fk.call answers ERR_NO_MEMBER, and nothing claims it exists. This is a
+	// member that IS in the table, correctly marshalled, whose argument is a
+	// value a wasm guest has no way to construct -- so binding it publishes a
+	// green, plausible function whose every possible call is a silent no-op.
+	//
+	// THE FIVE ARE LuaBootstrap's on_init, on_load, on_event,
+	// on_configuration_changed and on_nth_tick, at every pin this repo owns.
+	// Four are harmlessly shadowed by FkLua's own hooks; on_nth_tick is not, and
+	// was the one member in the whole API a guest could call, get OK from, and
+	// never hear from again. The documented substitute is a self-re-arming
+	// fk.Defer() chain, at up to one dispatch per tick where the engine's own
+	// form costs one per N.
+	//
+	// GUEST-SIDE ONLY, deliberately: the host table keeps all five, so no member
+	// id moves and a mod already in the field packages the table it packaged
+	// before, byte for byte. What changes is that a guest naming one now fails
+	// to COMPILE rather than failing to work.
+	Unfillable string
 }
 
 // The member kinds, mirroring runtime/lua/fk_abi.lua.
@@ -277,6 +301,58 @@ var indexWriteHalf = map[string]bool{
 	"LuaGuiElement":    false,
 	"LuaInventory":     false,
 	"LuaTransportLine": false,
+}
+
+// UnfillableHandler is the deferral reason both guest generators report for a
+// member whose argument can be a Lua function. It is a constant because it is a
+// census KEY -- `go_deferrals_by_reason` / `rust_deferrals_by_reason` are read
+// by the version diff and by the gate, and two generators spelling one bucket
+// differently would split the row in half silently.
+const UnfillableHandler = "handler is a Lua function"
+
+// typeCanBeAFunction reports a type that is, or can be, a Lua function.
+//
+// It walks the whole type rather than testing the top level, because the shape
+// that matters is a UNION: LuaBootstrap's five handler-taking members declare
+// `union(function, nil)`, which canonicalUnion cannot type and mapType therefore
+// renders as tier 2 -- an honest encoding of a value that is only ever nil, and
+// exactly why those five bound green for as long as the generators have existed.
+// The three positions where a bare `function` appears (add_command's callback,
+// add_interface's dictionary VALUE, get_event_handler's return) are already host
+// SKIPS and never reach a guest generator, so this predicate's whole live
+// population is the five -- which is the number to expect if a pin ever moves it.
+func typeCanBeAFunction(t Type) bool {
+	if t.Complex == "function" {
+		return true
+	}
+	for _, sub := range []*Type{t.Value, t.Key} {
+		if sub != nil && typeCanBeAFunction(*sub) {
+			return true
+		}
+	}
+	for _, o := range t.Options {
+		if typeCanBeAFunction(o) {
+			return true
+		}
+	}
+	for _, v := range t.Values {
+		if typeCanBeAFunction(v) {
+			return true
+		}
+	}
+	for _, p := range t.Parameters {
+		if typeCanBeAFunction(p.Type) {
+			return true
+		}
+	}
+	for _, g := range t.VariantGroups {
+		for _, p := range g.Parameters {
+			if typeCanBeAFunction(p.Type) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isCustomTable reports whether a type IS a LuaCustomTable at its top level.
@@ -1385,6 +1461,18 @@ func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {
 		return Member{}, fmt.Errorf("variadic parameter")
 	}
 	out := Member{Class: class, Name: meth.Name, Kind: MemberCall}
+
+	// A PARAMETER THAT CAN BE A LUA FUNCTION IS ONE NO GUEST CAN FILL, and the
+	// member is marked rather than skipped. See Member.Unfillable: the host
+	// binds it, the marshalling is right, and only the guest side has nothing to
+	// send. A union of function and nil collapses to tier 2 here, which is a
+	// correct encoding of a value that is only ever nil.
+	for _, p := range meth.Parameters {
+		if typeCanBeAFunction(p.Type) {
+			out.Unfillable = UnfillableHandler
+			break
+		}
+	}
 
 	if len(meth.VariantGroups) > 0 {
 		// The method's own parameter table is a discriminated union -- the four

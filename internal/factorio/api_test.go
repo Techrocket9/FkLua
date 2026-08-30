@@ -1,6 +1,7 @@
 package factorio
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +64,42 @@ func loadShapeAPI(t *testing.T, version string) *API {
 		t.Fatalf("LoadAPI(%s): %v", version, err)
 	}
 	return a
+}
+
+// committedVersions lists every description this working directory owns.
+//
+// For a test whose property is about the DESCRIPTION FAMILY rather than about
+// one pin: "these five members take a Lua function", "exactly two writable
+// attributes are a union with a class in it". Asserting such a thing at one pin
+// makes it a coincidence of which description happened to be the default, and
+// the generators are one code path serving all of them -- which is the lesson
+// TestEveryCommittedDescriptionHasACurrentCensus was written for, one level over.
+//
+// It reads the directory rather than listing versions, so a `fklua api pull`
+// widens every such test on the day it lands.
+func committedVersions(t *testing.T) []string {
+	t.Helper()
+	root := filepath.Join("..", "..", "api")
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("reading %s: %v", root, err)
+	}
+	var out []string
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, e.Name(), "runtime-api.json")); err != nil {
+			// A version directory with no description is half a pull, not a
+			// committed description.
+			continue
+		}
+		out = append(out, e.Name())
+	}
+	if len(out) == 0 {
+		t.Fatal("no committed descriptions: a walk that matched nothing passes forever")
+	}
+	return out
 }
 
 // The census lives in api/<version>/census.json, not in Go literals here.

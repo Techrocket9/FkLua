@@ -6,7 +6,7 @@ Read `CLAUDE.md` first — Invariant A is the contract every value crossing this
 
 **Status: reachable end to end, and verified in Factorio 2.0.77.** The handle table, dispatch, all three marshalling tiers, event dispatch, the generator, the Go bindings and the `control.lua` wiring are built and tested.
 
-Not built: the guest-side **C** bindings. At the default 2.0.77 pin the host carries **4262 of 4266** member entries; the 4 it does not are three callback parameters and one variadic — **and three of those four are reachable now, through a seam rather than a binding: see "The callback seam" below.** **2 are deferred on each of the Go and Rust sides**, both a name colliding with another member of the same class, listed under `go_deferrals_by_reason` and `rust_deferrals_by_reason` in the census and printed IN FULL by `fklua gen-bindings` since the campaign found two gaps hiding in the fourteen groups the headline never named — and every one of them is reachable from Lua.
+Not built: the guest-side **C** bindings. At the default 2.0.77 pin the host carries **4262 of 4266** member entries; the 4 it does not are three callback parameters and one variadic — **and three of those four are reachable now, through a seam rather than a binding: see "The callback seam" below.** **7 are deferred on each of the Go and Rust sides** -- five taking a Lua function, which no guest can construct, and two a name colliding with another member of the same class -- listed under `go_deferrals_by_reason` and `rust_deferrals_by_reason` in the census and printed IN FULL by `fklua gen-bindings` since the campaign found two gaps hiding in the fourteen groups the headline never named — and every one of them is reachable from Lua.
 
 **Every count in this file is PER PIN, and the pin is a build-time axis.** These are 2.0.77's, which is the general-availability release and therefore the default; the 2.1.x descriptions are committed too, and the newest of them, **2.1.17**, binds **4,857 of 4,859**. Take a number from `api/<version>/census.json` rather than from here, and if you move the default pin, `agents/versioning.md`'s "Moving the default pin" lists every row below that has to move with it.
 
@@ -460,11 +460,11 @@ A failed element frees the block it was writing into, the same rule `encode_rets
 
 ---
 
-## The guest bindings — **Go and Rust built (4260 of 4262 each at the 2.0.77 pin), C not**
+## The guest bindings — **Go and Rust built (4255 of 4262 each at the 2.0.77 pin), C not**
 
 `fklua gen-bindings` writes `guest/go/fkapi/fkapi.go` and `guest/rust/fkapi/src/api.rs`, committed as golden files so a regeneration is a reviewable diff. `--check` is the CI gate: a stale checkout is a build failure, not a method a mod author finds missing.
 
-**4260 of 4262 members bound (99.95%), 2 deferred** at the default 2.0.77 pin — plus **240 `Into` variants**, which are second bindings over members already counted rather than members of their own. Scalars, strings, handles, optionals, structs, arrays, dictionaries, tier-2 dynamic values, **an array field inside a struct**, and containers nested to any depth. (The 4160/27 this line read until the nested-container round is the number the ports round left behind, and it is the shape of the history below rather than the state now.)
+**4255 of 4262 members bound (99.84%), 7 deferred** at the default 2.0.77 pin — plus **240 `Into` variants**, which are second bindings over members already counted rather than members of their own. Scalars, strings, handles, optionals, structs, arrays, dictionaries, tier-2 dynamic values, **an array field inside a struct**, and containers nested to any depth. (The 4160/27 this line read until the nested-container round is the number the ports round left behind, and it is the shape of the history below rather than the state now.)
 
 **Both backends, to the member id, since 2026-08-03.** Rust was at 4140/47 for four milestones while Go moved to 4160/27, and every one of the twenty was a branch the Rust generator had not grown rather than a shape Rust could not express. What closed it is the ports round, and what keeps it closed is the census: `rust_members_bound`, `rust_members_deferred`, `rust_deferrals_by_reason`, `rust_members_inherited`, `rust_event_payload_structs` and `rust_define_accessors` sit beside their Go twins in one committed file, so a feature added to one backend and not the other is a diff rather than something four mod authors report independently. *Enforced by `TestBothBackendsBindTheSameMembers`, which compares the counts AND the member id sets — a missing member and an extra one cancel in a total.*
 
@@ -1000,6 +1000,18 @@ The scan is deliberately shallow — an `i32.const` feeding the member operand a
 ### A skipped member is skipped, never faked
 
 A member whose signature cannot be expressed is omitted with a reason. A guest author who finds a binding missing can see why in the report; one who finds a binding that exists and returns nonsense cannot. For the same reason, **one unexpressible field skips the whole struct** rather than being quietly dropped — a struct missing a field is a wrong value the guest cannot detect.
+
+### ...and a member no guest can FILL is deferred, never bound — `Member.Unfillable`
+
+**Five members bound green and could never work, which is a different failure from a skip.** `LuaBootstrap`'s `on_init`, `on_load`, `on_event`, `on_configuration_changed` and `on_nth_tick` each take `union(function, nil)`. A `function` option disqualifies the union (see `canonicalUnion`'s section C), so `mapType` renders it as tier 2 and all five generated a `handler Value` parameter — a correct encoding of a value that is only ever nil, which is Factorio's **unregister**. There is no callable Lua value a wasm guest can construct and there never will be, so every possible call was a successful no-op.
+
+**Four of the five are harmlessly shadowed by FkLua's own hooks. `on_nth_tick` is not**, and it was the one member in the whole API a guest could call, get `OK` from, and never hear from again — with no census row, compile check or document saying so. Seven of thirteen audited mods use `on_nth_tick`; the substitute is the self-re-arming `fk.Defer()` chain in [`agents/guests.md`](guests.md), which costs up to one dispatch per tick where the engine's own form costs one per N.
+
+**A MARK ON THE MEMBER, NOT A REFUSAL IN `buildMethod`, and the difference is a member id.** A skip never reaches the table; ids are dense sorted indices over that table, so removing five would shift every later id and answer an existing guest's calls with different members — the defect `checkAPIPin` exists to refuse. So `Member.Unfillable` is set where the method is built and read by both guest generators, and nothing else moves: `host_members_bound` is what it was, `fk.call` still resolves `on_nth_tick`, and a mod already in the field packages the table it packaged before, byte for byte. What moved is `<lang>_members_bound` 4260 → 4255 and `<lang>_members_deferred` 2 → 7 at the GA pin, in both languages in step, under one new reason: **`handler is a Lua function`**.
+
+**The predicate walks a whole type rather than testing the top level**, because the shape that matters is the union rather than a bare `function`. The three positions where a bare one appears — `add_command`'s callback, `add_interface`'s dictionary value, `get_event_handler`'s return — are already HOST skips and never reach a guest generator, so the predicate's whole live population is the five. That is the number to expect if a pin ever moves it, and it is asserted as an equality at every committed description rather than at the pin.
+
+*Enforced by `TestOnlyTheFiveHandlerMembersAreUnfillable` (an equality over every committed description), `TestTheHostTableStillCarriesTheHandlerMembers` (the id half, including that the rendered Lua table still names `on_nth_tick`) and `TestNeitherGuestBindsAHandlerMember`. Red-proven twice: removing the mark reports the unfillable set as empty at all five pins, and disabling the generators' check puts `func (o LuaBootstrap) OnNthTick(` and `pub fn on_nth_tick(` back with 0 deferrals under the reason.*
 
 ### Canonical unions: what took coverage from 78% to 89%
 

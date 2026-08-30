@@ -15,7 +15,7 @@ Binding coverage is essentially total: 4,857 of 4,859 members bind at the 2.1.16
 | Custom-input event subscription | **BLOCKS** | keybinds, GUI apps, selection tools (9 of 13 mods) | a name parameter widening `fk.subscribe` | S |
 | Mod-defined event subscription | **BLOCKS** | cross-mod integrations (LTN-style ecosystems) | third `fk.register` kind | M |
 | `LuaGuiElement.style = "name"` | **BLOCKS** | any GUI that restyles at runtime | generator fix (union write side) | S |
-| `on_nth_tick` binds but is unfillable | **BLOCKS, silently** | polling mods | defer the five handler members now; first-class hook later | S then M |
+| `on_nth_tick` binds but is unfillable | **BLOCKS, silently** | polling mods | **the five handler members are DEFERRED (2026-08-30)**; first-class hook later | S then M |
 | `fk_on_configuration_changed` discards its payload | **BLOCKS an idiom** | per-neighbour compatibility | pass `ConfigurationChangedData` as tier-2 | S-M |
 | `api check` blind to defines | **BLOCKS the gate's promise** | every guest reading a define | wire `UsedDefines` in; leaf-aware define diff | S |
 | GUI at application scale | TEMPTS, hard | GUI applications | `Value` accessors, typed `add`, batched add | S / M / M-L |
