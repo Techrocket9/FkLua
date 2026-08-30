@@ -18,14 +18,15 @@
 //     guest registration, that a name this game does not have is refused as a
 //     STATUS with the engine's own words rather than as a mod that will not
 //     load, and that no false log line is written for any of it;
+//
 //   - it CANNOT press a key, and it cannot fake one either: script.raise_event
 //     refuses a custom input outright. The refusal is captured here verbatim
 //     through fk.LastError, which is the same tripwire the lasterror fixture
 //     exists to be -- the day Factorio starts allowing that raise, this line
 //     changes and the gate says so.
 //
-//	tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 \
-//	    -o custominput.wasm ./examples/custominput
+//     tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 \
+//     -o custominput.wasm ./examples/custominput
 package main
 
 import (
