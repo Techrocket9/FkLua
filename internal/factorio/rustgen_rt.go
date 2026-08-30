@@ -294,10 +294,13 @@ pub fn subscribe_filtered_masked(event: u32, skip: u32, filters: &[Value]) -> St
     Status(unsafe { fk_subscribe(event, p, skip, 0, 0) })
 }
 
-/// The descriptor kinds fk.register takes, mirroring fk_mod.lua's REG_COMMAND
-/// and REG_INTERFACE.
+/// The descriptor kinds fk.register takes, mirroring fk_mod.lua's REG_COMMAND,
+/// REG_INTERFACE and REG_MODEVENT -- and gogen.go's, which is the fourth
+/// spelling of the same three numbers and is checked against the other three
+/// rather than trusted.
 const REG_COMMAND: u32 = 1;
 const REG_INTERFACE: u32 = 2;
+const REG_MOD_EVENT: u32 = 3;
 
 /// Declares a console command, handled by this guest's fk_on_call export.
 ///
@@ -373,6 +376,67 @@ pub fn add_interface(name: &str, methods: &[(&str, u32)]) -> Status {
         ]),
     );
     Status(unsafe { fk_register(REG_INTERFACE, p) })
+}
+
+/// Subscribes to an event ANOTHER MOD defined, handled by this guest's
+/// fk_on_call export.
+///
+/// THE SUBSCRIBE HALF OF A PUBLISHED PROTOCOL. A mod publishes an event with
+/// script.generate_event_name() and hands the id out through its remote
+/// interface; every consumer subscribes to that number. All of the publishing
+/// side binds -- generate_event_name, raise_event, get_event_id -- and until
+/// this existed the consuming side did not: a runtime-minted id is a NUMBER
+/// where subscribe wants a dense index into the generated event table, and a
+/// mod-defined event's payload is not in the API description at all, so there
+/// is no field descriptor to encode it with.
+///
+/// const EV_DELIVERY: u32 = 7; // this guest's own dispatch id
+///
+/// #[no_mangle]
+/// pub extern "C" fn _initialize() {
+///     if let Ok(v) = fkapi::remote_call("logistic-train-network",
+///                                       "on_delivery_completed", &[]) {
+///         if let Some(n) = v.as_num() {
+///             fkapi::register_mod_event(EV_DELIVERY, n as u32);
+///         }
+///     }
+/// }
+///
+/// THE PAYLOAD IS ONE TIER-2 VALUE, because there is nothing to type it
+/// against: the other end is another mod's table and no description carries its
+/// shape. That is why this is fk_on_call rather than fk_on_event -- the id is
+/// this guest's own and the argument list is the seam's.
+///
+/// CALL IT FROM _initialize, exactly as with add_command and for the same
+/// reason: a registration is not saved, so it has to be made on every load, and
+/// nothing here writes an event id into storage.
+pub fn register_mod_event(id: u32, event: u32) -> Status {
+    register_mod_event_value(id, Value::Number(event as f64))
+}
+
+/// register_mod_event for an event declared as a custom-event PROTOTYPE at the
+/// data stage rather than minted at runtime.
+///
+/// Both are arms of Factorio's own LuaEventType and the host passes either
+/// through unchanged. A name no custom-event prototype in this game has is
+/// refused by the ENGINE at subscribe time and comes back as StatusNoMember,
+/// with the engine's own words in one log line.
+pub fn register_mod_event_named(id: u32, name: &str) -> Status {
+    register_mod_event_value(id, Value::Str(name.into()))
+}
+
+fn register_mod_event_value(id: u32, event: Value) -> Status {
+    let _m = AllocMark::new();
+    let p = galloc(DYN_W as u32);
+    let d = unsafe { core::slice::from_raw_parts_mut(p as *mut u8, DYN_W) };
+    write_dyn(
+        d,
+        &Value::Map(alloc::vec![
+            (Value::Str("id".into()), Value::Number(id as f64)),
+            (Value::Str("event".into()), event),
+        ]),
+    );
+    Status(unsafe { fk_register(REG_MOD_EVENT, p) })
 }
 
 /// remote.call: the outbound half of mod-to-mod interop.

@@ -2073,6 +2073,80 @@ func AddInterface(name string, methods ...InterfaceMethod) Status {
 	return Status(hostRegister(regInterface, ptr(&b[0])))
 }
 
+// RegisterModEvent subscribes to an event ANOTHER MOD defined, handled by this
+// guest's fk_on_call export.
+//
+// THE SUBSCRIBE HALF OF A PUBLISHED PROTOCOL. A mod publishes an event with
+// script.generate_event_name() and hands the id out through its remote
+// interface; every consumer subscribes to that number. All of the publishing
+// side binds -- GenerateEventName, RaiseEvent, GetEventID -- and until this
+// existed the consuming side did not: a runtime-minted id is a NUMBER where
+// Subscribe wants a dense index into the generated event table, and a
+// mod-defined event's payload is not in the API description at all, so there is
+// no field descriptor to encode it with.
+//
+//	const evDelivery = 7 // this guest's own dispatch id, not the event's
+//
+//	func init() {
+//	    v, st := fkapi.RemoteCall("logistic-train-network", "on_delivery_completed")
+//	    if st == fkapi.StatusOK {
+//	        if n, ok := v.AsNum(); ok {
+//	            fkapi.RegisterModEvent(evDelivery, uint32(n))
+//	        }
+//	    }
+//	}
+//
+//	//go:wasmexport fk_on_call
+//	func onCall(id, argp, retp uint32) uint32 {
+//	    if id == evDelivery {
+//	        e := fkapi.ReadDyn(argp).At(0) // the payload, as the publisher sent it
+//	        _ = e
+//	    }
+//	    return 0
+//	}
+//
+// THE PAYLOAD IS ONE TIER-2 VALUE, because there is nothing to type it against:
+// the other end is another mod's table and no description carries its shape.
+// That is why this is fk_on_call rather than fk_on_event -- the id is this
+// guest's own, the argument list is the seam's, and the whole of it is the
+// machinery AddCommand already uses.
+//
+// CALL IT FROM AN init FUNCTION, exactly as with AddCommand and for the same
+// reason: a registration is not saved, so it has to be made on every load, and
+// nothing here writes an event id into the save -- an id minted by a mod that
+// may not be installed next time is not a thing to carry across one.
+//
+// A publisher that is not installed is StatusCallFailed from the RemoteCall
+// above, which is where a consumer finds out; this call is never reached.
+func RegisterModEvent(id, event uint32) Status {
+	return registerModEvent(id, OfNumber(float64(event)))
+}
+
+// RegisterModEventNamed is RegisterModEvent for an event declared as a
+// custom-event PROTOTYPE at the data stage rather than minted at runtime.
+//
+//	fkapi.RegisterModEventNamed(evDelivery, "some-mod-delivery-done")
+//
+// Both are arms of Factorio's own LuaEventType and the host passes either
+// through unchanged. A name no custom-event prototype in this game has is
+// refused by the ENGINE at subscribe time and comes back as StatusNoMember, with
+// the engine's own words in one log line; the mod keeps running, which is the
+// same treatment SubscribeNamed gives a missing custom input.
+func RegisterModEventNamed(id uint32, name string) Status {
+	return registerModEvent(id, OfString(name))
+}
+
+func registerModEvent(id uint32, ev Value) Status {
+	mark := allocMark()
+	defer allocRelease(mark)
+	b := (*[dynW]byte)(block(dynW))
+	writeDyn(&b[0], OfMap(
+		KeyValue{OfString("id"), OfNumber(float64(id))},
+		KeyValue{OfString("event"), ev},
+	))
+	return Status(hostRegister(regModEvent, ptr(&b[0])))
+}
+
 // RemoteCall is remote.call: the outbound half of mod-to-mod interop.
 //
 // The member itself is unbindable -- it is the API's one variadic method, and
@@ -2107,11 +2181,14 @@ func WriteDyn(p uint32, v Value) {
 	writeDyn((*byte)(unsafe.Pointer(uintptr(p))), v)
 }
 
-// The descriptor kinds fk.register takes, mirroring fk_mod.lua's REG_COMMAND
-// and REG_INTERFACE.
+// The descriptor kinds fk.register takes, mirroring fk_mod.lua's REG_COMMAND,
+// REG_INTERFACE and REG_MODEVENT -- and rustgen_rt.go's, which is the fourth
+// spelling of the same three numbers and is checked against the other three
+// rather than trusted.
 const (
 	regCommand   = 1
 	regInterface = 2
+	regModEvent  = 3
 )
 
 // Status is a host-call result. It is never a Lua error: without coroutines

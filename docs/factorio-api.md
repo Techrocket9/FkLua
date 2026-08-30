@@ -276,9 +276,26 @@ Exporting the hook with no parameter still works and still means what it meant: 
 
 This hook runs on the peer that loaded the save, before the first tick, so its effects are already in the state a joining client downloads. A guest may write its own state here.
 
-## Commands and remote interfaces
+## Commands, remote interfaces, and another mod's events
 
-A wasm guest has no callable Lua value, so callbacks work by id: the host synthesises the closure, hands it to Factorio, and dispatches back in through `fk_on_call` with an id the guest chose. Console commands, remote interfaces in both directions, and `remote.call` out of the guest all work this way. Registrations are made from `_initialize` for the same reason subscriptions are: Factorio does not save them, and `control.lua` re-runs on every load.
+A wasm guest has no callable Lua value, so callbacks work by id: the host synthesises the closure, hands it to Factorio, and dispatches back in through `fk_on_call` with an id the guest chose. Console commands, remote interfaces in both directions, `remote.call` out of the guest, and subscriptions to events another mod defined all work this way. Registrations are made from `_initialize` for the same reason subscriptions are: Factorio does not save them, and `control.lua` re-runs on every load.
+
+**An event another mod defined is subscribed to through the same seam, not through `Subscribe`.** A publisher mints an id with `script.generate_event_name()` and hands it out through its own remote interface, so the id is a number the consumer learns at runtime rather than a constant in the generated event table; and the payload is that mod's own table, which no API description carries, so there is no struct to decode it into. Both facts point at the same answer: ask for the id, register it against a dispatch id of your own, and read the payload as one tier-2 value.
+
+```go
+const evDelivery = 7 // this guest's dispatch id, not the event's
+
+func init() {
+    v, st := fkapi.RemoteCall("logistic-train-network", "on_delivery_completed")
+    if st == fkapi.StatusOK {
+        if n, ok := v.AsNum(); ok {
+            fkapi.RegisterModEvent(evDelivery, uint32(n))
+        }
+    }
+}
+```
+
+The payload arrives at `fk_on_call` as the single element of `argp`'s array, exactly as a command's `CustomCommandData` does. `RegisterModEventNamed` (Rust: `register_mod_event_named`) is the other spelling, for an event declared as a `custom-event` prototype at the data stage rather than minted at runtime. A publisher that is not installed shows up as a failed `RemoteCall`, and a prototype name this game does not have is refused by the engine with its own message in the log, so neither costs more than the subscription.
 
 ## defines
 

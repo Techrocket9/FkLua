@@ -55,6 +55,16 @@ func TestACommandAndARemoteInterfaceReachTheGuest(t *testing.T) {
 	// function up the way the engine does, so the outbound leg really does go
 	// out through the host and back in through the same trampoline.
 	got, err := runCallbackHost(t, h, dir, `
+-- A MOD-DEFINED EVENT, raised the way its publisher would raise it. The guest
+-- asked the publisher for the id during _initialize and subscribed to the
+-- NUMBER; nothing about 240 was in the wasm.
+handlers[240]({ payload = "from-runtime-id", tick = 3 })
+-- ...and the other spelling, a custom-event prototype's NAME.
+handlers["fk-demo-custom-event"]({ payload = "from-prototype", tick = 4 })
+-- The name the engine refused registered nothing, so nothing is dispatchable
+-- under it -- which is the ROLLBACK, not merely the refusal.
+print("absent registered " .. tostring(handlers["fk-absent-event"] ~= nil))
+
 -- Remote methods, called the way another mod would.
 print("add " .. tostring(remote.call("fk-callback-demo", "add", 20, 22)))
 print("greet " .. tostring(remote.call("fk-callback-demo", "greet", "world")))
@@ -81,6 +91,30 @@ handlers[1]({ tick = 1 })
 	}
 
 	want := []string{
+		// THE THIRD REGISTER KIND, from _initialize: the guest asked a publisher
+		// for a runtime-minted id and subscribed to it, subscribed to a
+		// custom-event prototype by name, and was refused a name this game has no
+		// prototype for -- 3 is ERR_NO_MEMBER, which is what a subscription to
+		// something absent has always answered.
+		"LOG modevent id 240 st 0",
+		"LOG modevent named st 0",
+		// The engine's OWN WORDS reach the log and the mod keeps running, which is
+		// what the pcall around a named registration is for.
+		"LOG fklua: script.on_event refused the event name fk-absent-event: " +
+			"Unknown event name: fk-absent-event. The guest will not receive it. " +
+			"The mod keeps running.",
+		"LOG modevent absent st 3",
+		// TWICE, which is the ROLLBACK: the host cleared its own dispatcher list
+		// when the engine refused, so a second attempt at the same name is refused
+		// too rather than appending to a list nothing dispatches.
+		"LOG fklua: script.on_event refused the event name fk-absent-event: " +
+			"Unknown event name: fk-absent-event. The guest will not receive it. " +
+			"The mod keeps running.",
+		"LOG modevent absent2 st 3",
+		// Both spellings deliver, and the payload is one tier-2 value.
+		"LOG modevent runtime payload=from-runtime-id args=1",
+		"LOG modevent named payload=from-prototype args=1",
+		"absent registered false",
 		// Remote methods, in and back out with a result.
 		"add 42",
 		"greet hello, world",
@@ -99,9 +133,11 @@ handlers[1]({ tick = 1 })
 		// ...and the OUTER invocation's arguments survived both nested calls
 		// encoding their own into the same scratch region.
 		"LOG still hello world",
-		// One command plus seven remote invocations: six from the host and one
-		// the guest made itself, which lands in the same export.
-		"LOG calls 8",
+		// One command, seven remote invocations (six from the host and one the
+		// guest made itself) and two mod-defined events -- ALL TEN through the one
+		// fk_on_call export, which is the seam's own claim about the third kind
+		// needing no second entry point.
+		"LOG calls 10",
 	}
 	lines := strings.Split(strings.TrimSpace(got), "\n")
 	for i := range lines {
@@ -213,7 +249,16 @@ script = {
   on_init = function(f) handlers.on_init = f end,
   on_load = function(f) handlers.on_load = f end,
   on_configuration_changed = function(f) handlers.on_config = f end,
-  on_event = function(ev, f) handlers[ev] = f end,
+  -- A NAME THIS GAME HAS NO PROTOTYPE FOR RAISES, which is the engine's own
+  -- behaviour and is what the register kind's pcall is for. Measured on 2.0.77
+  -- during the custom-input round, as: Unknown event name: NAME. Modelled here
+  -- the way remote.call's "no such interface" already is.
+  on_event = function(ev, f)
+    if type(ev) == "string" and ev:sub(1, 10) == "fk-absent-" then
+      error("Unknown event name: " .. ev, 0)
+    end
+    handlers[ev] = f
+  end,
 }
 local cmds = {}
 commands = {
@@ -221,7 +266,10 @@ commands = {
   __invoke = function(name, data) return cmds[name](data) end,
   __count = function() local n = 0 for _ in pairs(cmds) do n = n + 1 end return n end,
 }
-local ifaces = {}
+-- The PUBLISHER of a mod-defined event: the shape an LTN-style hub has, where
+-- the id is minted at runtime and handed out through a remote interface. 240 is
+-- an arbitrary number standing in for what generate_event_name() returned.
+local ifaces = { ["fk-event-publisher"] = { event_id = function() return 240 end } }
 remote = {
   add_interface = function(name, fns) ifaces[name] = fns end,
   call = function(iface, fname, ...)

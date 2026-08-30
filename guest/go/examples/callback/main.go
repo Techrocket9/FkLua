@@ -31,6 +31,13 @@ const (
 	mGreet    = 3
 	mArity    = 4
 	mNoReturn = 5
+	// The THIRD register kind: an event another mod defined. Two of them,
+	// because Factorio has two ways of naming one -- a number minted at runtime
+	// by script.generate_event_name(), and a custom-event PROTOTYPE's name.
+	evRuntime = 6
+	evNamed   = 7
+	evAbsent  = 8
+	evAbsent2 = 9
 )
 
 var calls uint32
@@ -47,6 +54,42 @@ func init() {
 		fkapi.InterfaceMethod{Name: "greet", ID: mGreet},
 		fkapi.InterfaceMethod{Name: "arity", ID: mArity},
 		fkapi.InterfaceMethod{Name: "no_return", ID: mNoReturn})
+
+	// ...AND THE CONSUMING HALF OF SOMEBODY ELSE'S PROTOCOL, which is the third
+	// register kind. The publisher mints the id with script.generate_event_name()
+	// and hands it out through its own remote interface, so a consumer ASKS for
+	// it and then subscribes to the number -- there is no constant anywhere for a
+	// guest to have compiled in, which is exactly why fk.subscribe could not
+	// serve this and why the payload crosses as one tier-2 value.
+	if v, st := fkapi.RemoteCall("fk-event-publisher", "event_id"); st == fkapi.StatusOK {
+		if n, ok := v.AsNum(); ok {
+			fk.Log("modevent id " + itoa(uint32(n)) + " st " +
+				itoa(uint32(fkapi.RegisterModEvent(evRuntime, uint32(n)))))
+		}
+	} else {
+		// A publisher that is not installed is the ordinary case, and it is where
+		// a consumer finds out -- not at the register call, which is never reached.
+		fk.Log("modevent publisher absent " + itoa(uint32(st)))
+	}
+
+	// The other spelling: a custom-event PROTOTYPE, named at the data stage.
+	fk.Log("modevent named st " +
+		itoa(uint32(fkapi.RegisterModEventNamed(evNamed, "fk-demo-custom-event"))))
+
+	// ...and a name this game has no prototype for. The ENGINE refuses it at
+	// subscribe time, which arrives here as a status rather than as a mod that
+	// will not load -- the same treatment SubscribeNamed gives a missing custom
+	// input, and the reason both paths register under pcall.
+	//
+	// TWICE, WHICH IS THE ROLLBACK RATHER THAN THE REFUSAL. The host sets its
+	// dispatcher list and its filter entry BEFORE calling script.on_event, so a
+	// failure that left them behind would make this second attempt take the
+	// "already registered, just append" arm and RETURN SUCCESS -- into a list
+	// Factorio never registered a dispatcher for. Both must be refused.
+	fk.Log("modevent absent st " +
+		itoa(uint32(fkapi.RegisterModEventNamed(evAbsent, "fk-absent-event"))))
+	fk.Log("modevent absent2 st " +
+		itoa(uint32(fkapi.RegisterModEventNamed(evAbsent2, "fk-absent-event"))))
 }
 
 // fk_on_call is the whole inbound surface: one export, id-dispatched, exactly
@@ -122,6 +165,22 @@ func onCall(id, argp, retp uint32) uint32 {
 	case mNoReturn:
 		// Writes nothing. The host cleared the slot before dispatching, so this
 		// must read back as nil rather than as the previous call's result.
+	case evRuntime, evNamed:
+		// A MOD-DEFINED EVENT'S PAYLOAD, which is one tier-2 value and cannot be
+		// anything else: the other end is another mod's table and no description
+		// carries its shape, so there is no layout to generate a struct from.
+		// Exactly one argument arrives, the event table, the way a command's
+		// CustomCommandData does.
+		which := "runtime"
+		if id == evNamed {
+			which = "named"
+		}
+		got := ""
+		if len(args) == 1 {
+			got = args[0].Get("payload").StrOr("?")
+		}
+		fk.Log("modevent " + which + " payload=" + got + " args=" +
+			itoa(uint32(len(args))))
 	default:
 		return uint32(fkapi.StatusNoMember)
 	}

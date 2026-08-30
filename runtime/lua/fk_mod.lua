@@ -978,7 +978,14 @@ local function invoke_callback(id, ...)
 end
 
 -- Descriptor kinds, matching the guest-side constants in fk.
-local REG_COMMAND, REG_INTERFACE = 1, 2
+--
+-- KEEP IN STEP WITH gogen.go's regCommand/regInterface/regModEvent and
+-- rustgen_rt.go's REG_COMMAND/REG_INTERFACE/REG_MOD_EVENT. Four spellings of
+-- three numbers, which is the Hooks-mirror shape and is checked the same way:
+-- TestTheRegisterKindsAgreeEverywhereTheyAreSpelled reads all four sources, so a
+-- kind added to one and not to the rest fails rather than dispatching a
+-- descriptor the host reads as something else.
+local REG_COMMAND, REG_INTERFACE, REG_MODEVENT = 1, 2, 3
 
 function register_callback(kind, descp)
   if not E.fk_on_call then return H.ERR_NO_MEMBER end
@@ -1023,6 +1030,67 @@ function register_callback(kind, descp)
       log("fklua: remote.add_interface(" .. desc.name .. ") failed: " ..
         tostring(cerr))
       return H.ERR_CALL_FAILED
+    end
+    return H.OK
+  elseif kind == REG_MODEVENT then
+    -- A MOD-DEFINED EVENT: {id = <u32>, event = <number | string>}.
+    --
+    -- THE SUBSCRIBE HALF OF A PUBLISHED PROTOCOL, and the half no guest had.
+    -- generate_event_name, raise_event, get_event_id and a custom-event
+    -- prototype's event_id all bind, so an FkLua mod could PUBLISH; it could not
+    -- CONSUME. A runtime-generated id is a NUMBER where fk.subscribe wants a
+    -- dense index into the generated event table, and a mod-defined event's
+    -- payload is not in runtime-api.json at all, so there is no field descriptor
+    -- to encode with. Whole ecosystems are built on that shape -- one
+    -- train-logistics hub publishes eleven generated events as its entire public
+    -- API -- and none of their companion mods could be written here.
+    --
+    -- A REGISTER KIND RATHER THAN A SUBSCRIBE WIDENING, which is the opposite
+    -- answer from the custom input one section up and for a stated reason. That
+    -- one had to stay in `subscribe` because `fklua mod` prunes the packaged
+    -- event table by scanning for an i32 constant at the subscribe call's event
+    -- operand, and a tier-2 register descriptor is a blob that scan cannot read:
+    -- the register shape would have pruned the payload descriptor out of the very
+    -- mod that needs it. HERE THERE IS NOTHING TO PRUNE. The payload is
+    -- undescribed, so no descriptor exists, so the pruning objection does not
+    -- apply -- and what is left is the register kind's own criterion, which this
+    -- meets and `subscribe` does not: the host must synthesise a closure and hand
+    -- it to script.on_event under a key the guest computed at runtime.
+    --
+    -- THE PAYLOAD CROSSES AS ONE TIER-2 VALUE, exactly as a command's
+    -- CustomCommandData does, because an undescribed payload has no other honest
+    -- encoding: there is no layout to write_struct against and the other end is
+    -- another mod's table. So it shares fk_on_call and the whole of
+    -- invoke_callback with the other two kinds -- the per-level buffer, the
+    -- scratch mark, the outermost bracket, the depth bookkeeping.
+    --
+    -- `event` IS EITHER A NUMBER OR A STRING and both are passed straight
+    -- through, because both are arms of Factorio's own LuaEventType: a number is
+    -- what script.generate_event_name() minted and another mod handed over
+    -- through a remote call, and a string is a custom-event PROTOTYPE's name.
+    -- Anything else is ERR_BAD_ARGS here rather than a raise from the engine.
+    --
+    -- NOT SAVED, like the other two kinds and for the same reason: control.lua is
+    -- re-executed on every load, so the registration is made on every load from
+    -- the guest's own _initialize. There is no `storage` flag and there must not
+    -- be one -- a saved event id is a number minted by a mod that may not be
+    -- installed next time.
+    if desc.id == nil then return H.ERR_BAD_ARGS end
+    local which = desc.event
+    if type(which) ~= "number" and (type(which) ~= "string" or which == "") then
+      return H.ERR_BAD_ARGS
+    end
+    local id = desc.id
+    -- PROTECTED, and unlike the custom-input path this is protected for BOTH
+    -- arms. A named registration can name a prototype this game does not have,
+    -- which the engine answers with `Unknown event name:`; a NUMERIC one here is
+    -- not defines.events' own -- it came out of another mod at runtime -- so it
+    -- is exactly as capable of being wrong, which is the property the numeric
+    -- subscribe path relies on NOT having. on_event rolls its own registration
+    -- back and says what the engine said.
+    if not on_event(which, function(e) return invoke_callback(id, e) end,
+                    nil, true) then
+      return H.ERR_NO_MEMBER
     end
     return H.OK
   end
