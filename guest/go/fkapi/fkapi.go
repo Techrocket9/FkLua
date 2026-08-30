@@ -31287,11 +31287,11 @@ func (o LuaGuiElement) Style() (Object, error) {
 	return v0, nil
 }
 
-func (o LuaGuiElement) SetStyle(value Object) error {
+func (o LuaGuiElement) SetStyle(value Value) error {
 	mark := allocMark()
 	defer allocRelease(mark)
-	a := (*[4]byte)(block(4))
-	*(*uint32)(unsafe.Pointer(&a[0])) = value.h
+	a := (*[16]byte)(block(16))
+	writeDyn(&a[0], value)
 	if st := hostCall(o.h, 2083, ptr(&a[0]), 0); st != 0 {
 		return Status(st)
 	}

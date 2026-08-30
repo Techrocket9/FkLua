@@ -1028,6 +1028,18 @@ ForceID     = string | uint8  | LuaForce                    69
 
 **What that costs, because it is not free:** under the second rule a guest can pass a force only as a handle, never as a name — reaching one by name means finding the `LuaForce` first. An ergonomic loss the generated bindings will have to paper over, not a correctness one, and tier 2 removes it.
 
+**AND ON AN ATTRIBUTE'S WRITE HALF THE SECOND RULE IS WRONG, which cost `LuaGuiElement::style` its only usable arm.** `style` is `LuaStyle | string` on the write side and **the engine accepts only the string**, so the generated setter took an `Object` no guest could obtain a useful value for: a member that exists and cannot be used. Four of the thirteen mods the temptations survey audited restyle at runtime, one at 31 sites; what kept it hidden is that `style` can also be set at creation time inside `add`'s option table.
+
+The asymmetry is a property of the POSITION rather than of the member. On a READ the engine's answer is determined — it returns the object, and the scalar arms are ways of naming one on the way IN — so the handle is the form that must work. On a WRITE the guest chooses the arm, and collapsing removes the choice; where the engine honours only the arm that was dropped, the member is unreachable. So `mapWriteType` is `mapType` with one clause: an attribute write whose union `canonicalUnion` would resolve to a single HANDLE crosses as tier 2 instead.
+
+**A description-wide scan finds exactly TWO writable union-with-a-class attributes at every committed pin, and the other one already generated correctly.** `LuaControl::opened` names eight classes, so `nHandle > 1` disqualifies shape B and it has always been tier 2. This brings `style` into line with `opened` rather than inventing a third behaviour, which is why it is a rule over the SHAPE and not an allowlist keyed on a name — the opposite call from `indexWriteHalf`, and for a stateable reason: there the description declares nothing at all and the evidence is prose, and here it declares the union and only the SIDE was being read wrongly.
+
+**Scoped to an attribute write, deliberately, and NOT to method parameters.** `ForceID` is shape B and appears in dozens of parameters; the paragraph above accepts that cost in as many words. A parameter has the engine accepting the handle and the guest able to get one, so nothing there is unreachable — an attribute write is the ONLY expression of its assignment, which is what makes it the position where a collapse can cost a member outright.
+
+**It is a SOURCE-LEVEL BREAK and no member id moves.** `SetStyle(value Object)` becomes `SetStyle(value Value)` and `set_style(&self, value: Object)` becomes `set_style(&self, value: &Value)`; the generated diff is those two lines and nothing else, the member id is 2083 either way, and no census row moves. A downstream guest that called the old setter was passing a handle the engine rejects, so the code that stops compiling is code that did not work.
+
+*Enforced by `TestOnlyTwoWritableAttributesAreAUnionWithAClass` (an equality over every committed description, with the population derived independently of `canonicalUnion` so the test cannot agree with the code by construction), `TestTheStyleSetterTakesAValueAndTheGetterStillAHandle` (the read half is untouched, which was the easy mistake) and `TestAStyleNameCrossesOnTheWriteHalf`, which drives both arms through the real `fk_abi.lua` under `lua52f`. Red-proven: without the clause the setter takes kind 11 at all five pins and the string leg reports `type nil value nil` — the assignment reaching the object with nothing in it.*
+
 `LocalisedString` is genuinely recursive and stays refused. No fixed layout holds it.
 
 ### Two things about member ids

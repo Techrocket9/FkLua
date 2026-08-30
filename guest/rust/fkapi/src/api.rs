@@ -28911,9 +28911,10 @@ impl LuaGuiElement {
         Ok(v0)
     }
 
-    pub fn set_style(&self, value: Object) -> Result<(), Status> {
-        let mut a = [0u8; 4];
-        wr_u32(&mut a[..], 0, value.0);
+    pub fn set_style(&self, value: &Value) -> Result<(), Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 16];
+        write_dyn(&mut a[0..], value);
         let st = unsafe { fk_call(self.0.0, 2083, a.as_ptr() as u32, 0) };
         if st != 0 {
             return Err(Status(st));

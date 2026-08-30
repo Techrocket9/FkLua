@@ -686,6 +686,67 @@ func (m *typeMapper) mapType(t Type, depth int) (FieldSpec, error) {
 //	   arm) and `ForceID`, the shape B was written for, has no tier-2 arm.
 //	   Found while binding LuaCustomTable's index operator, whose read type is
 //	   `Any`: the operator would have been generated returning a handle.
+//
+// mapWriteType is mapType for an ATTRIBUTE'S WRITE HALF, and it differs in one
+// clause: a union that would collapse to a single HANDLE arm crosses as tier 2
+// instead.
+//
+// WHY THE TWO SIDES DIFFER, and it is a property of the union rather than a
+// property of a member name. canonicalUnion's shape B -- one class plus scalar
+// identifiers -- is right on a READ because the engine's answer is determined:
+// it returns the object, and the scalar arms are ways of NAMING one on the way
+// in. On a WRITE the guest chooses the arm, and collapsing removes the choice --
+// so where the engine honours only the arm that was dropped, the member exists
+// and cannot be used at all.
+//
+// THAT IS `LuaGuiElement::style`. It is declared `LuaStyle | string` on the
+// write side and the engine accepts only the string, so the generated setter
+// took an `Object` no guest could ever obtain a useful value for, and four of
+// the thirteen mods the temptations survey audited restyle at runtime (one at 31
+// sites). What kept it hidden is that `style` can also be set at creation time
+// inside `add`'s option table.
+//
+// A DESCRIPTION-WIDE SCAN FINDS EXACTLY TWO writable union-with-class
+// attributes at every committed pin, and the OTHER one already generated
+// correctly: `LuaControl::opened` names eight classes, so `nHandle > 1`
+// disqualifies shape B and it was tier 2 all along. So this rule brings `style`
+// into line with `opened` rather than inventing a third behaviour -- which is
+// why it is a rule over the SHAPE and not an allowlist keyed on a name. See
+// indexWriteHalf for the case where an allowlist really was the answer: there
+// the description states nothing at all and the evidence is prose, and here the
+// description states the union and only the SIDE was being read wrongly.
+//
+// SCOPED TO AN ATTRIBUTE WRITE, deliberately, and not to method parameters.
+// `ForceID` is shape B and appears in dozens of parameters; canonicalUnion's own
+// header accepts that cost in as many words ("a guest can pass a force only as a
+// handle... an ergonomic loss the generated bindings will have to paper over").
+// A parameter has the engine accepting the handle and the guest able to get one,
+// so nothing there is unreachable; an attribute write is the ONLY expression of
+// that assignment, which is what makes this the position where the collapse can
+// cost a member outright.
+func (m *typeMapper) mapWriteType(t Type) (FieldSpec, error) {
+	if collapsesToAHandle(m, t) {
+		return FieldSpec{Kind: KindDyn}, nil
+	}
+	return m.mapType(t, 0)
+}
+
+// collapsesToAHandle reports a union that canonicalUnion resolves to shape B.
+//
+// It asks canonicalUnion rather than re-deriving the test, so the two cannot
+// drift: the whole point is that this is the SAME union the read half collapses,
+// answered differently because of where it sits.
+func collapsesToAHandle(m *typeMapper, t Type) bool {
+	for t.Complex == "type" && t.Value != nil {
+		t = *t.Value
+	}
+	if t.Complex != "union" {
+		return false
+	}
+	f, ok := m.canonicalUnion(t, 0)
+	return ok && f.Kind == KindHandle
+}
+
 func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
 	var chosenStruct, chosenHandle *FieldSpec
 	nStruct, nHandle, nScalar, nShorthand, nDyn := 0, 0, 0, 0, 0
@@ -1025,7 +1086,7 @@ func GenerateMembers(a *API) Report {
 				}
 			}
 			if at.WriteType != nil {
-				f, err := m.mapType(*at.WriteType, 0)
+				f, err := m.mapWriteType(*at.WriteType)
 				if err != nil {
 					// Only report once for an attribute whose read side already
 					// failed for the same reason.
