@@ -224,13 +224,19 @@ func TestEveryWritableAttributeHasItsSetter(t *testing.T) {
 			}
 		}
 	}
-	// TWO remain and both are genuine NAME collisions with a method the class
-	// also declares -- LuaControl::set_driving and LuaPlayer::set_zoom_limits --
-	// which is a different problem from a shape the generator cannot express,
-	// and is counted under its own reason.
-	if len(missing) != 2 {
-		t.Errorf("writable attributes with no setter binding: %v (expected the "+
-			"two name collisions)", missing)
+	// NONE remain, since the two that did -- genuine NAME collisions with a
+	// method the class also declares, LuaControl::set_driving and
+	// LuaPlayer::set_zoom_limits -- became a decision rather than an accident of
+	// emission order. See memberRename and TestEveryNameCollisionHasARow; they
+	// bind as WriteDriving and WriteZoomLimits.
+	//
+	// A ZERO ASSERTED AS A ZERO, deliberately. This read `!= 2` and a shape that
+	// stopped generating would have taken the place of one of the collisions and
+	// passed, which is the arithmetic-that-cancels shape this repo already
+	// records against a total.
+	if len(missing) != 0 {
+		t.Errorf("writable attributes with no setter binding in one or both "+
+			"languages: %v", missing)
 	}
 	for _, want := range []string{"LuaEntity::tags", "LuaItemCommon::tags", "LuaGuiElement::tags"} {
 		key := want[:strings.Index(want, "::")] + "::" +

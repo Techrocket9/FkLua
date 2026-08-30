@@ -5818,6 +5818,16 @@ impl LuaControl {
         Ok(v0)
     }
 
+    pub fn write_driving(&self, value: bool) -> Result<(), Status> {
+        let mut a = [0u8; 1];
+        a[0] = if value { 1 } else { 0 };
+        let st = unsafe { fk_call(self.0.0, 374, a.as_ptr() as u32, 0) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        Ok(())
+    }
+
     pub fn drop_item_distance(&self) -> Result<u32, Status> {
         let mut r = [0u8; 4];
         let st = unsafe { fk_call(self.0.0, 375, 0, r.as_mut_ptr() as u32) };
@@ -39738,6 +39748,17 @@ impl LuaPlayer {
         Ok(v0)
     }
 
+    pub fn write_zoom_limits(&self, value: ZoomLimits) -> Result<(), Status> {
+        let _mark = AllocMark::new();
+        let mut a = [0u8; 168];
+        value.encode_at(&mut a[0..]);
+        let st = unsafe { fk_call(self.0.0, 2835, a.as_ptr() as u32, 0) };
+        if st != 0 {
+            return Err(Status(st));
+        }
+        Ok(())
+    }
+
 }
 
 /// A handle to a `LuaProcessionLayerInheritanceGroupPrototype`.
@@ -61193,6 +61214,11 @@ impl LuaEntity {
         LuaControl(self.0).walking_state()
     }
 
+    #[inline]
+    pub fn write_driving(&self, value: bool) -> Result<(), Status> {
+        LuaControl(self.0).write_driving(value)
+    }
+
 }
 
 /// `LuaEntityPrototype` inherits these. The handle decides the object, so dispatch is
@@ -64419,6 +64445,11 @@ impl LuaPlayer {
     #[inline]
     pub fn walking_state(&self) -> Result<LuaControlWalkingStateResult, Status> {
         LuaControl(self.0).walking_state()
+    }
+
+    #[inline]
+    pub fn write_driving(&self, value: bool) -> Result<(), Status> {
+        LuaControl(self.0).write_driving(value)
     }
 
 }

@@ -90,6 +90,18 @@ type GoBindings struct {
 	// raise the coverage figure without covering anything, which is exactly the
 	// mistake the EventStructs split above was made to avoid.
 	IntoVariants int
+	// Collisions names every member whose bound name another member of the class
+	// had already taken and which memberRename has NO ROW for, and StaleRenames
+	// names every row that no longer describes the collision it was written for.
+	//
+	// IDENTITIES RATHER THAN COUNTS, and that is the whole point of the pair. A
+	// collision was a number in a census diff and a member nobody could call;
+	// with a name in hand a gate can fail saying WHICH member and telling the
+	// maintainer to decide, which is TestEveryIndexOperatorHasAWriteVerdict's
+	// shape over a different derivation. Both are empty at every committed
+	// description and both are gate failures when they are not.
+	Collisions   []string
+	StaleRenames []string
 }
 
 // defer1 records one deferral under a reason.
@@ -375,11 +387,18 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 				// loop already asks. No pinned description collides (`Log`,
 				// `LocalisedPrint`, `TableSize` name no concept), and a deferral
 				// with a reason beats a package that does not compile.
-				out.defer1("Go name collides with another member of the class")
+				//
+				// AND THE IDENTITY IS RECORDED, because a collision is a decision
+				// somebody has to take and a count cannot say whose. memberRename
+				// is where the two standing ones are taken; an unlisted one still
+				// defers safely here and fails a gate by name.
+				out.defer1("Go" + NameCollision)
+				out.Collisions = append(out.Collisions,
+					fmt.Sprintf("%s (would be %q)", MemberKey(m), name))
 				continue
 			}
 			seen[name] = true
-			out.Names[fmt.Sprintf("%s::%s/%d", m.Class, m.Name, m.Kind)] = name
+			out.Names[MemberKey(m)] = name
 			w("%s", src)
 			out.Emitted++
 			if bound[cls] == nil {
@@ -411,6 +430,10 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 				bound[cls][iname] = isig
 			}
 		}
+		out.StaleRenames = append(out.StaleRenames,
+			staleRenames(cls, byClass[cls], seen, func(r memberRenameRow) (string, string) {
+				return r.WasGo, r.Go
+			})...)
 		declared[cls] = seen
 	}
 
@@ -965,6 +988,14 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into bool) (src, n
 		// generated member over a `streq(handle, member, ptr)` import: the
 		// latter would be correct and would look like ABI plumbing in mod code.
 		name += "Is"
+	}
+	// A NAME COLLISION IS A DECISION, and memberRename is where it is written
+	// down. Applied here rather than in the caller's loop so `src` and `name`
+	// cannot disagree, and only when the computed name really is the one the row
+	// says it is replacing -- a row that stops matching is stale and is reported
+	// rather than silently applied to a name nobody meant.
+	if r, ok := memberRename[MemberKey(m)]; ok && !into && name == r.WasGo {
+		name = r.Go
 	}
 	if into {
 		name += "Into"

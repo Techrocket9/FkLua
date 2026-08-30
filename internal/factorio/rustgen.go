@@ -49,6 +49,12 @@ type RustBindings struct {
 	// members returning a container. Separate from Emitted, which counts
 	// MEMBERS bound: this is a second binding over one already counted.
 	IntoVariants int
+	// Collisions and StaleRenames are gogen.go's, mirrored. See there: a name
+	// collision is a decision somebody has to take, so the IDENTITY is recorded
+	// and not only the count, and a memberRename row that stops describing one
+	// is a claim about a member that is not there.
+	Collisions   []string
+	StaleRenames []string
 	// Inherited counts the members a subclass got by FORWARDING to its parent.
 	// LuaEntity's position() is LuaControl's, and an inherited member appears in
 	// neither the child's method list nor its attribute list.
@@ -361,7 +367,13 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 				// never fire. Go has one package-level namespace and therefore
 				// really can collide, which is why the two loops differ here
 				// rather than by oversight.
-				out.defer1("Rust name collides with another member of the class")
+				//
+				// AND THE IDENTITY IS RECORDED -- see gogen.go's twin of this
+				// branch and memberRename, where the two standing collisions are
+				// decided rather than left to emission order.
+				out.defer1("Rust" + NameCollision)
+				out.Collisions = append(out.Collisions,
+					fmt.Sprintf("%s (would be %q)", MemberKey(m), name))
 				continue
 			}
 			if global {
@@ -371,7 +383,7 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 				src = rustDedent(src)
 			}
 			seen[name] = true
-			out.Names[fmt.Sprintf("%s::%s/%d", m.Class, m.Name, m.Kind)] = name
+			out.Names[MemberKey(m)] = name
 			w("%s", src)
 			out.Emitted++
 			if bound[cls] == nil {
@@ -400,6 +412,10 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 		if !global {
 			w("}\n")
 		}
+		out.StaleRenames = append(out.StaleRenames,
+			staleRenames(cls, byClass[cls], seen, func(r memberRenameRow) (string, string) {
+				return r.WasRust, r.Rust
+			})...)
 		declared[cls] = seen
 	}
 
@@ -848,6 +864,12 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into bool) (sr
 	case m.Kind == MemberGetEq:
 		// `entity.name_is("transport-belt")`, reading as the predicate it is.
 		name += "_is"
+	}
+	// A NAME COLLISION IS A DECISION -- memberRename, and gogen.go's twin of
+	// this line. Applied here so `src` and `name` cannot disagree, and only when
+	// the computed name really is the one the row says it replaces.
+	if r, ok := memberRename[MemberKey(m)]; ok && !into && name == r.WasRust {
+		name = r.Rust
 	}
 	if into {
 		name += "_into"

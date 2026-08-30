@@ -6107,6 +6107,17 @@ func (o LuaControl) Driving() (bool, error) {
 	return v0, nil
 }
 
+func (o LuaControl) WriteDriving(value bool) error {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[1]byte)(block(1))
+	*(*bool)(unsafe.Pointer(&a[0])) = value
+	if st := hostCall(o.h, 374, ptr(&a[0]), 0); st != 0 {
+		return Status(st)
+	}
+	return nil
+}
+
 func (o LuaControl) DropItemDistance() (uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -42905,6 +42916,17 @@ func (o LuaPlayer) ZoomLimits() (ZoomLimits, error) {
 	return v0, nil
 }
 
+func (o LuaPlayer) WriteZoomLimits(value ZoomLimits) error {
+	mark := allocMark()
+	defer allocRelease(mark)
+	a := (*[168]byte)(block(168))
+	value.encodeAt(&a[0])
+	if st := hostCall(o.h, 2835, ptr(&a[0]), 0); st != 0 {
+		return Status(st)
+	}
+	return nil
+}
+
 // LuaProcessionLayerInheritanceGroupPrototype wraps a handle to a LuaProcessionLayerInheritanceGroupPrototype.
 type LuaProcessionLayerInheritanceGroupPrototype struct{ Object }
 
@@ -65581,6 +65603,10 @@ func (o LuaEntity) WalkingState() (LuaControlWalkingStateResult, error) {
 	return LuaControl{o.Object}.WalkingState()
 }
 
+func (o LuaEntity) WriteDriving(value bool) error {
+	return LuaControl{o.Object}.WriteDriving(value)
+}
+
 // LuaEntityPrototype inherits these. The handle decides the object, so dispatch is
 // identical -- only the name had nowhere to live.
 func (o LuaEntityPrototype) CustomTooltipFields() ([]CustomTooltipField, error) {
@@ -68097,6 +68123,10 @@ func (o LuaPlayer) Vehicle() (*Object, error) {
 
 func (o LuaPlayer) WalkingState() (LuaControlWalkingStateResult, error) {
 	return LuaControl{o.Object}.WalkingState()
+}
+
+func (o LuaPlayer) WriteDriving(value bool) error {
+	return LuaControl{o.Object}.WriteDriving(value)
 }
 
 // LuaProcessionLayerInheritanceGroupPrototype inherits these. The handle decides the object, so dispatch is

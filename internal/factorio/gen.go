@@ -303,6 +303,129 @@ var indexWriteHalf = map[string]bool{
 	"LuaTransportLine": false,
 }
 
+// A RENAME is what a name collision gets instead of a deferral.
+//
+// A class can declare a method and an attribute whose bound names coincide, and
+// two members cannot share one identifier -- so one of them was dropped, and
+// WHICH one was decided by emission order: methods are emitted before
+// attributes, so the method won and the attribute's WRITE HALF was deferred.
+// That is an accident dressed as a policy, and it is not free, because in both
+// standing instances the two members are different calls:
+//
+//   - `LuaControl::driving` (write) puts the player in or out of a vehicle;
+//     `set_driving(driving, force)` has a second parameter -- "the player will
+//     be ejected and left at the position of the car if normal leave is not
+//     possible". The attribute is the plain gesture and the method the forceful
+//     one.
+//   - `LuaPlayer::zoom_limits` (write) sets THE CURRENT CONTROLLER'S limits;
+//     `set_zoom_limits(controller_type, zoom_limits)` sets ANY controller's, and
+//     the description says exactly that on the attribute: "To set the zoom
+//     limits of ANY controller type, not just the currently active one, use
+//     LuaPlayer::set_zoom_limits."
+//
+// So both losers are members a guest can legitimately want, and both were
+// unreachable from either language.
+//
+// THE WINNER STAYS THE METHOD and the loser gets a name written down here. A
+// method's name is the description's own, and renaming it would put a spelling
+// in the bindings that appears nowhere in Factorio's documentation; an
+// attribute's bound name is already this generator's construction (`Set` plus
+// the attribute), so a different construction for it costs a reader nothing.
+//
+// `Write<Name>` IS THE CONSTRUCTION, and it is this repo's own vocabulary rather
+// than a coinage: an assignable attribute side is its WRITE HALF everywhere else
+// here -- `indexWriteHalf`, "the index operator's WRITE half", `at.WriteType`.
+//
+// EACH ROW NAMES THE NAME IT REPLACES as well as the replacement, which is what
+// makes the table self-checking without re-deriving the naming switch anywhere.
+// A generator applies a row only when the name it computed really is `Was`, and
+// a row whose `Was` nothing else in the class claimed is STALE -- the collision
+// it was written for is gone. Both are recorded and both are gate failures.
+//
+// AN UNLISTED COLLISION STILL DEFERS SAFELY, under the reason it always had.
+// What changes is that it is also recorded BY IDENTITY, so a pin that
+// introduces one fails a gate naming the member rather than moving a count in a
+// census diff.
+type memberRenameRow struct {
+	// WasGo and WasRust are the names the naming switch produces without this
+	// table.
+	WasGo, WasRust string
+	// Go and Rust are the names to emit instead.
+	Go, Rust string
+}
+
+var memberRename = map[string]memberRenameRow{
+	// LuaControl::driving, the attribute write half, against the method
+	// set_driving(driving, force).
+	"LuaControl::driving/" + memberSetKind: {
+		WasGo: "SetDriving", WasRust: "set_driving",
+		Go: "WriteDriving", Rust: "write_driving",
+	},
+	// LuaPlayer::zoom_limits, the attribute write half, against the method
+	// set_zoom_limits(controller_type, zoom_limits).
+	"LuaPlayer::zoom_limits/" + memberSetKind: {
+		WasGo: "SetZoomLimits", WasRust: "set_zoom_limits",
+		Go: "WriteZoomLimits", Rust: "write_zoom_limits",
+	},
+}
+
+// memberSetKind is MemberSet spelled for a map-literal key, which cannot call
+// strconv. Pinned against the constant by TestEveryNameCollisionHasARow rather
+// than trusted.
+const memberSetKind = "2"
+
+// MemberKey is the identity both binding generators index a member by: the
+// class, the description's own name, and the kind. One function rather than a
+// format string in four places, for the reason PinExport is one function.
+func MemberKey(m Member) string {
+	return fmt.Sprintf("%s::%s/%d", m.Class, m.Name, m.Kind)
+}
+
+// staleRenames reports memberRename rows on one class that no longer describe a
+// collision, given the names that class actually emitted.
+//
+// TWO WAYS A ROW GOES STALE and the message says which. The name it REPLACES is
+// no longer taken by anything else -- the method it was losing to was removed or
+// renamed, so the loser could have its ordinary name back and the row is now
+// inventing a spelling for nothing. Or the name it replaces was never emitted at
+// all, which means the naming switch moved under the table and the row applied
+// to a name nobody meant.
+//
+// Called once per class by each backend, with a per-language accessor rather
+// than a copy of the row shape, so the two cannot drift on which field they
+// read. `seen` holds the names that class emitted, the renamed one included.
+func staleRenames(cls string, ms []Member, seen map[string]bool,
+	pick func(memberRenameRow) (was, now string)) []string {
+	var out []string
+	for _, m := range ms {
+		r, ok := memberRename[MemberKey(m)]
+		if !ok {
+			continue
+		}
+		was, now := pick(r)
+		if !seen[now] {
+			out = append(out, fmt.Sprintf(
+				"%s: the row replaces %q with %q and %q was never emitted -- the "+
+					"naming rule moved under the table", MemberKey(m), was, now, now))
+			continue
+		}
+		if !seen[was] {
+			out = append(out, fmt.Sprintf(
+				"%s: the row replaces %q and nothing else on %s took that name -- "+
+					"the collision it was written for is gone",
+				MemberKey(m), was, cls))
+		}
+	}
+	return out
+}
+
+// NameCollision is the deferral reason a guest generator reports for a member
+// whose bound name another member of the class already took and which
+// memberRename has no row for. Language-qualified at the call site, because Go
+// and Rust really can collide differently -- Rust puts types and values in
+// separate namespaces.
+const NameCollision = " name collides with another member of the class"
+
 // UnfillableHandler is the deferral reason both guest generators report for a
 // member whose argument can be a Lua function. It is a constant because it is a
 // census KEY -- `go_deferrals_by_reason` / `rust_deferrals_by_reason` are read

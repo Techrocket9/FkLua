@@ -2461,6 +2461,27 @@ func printDeferrals(a *factorio.API, r factorio.Report,
 	list("go string-enum constants", g.LiteralsDeferred, g.LiteralDeferBy)
 	list("rust string-enum constants", rb.LiteralsDeferred, rb.LiteralDeferBy)
 
+	// NAME COLLISIONS BY IDENTITY, because a count cannot say whose decision it
+	// is. A collision is one member losing a name to another and somebody has to
+	// choose which -- `memberRename` in gen.go is where the two standing ones are
+	// chosen -- so an unlisted one prints with its name and its would-be
+	// spelling rather than sitting as a number in a census diff. Silent when
+	// there are none, like every other line here.
+	for _, b := range []struct {
+		lang           string
+		collide, stale []string
+	}{
+		{"go", g.Collisions, g.StaleRenames},
+		{"rust", rb.Collisions, rb.StaleRenames},
+	} {
+		for _, c := range b.collide {
+			fmt.Printf("  %s name collision with NO rename row: %s\n", b.lang, c)
+		}
+		for _, s := range b.stale {
+			fmt.Printf("  %s STALE rename row: %s\n", b.lang, s)
+		}
+	}
+
 	// THE ACCOUNTING LINE. Everything api.go models, reconciled against what
 	// came out, so a shape that reaches neither list is visible as a number
 	// rather than as an absence somebody has to notice.

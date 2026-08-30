@@ -6,7 +6,7 @@ Read `CLAUDE.md` first — Invariant A is the contract every value crossing this
 
 **Status: reachable end to end, and verified in Factorio 2.0.77.** The handle table, dispatch, all three marshalling tiers, event dispatch, the generator, the Go bindings and the `control.lua` wiring are built and tested.
 
-Not built: the guest-side **C** bindings. At the default 2.0.77 pin the host carries **4262 of 4266** member entries; the 4 it does not are three callback parameters and one variadic — **and three of those four are reachable now, through a seam rather than a binding: see "The callback seam" below.** **7 are deferred on each of the Go and Rust sides** -- five taking a Lua function, which no guest can construct, and two a name colliding with another member of the same class -- listed under `go_deferrals_by_reason` and `rust_deferrals_by_reason` in the census and printed IN FULL by `fklua gen-bindings` since the campaign found two gaps hiding in the fourteen groups the headline never named — and every one of them is reachable from Lua.
+Not built: the guest-side **C** bindings. At the default 2.0.77 pin the host carries **4262 of 4266** member entries; the 4 it does not are three callback parameters and one variadic — **and three of those four are reachable now, through a seam rather than a binding: see "The callback seam" below.** **5 are deferred on each of the Go and Rust sides**, every one of them taking a Lua function, which no guest can construct -- listed under `go_deferrals_by_reason` and `rust_deferrals_by_reason` in the census and printed IN FULL by `fklua gen-bindings` since the campaign found two gaps hiding in the fourteen groups the headline never named — and every one of them is reachable from Lua.
 
 **Every count in this file is PER PIN, and the pin is a build-time axis.** These are 2.0.77's, which is the general-availability release and therefore the default; the 2.1.x descriptions are committed too, and the newest of them, **2.1.17**, binds **4,857 of 4,859**. Take a number from `api/<version>/census.json` rather than from here, and if you move the default pin, `agents/versioning.md`'s "Moving the default pin" lists every row below that has to move with it.
 
@@ -460,11 +460,11 @@ A failed element frees the block it was writing into, the same rule `encode_rets
 
 ---
 
-## The guest bindings — **Go and Rust built (4255 of 4262 each at the 2.0.77 pin), C not**
+## The guest bindings — **Go and Rust built (4257 of 4262 each at the 2.0.77 pin), C not**
 
 `fklua gen-bindings` writes `guest/go/fkapi/fkapi.go` and `guest/rust/fkapi/src/api.rs`, committed as golden files so a regeneration is a reviewable diff. `--check` is the CI gate: a stale checkout is a build failure, not a method a mod author finds missing.
 
-**4255 of 4262 members bound (99.84%), 7 deferred** at the default 2.0.77 pin — plus **240 `Into` variants**, which are second bindings over members already counted rather than members of their own. Scalars, strings, handles, optionals, structs, arrays, dictionaries, tier-2 dynamic values, **an array field inside a struct**, and containers nested to any depth. (The 4160/27 this line read until the nested-container round is the number the ports round left behind, and it is the shape of the history below rather than the state now.)
+**4257 of 4262 members bound (99.88%), 5 deferred** at the default 2.0.77 pin — plus **240 `Into` variants**, which are second bindings over members already counted rather than members of their own. Scalars, strings, handles, optionals, structs, arrays, dictionaries, tier-2 dynamic values, **an array field inside a struct**, and containers nested to any depth. (The 4160/27 this line read until the nested-container round is the number the ports round left behind, and it is the shape of the history below rather than the state now.)
 
 **Both backends, to the member id, since 2026-08-03.** Rust was at 4140/47 for four milestones while Go moved to 4160/27, and every one of the twenty was a branch the Rust generator had not grown rather than a shape Rust could not express. What closed it is the ports round, and what keeps it closed is the census: `rust_members_bound`, `rust_members_deferred`, `rust_deferrals_by_reason`, `rust_members_inherited`, `rust_event_payload_structs` and `rust_define_accessors` sit beside their Go twins in one committed file, so a feature added to one backend and not the other is a diff rather than something four mod authors report independently. *Enforced by `TestBothBackendsBindTheSameMembers`, which compares the counts AND the member id sets — a missing member and an extra one cancel in a total.*
 
@@ -1012,6 +1012,25 @@ A member whose signature cannot be expressed is omitted with a reason. A guest a
 **The predicate walks a whole type rather than testing the top level**, because the shape that matters is the union rather than a bare `function`. The three positions where a bare one appears — `add_command`'s callback, `add_interface`'s dictionary value, `get_event_handler`'s return — are already HOST skips and never reach a guest generator, so the predicate's whole live population is the five. That is the number to expect if a pin ever moves it, and it is asserted as an equality at every committed description rather than at the pin.
 
 *Enforced by `TestOnlyTheFiveHandlerMembersAreUnfillable` (an equality over every committed description), `TestTheHostTableStillCarriesTheHandlerMembers` (the id half, including that the rendered Lua table still names `on_nth_tick`) and `TestNeitherGuestBindsAHandlerMember`. Red-proven twice: removing the mark reports the unfillable set as empty at all five pins, and disabling the generators' check puts `func (o LuaBootstrap) OnNthTick(` and `pub fn on_nth_tick(` back with 0 deferrals under the reason.*
+
+### A name collision is a DECISION — `memberRename`
+
+**A class can declare a method and an attribute whose bound names coincide, and until 2026-08-30 which one survived was decided by emission order.** Methods are emitted before attributes, so the method won and the attribute's WRITE HALF was deferred under `<Lang> name collides with another member of the class`. Two members, in both languages, at every committed description — and in both cases the loser is a member a guest can legitimately want:
+
+| loser | winner | what the loser does that the winner does not |
+|---|---|---|
+| `LuaControl::driving` (write) | `set_driving(driving, force)` | the plain gesture. The method's second parameter ejects the player "and leaves them at the position of the car if normal leave is not possible" |
+| `LuaPlayer::zoom_limits` (write) | `set_zoom_limits(controller_type, zoom_limits)` | sets THE CURRENT controller's limits. The description says so on the attribute: "To set the zoom limits of ANY controller type, not just the currently active one, use `LuaPlayer::set_zoom_limits`" |
+
+**The winner stays the method and the loser gets a name written down.** A method's name is the description's own, so renaming it would put a spelling in the bindings that appears nowhere in Factorio's documentation; an attribute's bound name is already this generator's construction (`Set` plus the attribute), so a different construction costs a reader nothing. `Write<Name>` / `write_<name>` is that construction, and it is this repo's own vocabulary rather than a coinage — an assignable attribute side is its WRITE HALF in `indexWriteHalf`, in `at.WriteType` and in the section above.
+
+**EACH ROW NAMES THE NAME IT REPLACES, which is what makes the table self-checking without re-deriving the naming switch anywhere.** A generator applies a row only when the name it computed really is the row's `Was`; a row whose `Was` nothing else in the class claimed is STALE, because the collision it was written for is gone. Both conditions are recorded by identity and both fail the gate.
+
+**An unlisted collision still defers safely** — the branch and the reason are unchanged — and what is new is that the IDENTITY is recorded and printed, so a pin that introduces one fails a gate naming the member and the name it would have had, rather than moving a count in a census diff. That is `TestEveryIndexOperatorHasAWriteVerdict`'s discipline over a different derivation, and it is the same argument: "no row" must not be allowed to mean "not writable", because it is indistinguishable from "nobody looked".
+
+**Both languages' member deferrals are now the five unfillable handlers and nothing else**: `<lang>_members_bound` 4255 → **4257**, `<lang>_members_deferred` 7 → **5**, and `<lang>_members_inherited` 1329 → **1331**, because `LuaControl::driving`'s write half is now forwarded to `LuaEntity` and `LuaPlayer`. The generated diff is **pure additions** and no member id moves — `driving`'s setter is member 374 and `zoom_limits`' is 2835 either way.
+
+*Enforced by `TestEveryNameCollisionHasARow`, over every committed description in both languages, and `TestTheRenamedMembersAreBoundUnderBothNames`, which asserts the WINNER still has the description's own name — a rename that quietly replaced the method would satisfy a check that only looked for the new one. Red-proven three times, each with its own message: a row removed reports the collision by name at all five pins, a row for a member that does not collide reports it as stale, and changing the naming switch's `Set` prefix reports that the rule moved under the table.*
 
 ### Canonical unions: what took coverage from 78% to 89%
 

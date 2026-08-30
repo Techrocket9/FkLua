@@ -142,7 +142,7 @@ The `agents/` directory holds the maintainer design notes; see [Working on FkLua
 
 ## The Factorio API from a guest
 
-The whole runtime API is bound in both languages, member id for member id: against the default **2.0.77** API pin, 4,255 of 4,262 members, with a payload struct for every event, 1,329 inherited forwarders and 1,137 `defines` accessors. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id: against the default **2.0.77** API pin, 4,257 of 4,262 members, with a payload struct for every event, 1,331 inherited forwarders and 1,137 `defines` accessors. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings; read them from there rather than from this page.
 
 The shape of it: one generic `fk.call` import rather than one per method, so a member Factorio removes degrades to a status instead of failing the module; a mod ships the member and event tables pruned to the ids it provably calls (about 0.6 KB instead of about 840 KB); events are filtered in C++ before the guest is entered, and an expensive payload field can be masked out; commands and remote interfaces dispatch back in by id; and a host call costs about 12.5 µs, so the cost model is calls, not bytes.
 

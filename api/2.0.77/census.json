@@ -35,32 +35,30 @@
   "fields_omitted_by_reason": {},
   "host_events_bound": 219,
   "event_scratch_bytes": 128,
-  "go_members_bound": 4255,
-  "go_members_deferred": 7,
+  "go_members_bound": 4257,
+  "go_members_deferred": 5,
   "go_deferrals_by_reason": {
-    "Go name collides with another member of the class": 2,
     "handler is a Lua function": 5
   },
   "go_literals_deferred": 1,
   "go_literal_deferrals_by_reason": {
     "a string literal with no identifier name": 1
   },
-  "go_members_inherited": 1329,
+  "go_members_inherited": 1331,
   "go_event_payload_structs": 219,
   "go_define_accessors": 1137,
   "go_event_payloads_deferred": 0,
   "go_event_deferrals_by_reason": {},
-  "rust_members_bound": 4255,
-  "rust_members_deferred": 7,
+  "rust_members_bound": 4257,
+  "rust_members_deferred": 5,
   "rust_deferrals_by_reason": {
-    "Rust name collides with another member of the class": 2,
     "handler is a Lua function": 5
   },
   "rust_literals_deferred": 1,
   "rust_literal_deferrals_by_reason": {
     "a string literal with no identifier name": 1
   },
-  "rust_members_inherited": 1329,
+  "rust_members_inherited": 1331,
   "rust_event_payload_structs": 219,
   "rust_define_accessors": 1137,
   "max_method_return_arity": 3
