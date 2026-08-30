@@ -883,6 +883,158 @@ impl Value {
     }
 }
 
+/// Renders this value into dst and answers how many bytes it wrote.
+///
+/// A DEBUGGER'S EYES. The accessors above answer a question you already knew to
+/// ask; this is for the case where you do not, and the recorded debugging loop
+/// for it was recompile, repackage, rerun and diff a transcript.
+///
+/// INTO A BUFFER THE CALLER OWNS, AND NOT A String. Building one would allocate,
+/// and the default bump allocator never gives it back -- which is exactly the
+/// cost the fklog crate exists to remove, so a dumper that allocated would undo
+/// it at the one call site most likely to be in a loop. fklog lends its own
+/// tail for this:
+///
+/// /// fklog::start("v=");
+/// fklog::advance(v.dump(fklog::tail()));
+/// fklog::end();
+///
+/// TRUNCATION OVER GROWTH: a value bigger than dst is cut, and the return is
+/// what fits.
+///
+/// DETERMINISTIC BY CONSTRUCTION. A map's pairs are a Vec and are rendered in
+/// the order the host sent them; nothing here iterates a hash map, so two guests
+/// on two clients render one value identically.
+///
+/// The rendering is the Go binding's, byte for byte, and it is Lua-ish rather
+/// than JSON: {k=v, ...}, [a, b], quoted strings, #N for a handle. It is for a
+/// person reading a log and is not parsed back anywhere.
+impl Value {
+    pub fn dump(&self, dst: &mut [u8]) -> usize {
+        let mut d = Dumper { dst, n: 0 };
+        d.value(self);
+        d.n
+    }
+}
+
+struct Dumper<'a> {
+    dst: &'a mut [u8],
+    n: usize,
+}
+
+impl Dumper<'_> {
+    fn put(&mut self, x: &[u8]) {
+        let room = self.dst.len().saturating_sub(self.n);
+        let k = core::cmp::min(room, x.len());
+        self.dst[self.n..self.n + k].copy_from_slice(&x[..k]);
+        self.n += k;
+    }
+
+    fn s(&mut self, x: &str) {
+        self.put(x.as_bytes());
+    }
+
+    fn value(&mut self, v: &Value) {
+        match v {
+            Value::Nil => self.s("nil"),
+            Value::Bool(b) => self.s(if *b { "true" } else { "false" }),
+            Value::Number(f) => self.num(*f),
+            Value::Str(x) => {
+                self.s("\"");
+                let b = x.as_bytes();
+                self.put(b);
+                self.s("\"");
+            }
+            Value::Obj(o) => {
+                self.s("#");
+                self.uint(o.0 as u64);
+            }
+            Value::Array(a) => {
+                self.s("[");
+                for (i, e) in a.iter().enumerate() {
+                    if i > 0 {
+                        self.s(", ");
+                    }
+                    self.value(e);
+                }
+                self.s("]");
+            }
+            Value::Map(m) => {
+                self.s("{");
+                for (i, (k, val)) in m.iter().enumerate() {
+                    if i > 0 {
+                        self.s(", ");
+                    }
+                    // A string key is rendered bare, which is what a Lua table
+                    // literal looks like; anything else takes the [k] form.
+                    if let Value::Str(ks) = k {
+                        let b = ks.as_bytes();
+                        self.put(b);
+                    } else {
+                        self.s("[");
+                        self.value(k);
+                        self.s("]");
+                    }
+                    self.s("=");
+                    self.value(val);
+                }
+                self.s("}");
+            }
+        }
+    }
+
+    /// A number the way a diagnostic wants it: integral values with no
+    /// fractional part, anything else to three decimal places with trailing
+    /// zeroes trimmed. Not a real float formatter, for fklog's reason.
+    fn num(&mut self, mut f: f64) {
+        if f < 0.0 {
+            self.s("-");
+            f = -f;
+        }
+        if !(f < 9.2e18) {
+            // NaN reaches here too, and big is a better answer than a number
+            // that is not one.
+            self.s("big");
+            return;
+        }
+        let mut whole = f as u64;
+        let mut frac = ((f - whole as f64) * 1000.0 + 0.5) as u64;
+        if frac >= 1000 {
+            whole += 1;
+            frac -= 1000;
+        }
+        self.uint(whole);
+        if frac == 0 {
+            return;
+        }
+        self.s(".");
+        if frac < 100 {
+            self.s("0");
+        }
+        if frac < 10 {
+            self.s("0");
+        }
+        while frac % 10 == 0 {
+            frac /= 10;
+        }
+        self.uint(frac);
+    }
+
+    fn uint(&mut self, mut v: u64) {
+        let mut b = [0u8; 20];
+        let mut i = b.len();
+        loop {
+            i -= 1;
+            b[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        self.put(&b[i..]);
+    }
+}
+
 /// Equality for a map KEY. A variant mismatch is never equal, and a container
 /// is never equal to anything.
 fn same_scalar(a: &Value, b: &Value) -> bool {

@@ -1,0 +1,13 @@
+[package]
+name = "logdump"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "logdump"
+crate-type = ["cdylib"]
+
+[dependencies]
+fk = { path = "../../fk" }
+fkapi = { path = "../../fkapi" }
+fklog = { path = "../../fklog" }

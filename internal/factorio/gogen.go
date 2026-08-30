@@ -2560,6 +2560,165 @@ func (v Value) ObjOr(def Object) Object {
 	return def
 }
 
+// Dump renders this value into dst and answers how many bytes it wrote.
+//
+// A DEBUGGER'S EYES, and until it existed a guest handed a tier-2 value had no
+// way to find out what was in it: the accessors above answer a question you
+// already knew to ask, and the recorded debugging loop for the other case was
+// recompile, repackage, rerun and diff a transcript.
+//
+// INTO A BUFFER THE CALLER OWNS, AND NOT A string. Building one would allocate,
+// and under -gc=leaking every byte of it is permanent -- which is exactly the
+// cost guest/go/fklog exists to remove, so a dumper that allocated would undo
+// it at the one call site most likely to be in a loop. fklog lends its own tail
+// for this:
+//
+//	fklog.Start("v=")
+//	fklog.Advance(v.Dump(fklog.Tail()))
+//	fklog.End()
+//
+// TRUNCATION OVER GROWTH, like everything else on this path: a value bigger than
+// dst is cut, and the return is what fits. A caller that must know can compare
+// the count against len(dst).
+//
+// DETERMINISTIC BY CONSTRUCTION. A map's pairs are a SLICE and are rendered in
+// the order the host sent them; nothing here iterates a Go map, so two guests
+// on two clients render one value identically. That is the same property
+// Value.Map is a slice of pairs for.
+//
+// The rendering is Lua-ish rather than JSON: {k=v, ...} for a map with string
+// keys, [a, b] for an array, quoted strings, and #N for a handle. It is for a
+// person reading a log, so it is not parsed back anywhere and is not a format
+// anything may depend on.
+func (v Value) Dump(dst []byte) int {
+	d := dumper{dst: dst}
+	d.value(v)
+	return d.n
+}
+
+type dumper struct {
+	dst []byte
+	n   int
+}
+
+func (d *dumper) s(x string) { d.n += copy(d.dst[min(d.n, len(d.dst)):], x) }
+
+func (d *dumper) value(v Value) {
+	switch v.Tag {
+	case TagNil:
+		d.s("nil")
+	case TagBool:
+		if v.Bool {
+			d.s("true")
+		} else {
+			d.s("false")
+		}
+	case TagNumber:
+		d.num(v.Number)
+	case TagString:
+		d.s("\"")
+		d.s(v.Str)
+		d.s("\"")
+	case TagObject:
+		d.s("#")
+		d.uint(uint64(v.Object.h))
+	case TagArray:
+		d.s("[")
+		for i := range v.Array {
+			if i > 0 {
+				d.s(", ")
+			}
+			d.value(v.Array[i])
+		}
+		d.s("]")
+	case TagMap:
+		d.s("{")
+		for i := range v.Map {
+			if i > 0 {
+				d.s(", ")
+			}
+			// A STRING KEY IS RENDERED BARE, which is what a Lua table literal
+			// looks like and what the API's option tables all are. Anything else
+			// takes the [k] form, so a number-keyed map cannot read as a
+			// string-keyed one.
+			if k := v.Map[i].Key; k.Tag == TagString {
+				d.s(k.Str)
+			} else {
+				d.s("[")
+				d.value(k)
+				d.s("]")
+			}
+			d.s("=")
+			d.value(v.Map[i].Val)
+		}
+		d.s("}")
+	default:
+		d.s("?")
+	}
+}
+
+// num renders a number the way a diagnostic wants it: an integral value with no
+// fractional part, and anything else to three decimal places.
+//
+// NOT strconv.FormatFloat, which links a large chunk of formatting code into a
+// guest that has no other use for it -- the same trade fklog's F1 states. A
+// value too large for an int64 renders as big, because printing it wrongly
+// would be worse than saying so.
+func (d *dumper) num(f float64) {
+	if f < 0 {
+		d.s("-")
+		f = -f
+	}
+	if f >= 9.2e18 {
+		d.s("big")
+		return
+	}
+	whole := uint64(f)
+	frac := uint64((f-float64(whole))*1000 + 0.5)
+	if frac >= 1000 {
+		whole++
+		frac -= 1000
+	}
+	d.uint(whole)
+	if frac == 0 {
+		return
+	}
+	d.s(".")
+	// Zero-padded to three places, so 0.5 is 0.500 and never 0.5.
+	if frac < 100 {
+		d.s("0")
+	}
+	if frac < 10 {
+		d.s("0")
+	}
+	// TRAILING ZEROES TRIMMED, so 1.5 is 1.5 and not 1.500.
+	for frac%10 == 0 {
+		frac /= 10
+	}
+	d.uint(frac)
+}
+
+func (d *dumper) uint(v uint64) {
+	var b [20]byte
+	i := len(b)
+	for {
+		i--
+		b[i] = byte('0' + v%10)
+		v /= 10
+		if v == 0 {
+			break
+		}
+	}
+	d.n += copy(d.dst[min(d.n, len(d.dst)):], b[i:])
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // sameScalar is equality for a map KEY. A tag mismatch is never equal, and a
 // container is never equal to anything.
 func sameScalar(a, b Value) bool {

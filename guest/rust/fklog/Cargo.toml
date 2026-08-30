@@ -1,0 +1,15 @@
+[package]
+name = "fklog"
+version = "0.1.0"
+edition = "2021"
+description = "A zero-allocation log line builder for an FkLua guest"
+
+[lib]
+crate-type = ["rlib"]
+
+# fk AND NOTHING ELSE, which is the point rather than an economy. fkapi is
+# generated, pinned to one API description and stamped with it, so a hand-written
+# library that depended on it would drag the pin into every consumer that only
+# wanted a line builder. What this needs from the runtime is one function.
+[dependencies]
+fk = { path = "../fk" }

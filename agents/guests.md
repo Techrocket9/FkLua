@@ -511,6 +511,26 @@ across ticks. It is the SIZE of the memory, not the part in use, and no
 --persist mode changes it.
 ```
 
+### The line builder is a LIBRARY now — `fklog`
+
+**At least nine guests across two languages hand-rolled the same zero-allocation line builder, and one of the copies grew a real rounding divergence from its twin.** `guest/go/fklog` and `guest/rust/fklog` are that thing, shipped once.
+
+The reason it is not advice is that the obvious way is wrong in a way nothing reports. `fk.Log("x=" + strconv.Itoa(n))` allocates every intermediate string, `+` in a loop is quadratic, and under `-gc=leaking` every byte of it is permanent — in the guest's linear memory, in every save, in every multiplayer join. The first downstream mod measured its ENTIRE guest heap as log lines: **64 MiB of linear memory and a 19.9 ms idle worst tick, against under 16 MiB and 2.3 ms** once the lines were built into one fixed buffer instead. Under `--gc=collected` the same allocations are garbage rather than a leak, and garbage is still allocated, marked around and swept out of the pacer's budget.
+
+**One fixed buffer, `copy`-append, truncation over growth, and the string handed to the host BORROWS it.** `unsafe.String` on the Go side rather than `string(buf[:n])`, which would copy; the host copies the bytes into a Lua string before the call returns, so the borrow never outlives it. Truncation rather than growth is measured too: `append` on a slice carries a growth branch the compiler inlines into every call site, worth **98,373 bytes of wasm `code` against 81,457** over ~200 of them, which is 1.34 MB of generated Lua against 1.04.
+
+**IT DEPENDS ON `fk` ALONE.** `fkapi` is generated, pinned to one API description and stamped with it, so a hand-written library that imported it would drag the pin into every consumer that only wanted a line builder. `Value.Dump` is the other side of that boundary and lives in the `fkapi` preamble, writing into a destination the caller owns; `fklog.Tail`/`Advance` is how a caller lends it the rest of the line:
+
+```go
+fklog.Start("v=")
+fklog.Advance(v.Dump(fklog.Tail()))
+fklog.End()
+```
+
+**A CALL SITE MAY NOT MAKE A HOST CALL BETWEEN `Start` AND `End`.** There is one buffer, and a synchronously-raised event whose handler logged would interleave with a line that is half built. It is an invariant of the caller rather than a guard, because a guard costs a branch on every append to catch a mistake a reader can see.
+
+**Nothing generates either copy, so `census.json` cannot see them and neither can `gen-bindings --check`.** The parity mechanism is a shared golden: `internal/guest.TestTheLineBuilderAndTheDumperAgreeInBothLanguages` builds `examples/logdump` in both languages against one transcript, which is `TestBothDataGuestLibrariesMakeTheSameCalls`' shape applied to a library rather than to a stage. What it pins beyond the obvious is the two places the twins could legitimately disagree: the SIGNED EDGE (`-v` at the most negative value is a defined two's-complement wrap in Go and an overflow in Rust, so both write the form that is defined in both) and the ROUNDING CARRY (9.96 is 10.0 and not 9.10, which is the divergence class one of the nine copies actually grew).
+
 ### What to do about it, in order
 
 **`--gc=collected` IS THE RECOMMENDED DEFAULT FOR A NEW GO GUEST, as of sharding stage C, and the ordering below says so.** What changed is not the collector, it is what happens when it is outrun: `fkgc.HeapCap` is gone, the collector's metadata scales with the heap, and a collected guest that allocates faster than its budget reclaims now GROWS exactly like a leaking one instead of trapping. There is no size at which turning the collector on makes a guest worse than leaving it off, so the advice that used to be item 0 is item 0 because it is first, not because it is an alternative.

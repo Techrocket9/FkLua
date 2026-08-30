@@ -4,7 +4,7 @@
 # example against the same lockfile, the way guest/go is one module.
 [workspace]
 resolver = "2"
-members = ["fk", "fkgc", "fkapi", "fkipc", "fkdata", "examples/hello", "examples/array", "examples/api", "examples/gctorture", "examples/gcsave", "examples/gcconfig", "examples/dict", "examples/dynread", "examples/typedargs", "examples/lasterror", "examples/ipc", "examples/demo-circle", "examples/datastage"]
+members = ["fk", "fkgc", "fkapi", "fkipc", "fkdata", "fklog", "examples/hello", "examples/array", "examples/api", "examples/gctorture", "examples/gcsave", "examples/gcconfig", "examples/dict", "examples/dynread", "examples/typedargs", "examples/logdump", "examples/lasterror", "examples/ipc", "examples/demo-circle", "examples/datastage"]
 
 # Every guest ships as a cdylib into a game's tick loop, so the profile is not
 # a preference. panic=abort because there is no unwinding across the wasm

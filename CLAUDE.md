@@ -629,6 +629,18 @@ The second queued round: the widest TEMPTATIONS rather than the blocks. Each ite
 
 *Red-proven three times: dropping `attachDocs`' attribute arm takes coverage from 3,566 to 914 and fails the floor by name, cutting at every period truncates `defines.events` and `1.0`, and removing the `writeParams` call reports all five missing renderings.* Detail: [`agents/abi.md`](agents/abi.md), "The description's PROSE reaches the bindings".
 
+#### The line builder is a library, and a tier-2 value can be dumped
+
+**At least nine guests across two languages hand-rolled the same zero-allocation line builder, and one copy grew a real rounding divergence from its twin.** `guest/go/fklog` and `guest/rust/fklog` are that thing shipped once: one fixed buffer, `copy`-append, truncation over growth, and a string handed to the host that BORROWS the buffer. The measurement behind it is downstream's: **64 MiB of linear memory and a 19.9 ms idle worst tick against under 16 MiB and 2.3 ms**, for a guest whose entire heap turned out to be log lines.
+
+**IT DEPENDS ON `fk` ALONE, which is the coupling decision.** `fkapi` is generated, pinned and stamped, so a hand-written library that imported it would drag the pin into every consumer that only wanted a line builder. **So `Value.Dump` lives in the fkapi PREAMBLE, not in fklog**, and writes into a destination the caller owns; `fklog.Tail`/`Advance` lends it the rest of the line. Neither knows about the other beyond a `[]byte` and a count.
+
+**`Dump` is deterministic by construction**: a map's pairs are a SLICE and render in the order the host sent them, so two clients render one value identically. The rendering is Lua-ish (`{k=v}`, `[a, b]`, `"s"`, `#7`) and is for a person reading a log; nothing parses it back.
+
+**Nothing generates either copy, so `census.json` cannot see them.** The parity mechanism is a shared golden — `TestTheLineBuilderAndTheDumperAgreeInBothLanguages` over `examples/logdump`, which is `TestBothDataGuestLibrariesMakeTheSameCalls`' shape applied to a library. **And it went to work immediately**: writing it turned up a comment claiming `-v` at the most negative value prints it as itself, which is FALSE in Go (the wrap is defined, so both spellings agree, measured by injection) and true only of Rust's overflow. The claim is corrected rather than kept.
+
+*Red-proven four times: `F1`'s carry removed in Go (9.96 prints 9.10), the SAME carry removed in RUST ALONE (the mirror catches a one-language divergence, which is the whole point of it), every map key forced into the `[k]` form, and `Dump` answering the destination's size instead of what it wrote (the line runs past its own end into the buffer's stale bytes).* Detail: [`agents/guests.md`](agents/guests.md), "The line builder is a LIBRARY now".
+
 #### A mod setting arrives typed — `IsDynValueStruct`
 
 **`ModSetting` is a box around a tagged union, so a guest reading its own boolean setting switched on a tag to find out whether it was on.** `Bool`/`Num`/`Str`/`Obj` and `as_bool`/`as_num`/`as_str`/`as_obj` delegate to the accessors above and inherit their contract exactly: absent and mismatched both answer not-ok, and nothing coerces.

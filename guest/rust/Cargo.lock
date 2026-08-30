@@ -82,6 +82,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fklog"
+version = "0.1.0"
+dependencies = [
+ "fk",
+]
+
+[[package]]
 name = "gcconfig"
 version = "0.1.0"
 dependencies = [
@@ -123,6 +130,15 @@ version = "0.1.0"
 dependencies = [
  "fk",
  "fkapi",
+]
+
+[[package]]
+name = "logdump"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkapi",
+ "fklog",
 ]
 
 [[package]]
