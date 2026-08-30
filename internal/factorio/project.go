@@ -83,6 +83,19 @@ type Project struct {
 	// A DECLARED key with an empty list is not the same as an ABSENT one, so
 	// this map is read for presence rather than for length.
 	Stages map[string][]string
+	// Scenarios is the [scenarios] section: an ordered list of require paths per
+	// SCENARIO the mod ships, one entry of which may be "@control".
+	//
+	// A scenario's control.lua is a full control stage in its own Lua state, and
+	// the base game's own convention for a mod-shipped scenario is a one-line
+	// require into the mod's tree -- which is exactly the file `fklua mod`
+	// already writes for the mod root. So this is a packaging key rather than a
+	// second compiler: it says which scenario directories to put that line in.
+	//
+	// An ABSENT key generates nothing, so a project written before it existed
+	// emits byte for byte what it emitted before -- the same rule `gc` and
+	// `data_module` follow, gated by the same byte-identity test.
+	Scenarios map[string][]string
 	// Dependencies reach info.json verbatim, in Factorio's own syntax:
 	// "base >= 2.0.0" for a hard dependency, "? other-mod" for an optional
 	// one, "! conflicting-mod" for an incompatibility. Not parsed here --
@@ -166,6 +179,22 @@ func ParseProject(src string) (Project, error) {
 					items = []string{}
 				}
 				p.Stages[key] = items
+				continue
+			}
+			// [scenarios] IS THE ONE SECTION WHOSE KEYS ARE THE AUTHOR'S OWN, so
+			// unlike [stages] there is nothing to check a key against here: a
+			// scenario is named whatever the author calls it. What the name has to
+			// be is checked at PACKAGE time, where it becomes a directory --
+			// scenarioNameRE -- rather than here, so the manifest reader stays a
+			// reader.
+			if section == "scenarios" {
+				if p.Scenarios == nil {
+					p.Scenarios = map[string][]string{}
+				}
+				if items == nil {
+					items = []string{}
+				}
+				p.Scenarios[key] = items
 				continue
 			}
 			return p, fmt.Errorf("line %d: unknown list key %q in [%s]", i+1, key, section)
@@ -289,6 +318,21 @@ func (p Project) TOML() string {
 		b.WriteString("#   fk_settings -> settings.lua           fk_data -> data.lua\n")
 		b.WriteString("#   fk_data_updates -> data-updates.lua   fk_data_final_fixes -> data-final-fixes.lua\n")
 		fmt.Fprintf(&b, "data_module = %q\n", p.DataModule)
+	}
+	if len(p.Scenarios) > 0 {
+		b.WriteString("\n# Scenarios this mod ships. Each key is a directory under\n")
+		b.WriteString("# scenarios/, and each entry is one require in the generated\n")
+		b.WriteString("# control.lua for it, with \"@control\" standing for this mod's own\n")
+		b.WriteString("# control stage. A scenario's control.lua is a full control stage in\n")
+		b.WriteString("# its own Lua state, so the shim is what connects it to the guest.\n")
+		b.WriteString("[scenarios]\n")
+		for _, name := range sortedScenarioNames(p.Scenarios) {
+			var qs []string
+			for _, e := range p.Scenarios[name] {
+				qs = append(qs, fmt.Sprintf("%q", e))
+			}
+			fmt.Fprintf(&b, "%s = [%s]\n", name, strings.Join(qs, ", "))
+		}
 	}
 	if len(p.Stages) > 0 {
 		b.WriteString("\n# The order each stage file loads things in, one entry per require,\n")

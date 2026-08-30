@@ -1384,6 +1384,7 @@ func runMod(args []string) error {
 	// key and a key declared as an empty list mean different things and a map
 	// that invented entries would erase the difference.
 	var stages map[string][]string
+	var scenarios map[string][]string
 
 	str := func(i *int, flag string, dst *string) error {
 		if *i+1 >= len(args) {
@@ -1608,6 +1609,12 @@ func runMod(args []string) error {
 				stages[key] = chain
 			}
 		}
+		// [scenarios] TRAVELS THE SAME WAY AND HAS NO FLAG, which is [stages]'
+		// own arrangement rather than an oversight. A scenario is a directory of
+		// authored assets that the manifest names alongside them; there is no
+		// case where one checkout packages several mods with different scenario
+		// sets out of one tree, which is what earned --dependency its flag.
+		scenarios = proj.Scenarios
 	}
 
 	// A DATA-STAGE-ONLY MOD HAS NO CONTROL MODULE, and Factorio has never
@@ -1690,7 +1697,7 @@ func runMod(args []string) error {
 	// from a module that by design carries none.
 	var im *ir.Module
 	var src string
-	pkg := &factorio.Package{Info: info, Stages: stages}
+	pkg := &factorio.Package{Info: info, Stages: stages, Scenarios: scenarios}
 	if in != "" {
 		// BELOW the pin resolution above, and it has to be: the build stamp is a
 		// fact about the module AND the version this package is built against, so

@@ -153,6 +153,12 @@ type Package struct {
 	// decides WHICH stage files are generated. A mod with only a data stage must
 	// not get an empty settings.lua.
 	DataExports []string
+	// Scenarios is the [scenarios] chain per SCENARIO the mod ships: an ordered
+	// list of require paths, one entry of which may be ScenarioControlEntry.
+	//
+	// Empty generates nothing, which is what makes the whole key free for every
+	// project written before it existed. See scenario.go.
+	Scenarios map[string][]string
 	// Stages is the [stages] chain per stage key: an ordered list of require
 	// paths, one entry of which may be GuestStageEntry.
 	//
@@ -304,6 +310,15 @@ func (p *Package) Files() (map[string]string, error) {
 		}
 		files[h.File] = stageFile(h, chain)
 	}
+	// THE SCENARIOS, gated on there being any, so a package without the key emits
+	// exactly the entries it always did.
+	scen, err := p.scenarioFiles()
+	if err != nil {
+		return nil, err
+	}
+	for name, body := range scen {
+		files[name] = body
+	}
 	// A COLLISION IS AN ERROR, and neither precedence is defensible. Letting
 	// an included file win produces a mod whose guest never runs; letting the
 	// generated one win produces a mod whose data stage is silently not the one
@@ -340,6 +355,25 @@ func (p *Package) Files() (map[string]string, error) {
 				"    [stages]\n    %s = [\"stages.%s\", %q]\n"+
 				"-- then delete the entry when the Lua is gone",
 				c, h.What, c, h.Key, strings.TrimSuffix(c, ".lua"), GuestStageEntry)
+		}
+		// ...AND A SCENARIO SHIM COLLIDING IS THE SAME HALFWAY HOUSE ONE
+		// DIRECTORY OVER: a mod whose scenario already carries a hand-written
+		// control.lua and has just declared the key. [scenarios] is the way
+		// through it for [stages]' reason -- the hand-written file goes back into
+		// the chain in an order the author states.
+		for _, c := range clashes {
+			if !strings.HasPrefix(c, ScenarioDir+"/") ||
+				!strings.HasSuffix(c, "/control.lua") {
+				continue
+			}
+			name := strings.TrimSuffix(strings.TrimPrefix(c, ScenarioDir+"/"),
+				"/control.lua")
+			return nil, fmt.Errorf("included file %s would overwrite the scenario "+
+				"shim fklua generates for %q. Rename the hand-written file (to "+
+				"%s/%s/scenario.lua, say) and name it in the chain beside the mod --\n"+
+				"    [scenarios]\n    %s = [%q, \"__%s__/scenario\"]\n"+
+				"-- then delete the entry when the Lua is gone",
+				c, name, ScenarioDir, name, name, ScenarioControlEntry, p.Info.Name)
 		}
 		// THE LIST IS WHAT WAS ACTUALLY WRITTEN, read back out of the map rather
 		// than spelled a second time. It used to be a literal naming five files,

@@ -35,6 +35,8 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 | `lang` | the guest language(s) to generate bindings for: `["go"]`, `["rust"]`, or both |
 | `gc` | how the guest heap is managed: `"collected"` (what `init` writes) or `"leaking"`. This key must agree with how the guest was built; a mismatch is a refusal at package time that names both sides. An absent key means "nobody said", which keeps pre-existing projects byte-for-byte unchanged. See [Memory, the collector and the save](memory.md) |
 
+`[scenarios]` names the scenarios the mod ships, one key per scenario directory. It is optional, and a project without it packages exactly what it packaged before.
+
 ## fklua.lock
 
 Derived, never hand-edited. `fklua lock` records the API version, a hash of the pinned `runtime-api.json`, and a hash of the generated bindings. `fklua lock --check` is the CI form, and each mismatch gets its own message: the pin moved without regeneration, the description changed underneath a pinned version, or generated code was edited by hand.
@@ -86,6 +88,8 @@ A mod whose settings and data stages are also a guest ships two more files, plus
 | `fk_data_module.lua` | your data guest, compiled to Lua and wrapped as a factory |
 | `settings.lua`, `data.lua`, `data-updates.lua`, `data-final-fixes.lua` | one per stage hook the data module exports, and none for a hook it does not |
 
+A mod that declares `[scenarios]` ships one more file per scenario, `scenarios/<name>/control.lua`, and none at all without the key.
+
 ### A mod with no control stage
 
 Factorio requires `info.json` and nothing else, so a mod that is only prototypes is an ordinary mod: a compatibility shim, a stand-in, anything whose whole job is `data.raw`. The control guest is optional whenever the mod has a data module, so leave the positional argument out:
@@ -103,6 +107,26 @@ Giving neither a control module nor a data module is an error: the command needs
 The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
 
 A mod with a hand-written data stage ships it through `data = "DIR"` under `[mod]` (or `fklua mod --include DIR`); the directory's contents are merged into the package, and a name collision with a generated file is an error at package time rather than a mod that is silently wrong in game. A mod whose data stage is a guest declares `data_module` under `[fklua]` instead, and can run both at once while it moves from one to the other: see [`docs/data-stage.md`](data-stage.md). The packaged output itself is disposable: edit the guest or the manifest and run `fklua mod` again.
+
+### Scenarios a mod ships
+
+A scenario's `control.lua` is a full control stage in its own Lua state, so it is not somewhere a guest can be compiled to. The base game's own convention for a mod-shipped scenario is a one-line require into the mod's tree, and that is exactly the `control.lua` `fklua mod` already writes for the mod root. `[scenarios]` says where to put a copy of that line:
+
+```toml
+[scenarios]
+freeplay-plus = ["@control"]
+```
+
+writes `scenarios/freeplay-plus/control.lua` containing `require("__my-mod__/control")`, so picking that scenario in the New Game menu runs the mod's guest. The cross-mod path is what makes it work from a scenario's own directory; a bare `require("control")` would look beside the scenario instead.
+
+Each value is an ordered chain of requires, exactly like `[stages]`, with `"@control"` standing for the mod's own control stage. A scenario that also needs Lua of its own names it in the order it wants:
+
+```toml
+[scenarios]
+custom = ["__my-mod__/scenario-setup", "@control"]
+```
+
+A chain with no `"@control"` is a pure-Lua scenario and is legal; a chain that names it in a mod with no control guest is an error at package time, because that scenario would load and do nothing. Everything else a scenario directory holds -- `description.json`, `blueprint.zip`, a locale directory, a saved map -- is authored, and comes in through `data` (or `--include`) like any other file. An included file that would overwrite a generated shim is an error, with the same remedy `[stages]` gives: put the hand-written file back into the chain.
 
 ### Packaging several mods from one manifest
 

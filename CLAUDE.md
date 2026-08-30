@@ -683,6 +683,20 @@ subsection below and each shipped with its own red proof.
 
 *Red-proven three times: the Go preamble's kind number moved off the host's (the gate names both values and says a descriptor of one kind would be read as another), the host losing a kind the two guests still spell (both writers reported by name), and the ROLLBACK removed — where a second registration to the refused name comes back `st 0`, silently succeeding into a dispatcher Factorio never registered, with the engine's refusal logged once for two attempts.*
 
+#### A mod-shipped scenario is one line of Lua — `[scenarios]`
+
+**A scenario's `control.lua` is a full control stage in its own Lua state, so it is not somewhere a guest can be compiled to** — and the base game's own convention for a mod-shipped scenario is a one-line require into the mod's tree, which is *exactly the file `fklua mod` already writes for the mod root*. So this was never a compiler gap: it was that there was nowhere to put a second copy of that line. `[scenarios] <name> = ["@control"]` writes `scenarios/<name>/control.lua` containing `require("__<mod>__/control")`.
+
+**THE SHAPE IS `[stages]`', DELIBERATELY.** A chain of requires with one token standing for the generated thing is a form this project already has, an author who has met one has met the other, and the mid-migration case — a scenario that requires the mod AND some Lua of its own, in an order the author states — is expressible without a second mechanism. The rules are `stageChains`' with one word changed: a chain naming `@control` in a mod with no control guest is an error at package time (a scenario that loads and does nothing), a chain without it is a pure-Lua scenario, and an absent section generates nothing.
+
+**`@control` IS A TOKEN AND NOT A PATH**, for `@guest`'s reason and one of its own: the require it becomes is `__<modname>__/control`, which cannot be written in the manifest without repeating the mod's name there — and a name written twice is this file's most-repeated failure shape. The CROSS-MOD path is load-bearing rather than stylistic: a scenario runs in its own directory, so a bare `require("control")` looks beside the scenario rather than at the mod root.
+
+**NO FLAG, which is `[stages]`' own arrangement.** `--dependency` earned a flag because one checkout packaging several mods needs different lists per mod; a scenario is a directory of authored assets the manifest names alongside them, and no case has been reported where one tree packages several mods with different scenario sets.
+
+**A scenario NAME becomes a directory inside the package**, so it is validated against the same shape a mod name is: a separator or a `..` in it is a package that writes outside itself, into a zip entry or onto the disk. **Back-compatibility is absolute** — no key means no `scenarios/` entry at all, gated the way `TestAProjectWithNoDataModuleIsByteIdentical` gates the data module.
+
+*Red-proven three times: the shim written with a bare `require("control")` (the cross-mod assertion by name), the files written unconditionally rather than gated on the key (the byte-identity gate reports the entry), and the generated shim not reaching `Files()` at all, where an included `scenarios/*/control.lua` silently wins.*
+
 #### `api diff` reads a method's VARIANT GROUPS, and the amendment's premise was wrong
 
 **The diff walked a method's top-level parameters and never its variant groups, which decide the same thing `takes_table` does.** Both generators branch on the group count being zero: with none the shared parameters lay out as a tier-1 struct or as positional arguments, with any the whole argument table crosses as ONE tier-2 value. So a member that gains its FIRST group or loses its LAST flips the shape of every call to it — and for a table CONCEPT the walk was worse than incomplete, because `diffShape` short-circuits on two identical signatures and `typeSig` does not carry variant groups, so a concept that gained one with its fields untouched reported **nothing at all**.
