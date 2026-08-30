@@ -808,6 +808,27 @@ defer allocRelease(mark)
 
 which restores the **marshalling arena**'s bump pointer to where it was. O(1), and it covers both sides however deep. **The invariant that makes it safe: an allocation meant to outlive the call must be made outside one** — or through `fk_alloc_static`, see below.
 
+### Reading a tier-2 value back — the accessors
+
+**There were seven constructors and zero accessors, in both languages, for as long as tier 2 has existed.** So every read of a returned map was a hand-written linear scan and a tag switch — and the scans in this repo's own examples read `kv.Val.Str` without ever looking at `kv.Val.Tag`, which is the empty string for a number and for an absent key alike. 598 `Value`-typed functions are improved at once, which is what made this the highest value-per-line item the temptations survey found.
+
+**TWO FAMILIES, AND THE SPLIT IS WHAT LETS ONE OF THEM CHAIN.** A LOOKUP (`Get`, `GetKey`, `At`; `get`, `get_key`, `at`) answers with a `Value` whose miss is nil, so `v.Get("a").Get("b").NumOr(0)` is one expression over a shape that may not be there. A READ (`AsBool`/`AsNum`/`AsStr`/`AsObj`; `as_bool` and siblings) answers with a comma-ok in Go and an `Option` in Rust, so a caller who needs to know says so, and the `Or` forms are the same read with the ok spent on a default. `Has`, `Len` and `IsNil` complete it.
+
+| | Go | Rust |
+|---|---|---|
+| lookup, chains | `Get(key) Value`, `GetKey(Value) Value`, `At(i) Value` | `get(&str) -> &Value`, `get_key(&Value) -> &Value`, `at(usize) -> &Value` |
+| read, may fail | `AsBool/AsNum/AsStr/AsObj() (T, bool)` | `as_bool/as_num/as_str/as_obj() -> Option<T>` |
+| read with a default | `BoolOr/NumOr/StrOr/ObjOr(def) T` | `bool_or/num_or/str_or/obj_or(def) -> T` |
+| the rest | `Has(key) bool`, `Len() int`, `IsNil() bool` | `has(&str) -> bool`, `len()`, `is_empty()`, `is_nil()` |
+
+**The two spellings differ and the answers do not**, which is the `<Name>Into` precedent one level down: forcing Go's comma-ok onto Rust, or Rust's `Option` onto Go, would make one of them worse for a rendering difference the wire does not have. Rust's `as_str` hands back a `&LuaStr` rather than a `&str` for the reason that type exists at all — a Lua string is arbitrary bytes. Rust's lookups return a `&Value` and therefore need something for a miss to point at, which is the file-level `static NIL: Value = Value::Nil`.
+
+**NOTHING COERCES.** `AsNum` on a string is `(0, false)`, never a parse: the tag is what the host said the value IS, and a codec that guessed would turn a wrong type into a plausible number. `Len` is the one asymmetry and it is deliberate — it answers 0 for a scalar, because "how many" has an answer there and it is none. **A miss and a present nil are different and `Get` cannot tell you which**; `Has` is what answers that, and it is a separate call because Factorio's own option tables read an absent key and a nil one identically.
+
+**A LINEAR SCAN, which is the honest shape for a pair slice.** The maps this API carries are option tables and event payloads with a handful of keys, and an index would allocate on every lookup to shorten a walk that is over in ten compares. A guest reading one map many times builds its own. `GetKey`'s equality is by tag and payload and **a container key never matches**: no described map is keyed by one, and comparing two slices elementwise would be a cost on every lookup.
+
+**The accessors are in the generated PREAMBLE, which is why the instrument is an end-to-end guest test.** `census.json` counts what the description produced and a preamble is not that; and no host-side unit test can call them, because the package they live in is `//go:wasmimport` declarations with no bodies and does not compile off-target. `internal/guest.TestValueAccessorsReadWhatTheTagNames` builds `examples/dynread` in both languages, drives it through the real `control.lua` against a `json_to_table` stub that returns one nested table, and compares both transcripts against one expectation — `TestBothDataGuestLibrariesMakeTheSameCalls`' shape, for AD5's reason. **Every asserted line is order-independent**: the host writes a map's pairs in `pairs()` order, which this ABI does not promise and which `bin/lua52f` varies between runs, so key lookups and `Len` are the whole surface and `At` runs over an array. The map-indexed-as-an-array case is asserted through `IsNil` as well as through a string default, because the default alone hides the defect whenever the first pair's value is not a string — which a red proof found rather than a review.
+
 ### The marshalling arena — what a host call keeps forever
 
 **Measured, through `examples/heap`, which reads the allocator's own bump pointer rather than reasoning about the code.** `-gc=leaking` is mandatory, so every byte the ABI allocates per call is a byte in every save and every multiplayer join; the first downstream mod hit ~2.4 MB of guest heap on a test map from a ~350-call network compile.

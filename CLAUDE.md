@@ -577,6 +577,22 @@ Still true and still a trap: adding a hook means editing `runtime/lua/fk_mod.lua
 
 *Red-proven twice: removing the check makes an older-generation stamp package silently, and dropping the LAYOUT from the digest makes it blind to `LuaGuiElement::style`'s write half changing from a handle to a Value -- same member, same id, different wire, which is the class this round itself produced.* Detail: [`agents/versioning.md`](agents/versioning.md), "...and the ABI SIGNATURE".
 
+### The GUI-and-hands round (2026-08-30) — round 2 of the temptations survey
+
+The second queued round: the widest TEMPTATIONS rather than the blocks. Each item is one subsection below and each shipped with its own red proof.
+
+#### Tier 2 grew accessors — `Get`/`As…`/`…Or`, both languages
+
+**Seven constructors and zero accessors, for as long as tier 2 has existed**, so every read of a returned map was a hand-written linear scan and a tag switch — and the scans in this repo's own examples read `kv.Val.Str` without ever consulting `kv.Val.Tag`, which is the empty string for a number and for an absent key alike. It improves all **598** `Value`-typed functions at once, which is why the survey ranked it the highest value-per-line item it found.
+
+**TWO FAMILIES, because one of them has to CHAIN.** A LOOKUP (`Get`, `GetKey`, `At`) answers with a `Value` whose miss is nil, so `v.Get("a").Get("b").NumOr(0)` is one expression over a shape that may not be there; a READ (`AsBool`/`AsNum`/`AsStr`/`AsObj`) answers with a comma-ok, and the `Or` forms spend that ok on a default. `Has` is separate because it answers the one question `Get` cannot — a key present and nil reads exactly like a key that is absent. **Nothing coerces**: `AsNum` on a string is `(0, false)` and never a parse, because the tag is what the host said the value IS. `Len` is the deliberate asymmetry, answering 0 for a scalar.
+
+**The spellings differ between the languages and the ANSWERS do not.** Rust's lookups return `&Value` (with a file-level `static NIL` for a miss to point at) and its reads return `Option`, which is the `<Name>Into` precedent one level down: forcing one shape onto both would make one language worse for a rendering difference the wire does not have. `as_str` hands back a `&LuaStr`, because a Lua string is arbitrary bytes.
+
+**NO CENSUS ROW, and that is a statement rather than an omission.** The accessors are in the generated PREAMBLE — a raw string in `gogen.go` and its twin in `rustgen_rt.go` — and the census counts what the DESCRIPTION produced. Nothing about a member, an event or a define moved: **no member id moves, no count moves, and the `gen-bindings --check` output is identical at all five pins.** The instrument is instead `internal/guest.TestValueAccessorsReadWhatTheTagNames`, which builds `examples/dynread` in BOTH languages against one host stub and compares both transcripts to one expectation — the `TestBothDataGuestLibrariesMakeTheSameCalls` shape, for AD5's reason, and the only place these functions can run at all (a package of `//go:wasmimport` declarations does not compile off-target).
+
+*Red-proven eight times, four per language, each firing one named line: `AsNum` answering on any tag (`num-of-str=0/no` → `0/ok`), a chained miss returning the receiver (`via-scalar=-1` → `42`), `At` walking a map's pair slice as an array, and `sameScalar` reduced to a tag compare so the number 8 finds the number-7 key (`n8=<none>` → `seven`).* **The third of those found a hole in the fixture rather than confirming one**: the map-indexed-as-an-array case was asserted only through a string default, which hides the defect whenever the first pair in `pairs()` order does not hold a string — so it failed on some runs and not others. The line carries `IsNil` as well now, which is tag- and order-independent. Detail: [`agents/abi.md`](agents/abi.md), "Reading a tier-2 value back".
+
 ### Guests (M4, M8, M10)
 
 **TinyGo builds at `-opt=2`, not its default `-opt=z`.** That default optimises for SIZE, which is the one cost this target does not have — the day-0 probe measured Factorio parsing 4 MB of Lua in 106 ms and a chunk never appears in a save. It was the single largest win of the M11 perf pass and it is one flag: `real_names` **0.577×**, `real_grid` 0.771×, `pure_sum` 0.770×, `pure_dot` 0.847×, `real_entities` 0.958×, against `-opt=z` through the same compiler. `pure_prng` is ~2% slower and is the only kernel that loses. It also retired a claim: Rust used to beat TinyGo everywhere by 1.05×–1.46×, which was rustc `-O3` measured against TinyGo `-Oz`.

@@ -724,6 +724,174 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
 }
 
+/// The nil a missing lookup answers with. A static rather than a returned
+/// Value: get() hands back a reference, so there has to be something for it to
+/// point at that outlives the call.
+static NIL: Value = Value::Nil;
+
+/// Reading a tier-2 value back.
+///
+/// There were no accessors in either language, so every read of a tier-2 map
+/// was a hand-written scan and a match. THE TWO FAMILIES ARE THE GO BINDING'S,
+/// AND THE SPELLING IS RUST'S: a lookup (get, get_key, at) answers with a
+/// &Value whose miss is Value::Nil, so it chains; a read (as_bool,
+/// as_num, as_str, as_obj) answers with an Option, which is what Go
+/// spells as a comma-ok. Forcing one shape onto both languages would have made
+/// one of them worse, and the Into-variant precedent already says the
+/// rendering may differ where the wire does not.
+///
+/// NOTHING HERE COERCES. as_num on a string is None rather than a parse.
+///
+/// A MISS AND A PRESENT NIL ARE DIFFERENT AND get CANNOT TELL YOU WHICH:
+/// has is what answers that.
+impl Value {
+    /// Whether this is the nil value. Value::default() is nil.
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Value::Nil)
+    }
+
+    /// The number of elements in an array or of pairs in a map, and 0 for
+    /// everything else.
+    pub fn len(&self) -> usize {
+        match self {
+            Value::Array(a) => a.len(),
+            Value::Map(m) => m.len(),
+            _ => 0,
+        }
+    }
+
+    /// Whether [Value::len] is zero. Present because clippy asks for it beside
+    /// len, and because "an empty option table" is a real question.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Looks a string key up in a map. Not a map, or key absent, is
+    /// Value::Nil -- so the result chains.
+    ///
+    /// A LINEAR SCAN, which is the honest shape for a pair vector: the maps the
+    /// API carries are option tables and event payloads with a handful of keys.
+    pub fn get(&self, key: &str) -> &Value {
+        if let Value::Map(m) = self {
+            for (k, v) in m.iter() {
+                if let Value::Str(s) = k {
+                    if s.as_bytes() == key.as_bytes() {
+                        return v;
+                    }
+                }
+            }
+        }
+        &NIL
+    }
+
+    /// get for a key that is not a string -- a number-keyed map. A container
+    /// key never matches: no described map is keyed by one.
+    pub fn get_key(&self, key: &Value) -> &Value {
+        if let Value::Map(m) = self {
+            for (k, v) in m.iter() {
+                if same_scalar(k, key) {
+                    return v;
+                }
+            }
+        }
+        &NIL
+    }
+
+    /// Whether a map carries this key, which is the one question get cannot
+    /// answer: a key present and nil reads exactly like a key that is absent.
+    pub fn has(&self, key: &str) -> bool {
+        if let Value::Map(m) = self {
+            for (k, _) in m.iter() {
+                if let Value::Str(s) = k {
+                    if s.as_bytes() == key.as_bytes() {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Indexes an array, zero-based. Out of range, or not an array, is
+    /// Value::Nil.
+    pub fn at(&self, i: usize) -> &Value {
+        if let Value::Array(a) = self {
+            if i < a.len() {
+                return &a[i];
+            }
+        }
+        &NIL
+    }
+
+    /// The payload the variant names, or None for every other variant
+    /// INCLUDING nil -- which is what keeps an absent key and a present false
+    /// apart.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_num(&self) -> Option<f64> {
+        match self {
+            Value::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// The BYTES, not a str: a Lua string is an arbitrary byte sequence and
+    /// [LuaStr] is what this crate carries one in.
+    pub fn as_str(&self) -> Option<&LuaStr> {
+        match self {
+            Value::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_obj(&self) -> Option<Object> {
+        match self {
+            Value::Obj(o) => Some(*o),
+            _ => None,
+        }
+    }
+
+    /// Those reads with the None spent on a default.
+    pub fn bool_or(&self, def: bool) -> bool {
+        self.as_bool().unwrap_or(def)
+    }
+
+    pub fn num_or(&self, def: f64) -> f64 {
+        self.as_num().unwrap_or(def)
+    }
+
+    /// Borrows for as long as BOTH the value and the default live, because the
+    /// answer is one or the other and a caller cannot say which.
+    pub fn str_or<'a>(&'a self, def: &'a [u8]) -> &'a [u8] {
+        match self {
+            Value::Str(s) => s.as_bytes(),
+            _ => def,
+        }
+    }
+
+    pub fn obj_or(&self, def: Object) -> Object {
+        self.as_obj().unwrap_or(def)
+    }
+}
+
+/// Equality for a map KEY. A variant mismatch is never equal, and a container
+/// is never equal to anything.
+fn same_scalar(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Nil, Value::Nil) => true,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Number(x), Value::Number(y)) => x == y,
+        (Value::Str(x), Value::Str(y)) => x.as_bytes() == y.as_bytes(),
+        (Value::Obj(x), Value::Obj(y)) => x.0 == y.0,
+        _ => false,
+    }
+}
+
 const DYN_W: usize = 16;
 const DYN_PW: usize = 32;
 

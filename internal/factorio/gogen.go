@@ -2291,6 +2291,165 @@ func OfObject(o Object) Value     { return Value{Tag: TagObject, Object: o} }
 func OfArray(vs ...Value) Value   { return Value{Tag: TagArray, Array: vs} }
 func OfMap(kv ...KeyValue) Value  { return Value{Tag: TagMap, Map: kv} }
 
+// Reading one back.
+//
+// There were seven constructors and no accessors, so every read of a tier-2 map
+// was a hand-written linear scan and a tag switch -- and the scans in this
+// repo's own examples read kv.Val.Str without ever looking at kv.Val.Tag, which
+// is the empty string for a number and for an absent key alike.
+//
+// TWO FAMILIES, AND THE SPLIT IS WHAT LETS ONE OF THEM CHAIN. A lookup (Get,
+// GetKey, At) answers with a Value, and a miss is TagNil -- so
+// v.Get("a").Get("b").NumOr(0) is one expression over a shape that may not be
+// there. A read (AsBool, AsNum, AsStr, AsObj) answers with a comma-ok, so a
+// caller who needs to know says so; the Or forms are the same read with the ok
+// spent on a default, which is what most call sites want.
+//
+// NOTHING HERE COERCES. AsNum on a string is (0, false) rather than a parse:
+// the tag is what the host said the value IS, and a codec that guessed would
+// turn a wrong type into a plausible number. Len is the one asymmetry and it is
+// deliberate -- it answers 0 for a scalar, because "how many" has an answer
+// there and it is none.
+//
+// A MISS AND A PRESENT NIL ARE DIFFERENT, AND Get CANNOT TELL YOU WHICH. Has is
+// what answers that. It is a separate call because the distinction matters at a
+// small fraction of call sites: Factorio's own option tables read an absent key
+// and a nil one identically.
+
+// IsNil reports whether this is the nil value. The zero Value is nil.
+func (v Value) IsNil() bool { return v.Tag == TagNil }
+
+// Len is the number of elements in an array or of pairs in a map, and 0 for
+// everything else.
+func (v Value) Len() int {
+	switch v.Tag {
+	case TagArray:
+		return len(v.Array)
+	case TagMap:
+		return len(v.Map)
+	}
+	return 0
+}
+
+// Get looks a string key up in a map. A value that is not a map, and a key that
+// is not there, both answer TagNil -- so the result chains.
+//
+// A LINEAR SCAN, which is the honest shape for a pair slice: the maps the API
+// carries are option tables and event payloads with a handful of keys, and an
+// index would allocate on every lookup to shorten a walk that is over in ten
+// compares. A guest reading one map many times builds its own.
+func (v Value) Get(key string) Value {
+	if v.Tag != TagMap {
+		return Value{}
+	}
+	for i := range v.Map {
+		if v.Map[i].Key.Tag == TagString && v.Map[i].Key.Str == key {
+			return v.Map[i].Val
+		}
+	}
+	return Value{}
+}
+
+// GetKey is Get for a key that is not a string -- a number-keyed map, which is
+// what the API produces where the Lua table is indexed. Equality is by tag and
+// payload, and a container key never matches: no described map is keyed by one,
+// and comparing two slices elementwise would be a cost on every lookup.
+func (v Value) GetKey(key Value) Value {
+	if v.Tag != TagMap {
+		return Value{}
+	}
+	for i := range v.Map {
+		if sameScalar(v.Map[i].Key, key) {
+			return v.Map[i].Val
+		}
+	}
+	return Value{}
+}
+
+// Has reports whether a map carries this key, which is the one question Get
+// cannot answer: a key present and nil reads exactly like a key that is absent.
+func (v Value) Has(key string) bool {
+	if v.Tag != TagMap {
+		return false
+	}
+	for i := range v.Map {
+		if v.Map[i].Key.Tag == TagString && v.Map[i].Key.Str == key {
+			return true
+		}
+	}
+	return false
+}
+
+// At indexes an array, ZERO-BASED -- this is Go, and the one-based Lua index the
+// host read it out of is behind us. Out of range, or not an array, is TagNil.
+func (v Value) At(i int) Value {
+	if v.Tag != TagArray || i < 0 || i >= len(v.Array) {
+		return Value{}
+	}
+	return v.Array[i]
+}
+
+// AsBool, AsNum, AsStr and AsObj read the payload the tag names. The ok is
+// false for every other tag INCLUDING nil, which is what keeps an absent key
+// and a present false apart.
+func (v Value) AsBool() (bool, bool) { return v.Bool, v.Tag == TagBool }
+
+func (v Value) AsNum() (float64, bool) { return v.Number, v.Tag == TagNumber }
+
+func (v Value) AsStr() (string, bool) { return v.Str, v.Tag == TagString }
+
+func (v Value) AsObj() (Object, bool) { return v.Object, v.Tag == TagObject }
+
+// BoolOr, NumOr, StrOr and ObjOr are those reads with the ok spent on a default.
+func (v Value) BoolOr(def bool) bool {
+	if v.Tag == TagBool {
+		return v.Bool
+	}
+	return def
+}
+
+func (v Value) NumOr(def float64) float64 {
+	if v.Tag == TagNumber {
+		return v.Number
+	}
+	return def
+}
+
+func (v Value) StrOr(def string) string {
+	if v.Tag == TagString {
+		return v.Str
+	}
+	return def
+}
+
+func (v Value) ObjOr(def Object) Object {
+	if v.Tag == TagObject {
+		return v.Object
+	}
+	return def
+}
+
+// sameScalar is equality for a map KEY. A tag mismatch is never equal, and a
+// container is never equal to anything.
+func sameScalar(a, b Value) bool {
+	if a.Tag != b.Tag {
+		return false
+	}
+	switch a.Tag {
+	case TagNil:
+		return true
+	case TagBool:
+		return a.Bool == b.Bool
+	case TagNumber:
+		return a.Number == b.Number
+	case TagString:
+		return a.Str == b.Str
+	case TagObject:
+		return a.Object.h == b.Object.h
+	}
+	return false
+}
+
 // The wire widths, fixed by fk_abi.lua: one dynamic value, and one pair of them.
 const dynW = 16
 const dynPW = 32

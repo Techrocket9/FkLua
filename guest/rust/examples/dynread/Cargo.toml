@@ -1,0 +1,12 @@
+[package]
+name = "dynread"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dynread"
+crate-type = ["cdylib"]
+
+[dependencies]
+fk = { path = "../../fk" }
+fkapi = { path = "../../fkapi" }

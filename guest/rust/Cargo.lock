@@ -44,6 +44,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynread"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkapi",
+]
+
+[[package]]
 name = "fk"
 version = "0.1.0"
 dependencies = [
