@@ -1,0 +1,8 @@
+one jump over 131071 instructions (Lua's stated limit)     LOADS, returns 0
+one jump over 150000 instructions                          REFUSED -- [string "local v = 0..."]:150005: control structure too long near <eof>
+BARE ladder,  2 hops x 50000 = 100000 total                LOADS, returns 100000
+BARE ladder,  4 hops x 50000 = 200000 total                REFUSED -- [string "local v = 0..."]:200018: control structure too long near <eof>
+BARE ladder, 10 hops x 50000 = 500000 total                REFUSED -- [string "local v = 0..."]:500036: control structure too long near <eof>
+SEPARATED ladder,  4 hops x 50000 = 200000 total           LOADS, returns 200000
+SEPARATED ladder, 10 hops x 50000 = 500000 total           LOADS, returns 500000
+UNREACHABLE-placed ladder, 10 hops x 50000 = 500000 total  LOADS, returns 500000

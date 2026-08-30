@@ -1,0 +1,114 @@
+// What a split point's LIVE SET would actually be, on this repo's own guests.
+//
+// The recorded design says the split point is where the operand stack AND the
+// control stack are both empty, and that there the live set is exactly the wasm
+// locals -- which the outlined piece takes as parameters and hands back through
+// multiple return. Lua caps that at 124 (measured). This asks whether 124 binds.
+package main
+
+import (
+	"fmt"
+	"os"
+	"sort"
+
+	"github.com/Techrocket9/fklua/internal/ir"
+	"github.com/Techrocket9/fklua/internal/wasm"
+)
+
+func ctrlDepths(f *ir.Func) []int {
+	d := make([]int, len(f.Steps))
+	cur := 0
+	for i := range f.Steps {
+		switch f.Steps[i].Op {
+		case wasm.OpEnd:
+			if cur > 0 {
+				cur--
+			}
+		}
+		d[i] = cur
+		switch f.Steps[i].Op {
+		case wasm.OpBlock, wasm.OpLoop, wasm.OpIf:
+			cur++
+		}
+	}
+	return d
+}
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-repro" {
+		repro(33767)
+		return
+	}
+	type row struct {
+		name           string
+		steps, slots   int
+		width          int // params + locals, in SLOTS (an i64 is two)
+		zeroPts        int
+	}
+	var rows []row
+	for _, path := range os.Args[1:] {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
+		m, err := wasm.Decode(raw)
+		if err != nil {
+			panic(err)
+		}
+		im, err := ir.BuildModule(m)
+		if err != nil {
+			panic(err)
+		}
+		for _, f := range im.Funcs {
+			if f.Unsupported != nil {
+				continue
+			}
+			w := 0
+			for _, t := range f.Params {
+				w += t.Slots()
+			}
+			for _, t := range f.Locals {
+				w += t.Slots()
+			}
+			cd := ctrlDepths(f)
+			z := 0
+			for i := range f.Steps {
+				if f.Steps[i].StackDepth == 0 && cd[i] == 0 {
+					z++
+				}
+			}
+			rows = append(rows, row{f.Name, len(f.Steps), f.NumSlots, w, z})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].steps > rows[j].steps })
+	fmt.Printf("%-52s %8s %8s %8s %10s\n", "the twelve biggest functions", "steps", "slots", "live", "0-depth")
+	for i, r := range rows {
+		if i >= 12 {
+			break
+		}
+		n := r.name
+		if len(n) > 52 {
+			n = n[:49] + "..."
+		}
+		fmt.Printf("%-52s %8d %8d %8d %10d\n", n, r.steps, r.slots, r.width, r.zeroPts)
+	}
+	var widths []int
+	over, overFew := 0, 0
+	for _, r := range rows {
+		widths = append(widths, r.width)
+		if r.width > 124 {
+			over++
+		}
+		if r.zeroPts < 2 {
+			overFew++
+		}
+	}
+	sort.Ints(widths)
+	q := func(p float64) int { return widths[int(float64(len(widths)-1)*p)] }
+	fmt.Printf("\n%d functions. live-set slots: median %d, p90 %d, p99 %d, max %d\n",
+		len(rows), q(0.5), q(0.9), q(0.99), widths[len(widths)-1])
+	fmt.Printf("functions whose live set exceeds Lua's measured 124-slot call ceiling: %d (%.2f%%)\n",
+		over, 100*float64(over)/float64(len(rows)))
+	fmt.Printf("functions with fewer than two zero-depth split points: %d (%.2f%%)\n",
+		overFew, 100*float64(overFew)/float64(len(rows)))
+}

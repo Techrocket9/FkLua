@@ -10,50 +10,50 @@ encodings_agree=true type=label name=row-1-cell
 addpercall_status=0 adds=1
 
 === 4a  BULK ATTRIBUTE READ  (N = 200 entities per iteration) ===
-  floor (a plain Lua call)        18.9 ns   (A/A 19 and 19 ns, spread 0.8% -- this run's resolution)
+  floor (a plain Lua call)        18.7 ns   (A/A 18 and 19 ns, spread 6.9% -- this run's resolution)
   leg                         ns/iter   ns/element  vs percall  vs hand Lua
-  lua_poll                       4218         21.1      0.022x         1.0x
-  percall                      195703        978.5      1.000x        46.4x
-  percall_str                  307810       1539.1      1.573x        73.0x
-  dispatch                      95074        475.4      0.486x        22.5x
-  bulk_full                     83562        417.8      0.427x        19.8x
-  bulk_encode_rets             133310        666.6      0.681x        31.6x
-  bulk_batchpcall               66252        331.3      0.339x        15.7x
-  bulk_bare                     63594        318.0      0.325x        15.1x
-  bulk_bare_u32                 36729        183.6      0.188x         8.7x
-  bulk_read_only                23622        118.1      0.121x         5.6x
-  bulk_resolve_only             22107        110.5      0.113x         5.2x
-  bulk_ld32_only                12665         63.3      0.065x         3.0x
-  bulk_store_f64                37802        189.0      0.193x         9.0x
-  bulk_store_u32                14391         72.0      0.074x         3.4x
-  bulk_direct_inline             8612         43.1      0.044x         2.0x
-  bulk_direct                   12895         64.5      0.066x         3.1x
-  bulk_direct_raw                3710         18.6      0.019x         0.9x
+  lua_poll                       4234         21.2      0.021x         1.0x
+  percall                      198851        994.3      1.000x        47.0x
+  percall_str                  318315       1591.6      1.601x        75.2x
+  dispatch                      99624        498.1      0.501x        23.5x
+  bulk_full                     84919        424.6      0.427x        20.1x
+  bulk_encode_rets             136675        683.4      0.687x        32.3x
+  bulk_batchpcall               66180        330.9      0.333x        15.6x
+  bulk_bare                     63760        318.8      0.321x        15.1x
+  bulk_bare_u32                 37666        188.3      0.189x         8.9x
+  bulk_read_only                23796        119.0      0.120x         5.6x
+  bulk_resolve_only             22741        113.7      0.114x         5.4x
+  bulk_ld32_only                12994         65.0      0.065x         3.1x
+  bulk_store_f64                39208        196.0      0.197x         9.3x
+  bulk_store_u32                14716         73.6      0.074x         3.5x
+  bulk_direct_inline             9048         45.2      0.046x         2.1x
+  bulk_direct                   13244         66.2      0.067x         3.1x
+  bulk_direct_raw                3762         18.8      0.019x         0.9x
 
 === 4b  BATCHED GUI ADD  (G = 50 elements per iteration) ===
-  floor (a plain Lua call)        19.5 ns   (A/A 20 and 19 ns, spread 2.4%)
+  floor (a plain Lua call)        19.4 ns   (A/A 19 and 20 ns, spread 1.3%)
   leg                         ns/iter   ns/element  vs percall  vs hand Lua
-  lua_add                        9596        191.9      0.010x         1.0x
-  add_percall                 1009192      20183.8      1.000x       105.2x
-  add_batch_dyn                890997      17819.9      0.883x        92.9x
-  add_batch_typed              325815       6516.3      0.323x        34.0x
-  decode_dyn                   897308      17946.2      0.889x        93.5x
-  decode_typed                 298457       5969.1      0.296x        31.1x
-  decode_typed_pooled          146158       2923.2      0.145x        15.2x
-  decode_typed_strings         276819       5536.4      0.274x        28.8x
-  decode_typed_table             8643        172.9      0.009x         0.9x
-  decode_typed_interned         23220        464.4      0.023x         2.4x
-  decode_typed_mixed            86659       1733.2      0.086x         9.0x
+  lua_add                       10455        209.1      0.010x         1.0x
+  add_percall                 1017712      20354.2      1.000x        97.3x
+  add_batch_dyn                919869      18397.4      0.904x        88.0x
+  add_batch_typed              327590       6551.8      0.322x        31.3x
+  decode_dyn                   892294      17845.9      0.877x        85.3x
+  decode_typed                 301061       6021.2      0.296x        28.8x
+  decode_typed_pooled          147766       2955.3      0.145x        14.1x
+  decode_typed_strings         285783       5715.7      0.281x        27.3x
+  decode_typed_table             8644        172.9      0.008x         0.8x
+  decode_typed_interned         25349        507.0      0.025x         2.4x
+  decode_typed_mixed            84679       1693.6      0.083x         8.1x
 
-NOISE: the two A/A spreads are 0.8% and 2.4%. A ratio inside them is not a measurement.
+NOISE: the two A/A spreads are 6.9% and 1.3%. A ratio inside them is not a measurement.
 
 === 4a  AMORTIZATION: does one crossing pay for itself at small N? ===
        N   percall ns/el   bulk_full ns/el   bulk_inline ns/el   best vs percall
-       1          1035.1            1173.3               831.4            0.803x
-       2          1032.5             823.2               437.5            0.424x
-       4          1018.0             655.4               259.2            0.255x
-       8          1006.5             504.1               144.6            0.144x
-      16          1054.6             471.3                90.9            0.086x
-      64          1019.5             432.3                52.0            0.051x
-     256           982.4             399.5                43.9            0.045x
-    1024          1055.7             433.9                42.7            0.040x
+       1          1056.1            1203.4               866.8            0.821x
+       2          1036.8             845.4               460.0            0.444x
+       4          1026.6             633.5               255.1            0.248x
+       8          1074.0             586.6               176.7            0.165x
+      16          1156.1             550.9               105.0            0.091x
+      64          1063.4             458.7                56.9            0.053x
+     256          1015.1             424.1                44.2            0.044x
+    1024          1031.8             426.0                41.8            0.040x

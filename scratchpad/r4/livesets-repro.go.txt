@@ -1,0 +1,66 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/Techrocket9/fklua/internal/ir"
+	"github.com/Techrocket9/fklua/internal/wasm"
+)
+
+// The funclimit test's own reproduction, and the question the split design
+// turns on: a function that REACHES the jump limit does so by having one
+// enormous block with a br_if at its top -- so is there a point inside that
+// span where the CONTROL stack is empty?
+func repro(ops int) {
+	var body strings.Builder
+	for i := 0; i < ops; i++ {
+		body.WriteString(" (local.set 1 (i32.add (local.get 1) (i32.const 1)))")
+	}
+	src := `(module (memory 1) (func $big (export "big") (param i32) (result i32)
+		(local i32)
+		(block $out
+		  (br_if $out (local.get 0))` + body.String() + `
+		  (return (local.get 1)))
+		(unreachable)))`
+	m, err := wasm.DecodeWAT(src)
+	if err != nil {
+		panic(err)
+	}
+	im, err := ir.BuildModule(m)
+	if err != nil {
+		panic(err)
+	}
+	for _, f := range im.Funcs {
+		if len(f.Steps) < 1000 {
+			continue
+		}
+		fmt.Printf("  function %q\n", f.Name)
+		cd := ctrlDepths(f)
+		zeroBoth, zeroStack, zeroCtrl := 0, 0, 0
+		for i := range f.Steps {
+			if f.Steps[i].StackDepth == 0 {
+				zeroStack++
+			}
+			if cd[i] == 0 {
+				zeroCtrl++
+			}
+			if f.Steps[i].StackDepth == 0 && cd[i] == 0 {
+				zeroBoth++
+			}
+		}
+		live := 0
+		for _, t := range f.Params {
+			live += t.Slots()
+		}
+		for _, t := range f.Locals {
+			live += t.Slots()
+		}
+		fmt.Printf("THE FUNCLIMIT REPRODUCTION (%d ops)\n", ops)
+		fmt.Printf("  steps                                        %8d\n", len(f.Steps))
+		fmt.Printf("  slots / live set (params+locals)             %8d / %d\n", f.NumSlots, live)
+		fmt.Printf("  steps with an EMPTY OPERAND stack            %8d\n", zeroStack)
+		fmt.Printf("  steps with an EMPTY CONTROL stack            %8d\n", zeroCtrl)
+		fmt.Printf("  steps with BOTH empty -- the split points    %8d\n", zeroBoth)
+	}
+}
