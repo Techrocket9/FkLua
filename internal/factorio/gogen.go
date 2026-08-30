@@ -1589,7 +1589,7 @@ func hostRetain(handle uint32) uint32
 func hostRelease(handle uint32) uint32
 
 //go:wasmimport fk subscribe
-func hostSubscribe(event, filterp, skip uint32) uint32
+func hostSubscribe(event, filterp, skip, namep, namelen uint32) uint32
 
 //go:wasmimport fk define
 func hostDefine(id uint32) uint32
@@ -1608,7 +1608,70 @@ func hostRemoteCall(callp, retp uint32) uint32
 // ships only the event descriptors a guest actually subscribes to; an id it
 // cannot prove constant makes it ship all of them, which is a bigger mod rather
 // than a broken one.
-func Subscribe(event uint32) Status { return Status(hostSubscribe(event, 0, 0)) }
+func Subscribe(event uint32) Status { return Status(hostSubscribe(event, 0, 0, 0, 0)) }
+
+// SubscribeNamed subscribes to an event addressed by NAME rather than by
+// defines.events, which is how Factorio delivers a CUSTOM INPUT -- the keybind
+// a mod declares with a custom-input prototype at the data stage.
+//
+//	fkapi.SubscribeNamed(fkapi.EventCustomInputEvent, "my-mod-hotkey")
+//
+// THE EVENT ID IS STILL THE PAYLOAD'S and is still a constant at the call site.
+// It says what the handler will be handed -- CustomInputEvent's player_index,
+// input_name, cursor_position and the rest -- and the NAME says what to register
+// under. The two are separate jobs: defines.events.CustomInputEvent does not
+// exist in any Factorio (measured: the table has 233 keys and that is not one of
+// them), so without a name there is nothing to register and fk.subscribe logs
+// that it could not resolve the event.
+//
+// SEVERAL CUSTOM INPUTS SHARE ONE HANDLER, because they all carry the same
+// payload descriptor and therefore the same id. Read input_name out of the
+// payload to tell them apart:
+//
+//	e := fkapi.ReadCustomInputEvent(p)
+//	switch e.InputName { case "my-mod-hotkey": ... }
+//
+// A name no custom-input prototype in this game has is refused by the ENGINE at
+// subscribe time. It comes back as a status here and as one line in the log
+// naming the engine's own words; the mod keeps running, because a typo in a
+// keybind name is not worth a mod that will not load.
+func SubscribeNamed(event uint32, name string) Status {
+	p, n := namePtr(name)
+	return Status(hostSubscribe(event, 0, 0, p, n))
+}
+
+// SubscribeNamedMasked is SubscribeNamed and SubscribeMasked at once: the
+// registration is by name and the host does not encode the fields this guest
+// will not read. CustomInputEvent has three maskable ones --
+// SkipCustomInputEventCursorDirection, ...SelectedPrototype and ...Element.
+//
+// There is deliberately no named-and-FILTERED form. Factorio's event filters are
+// declared per described event, as the Lua<Event>EventFilter concepts, and a
+// custom input has none -- so the combination would be a binding that exists and
+// always fails, which is this project's "a skipped member is skipped, never
+// faked" pointed at a wrapper.
+func SubscribeNamedMasked(event, skip uint32, name string) Status {
+	p, n := namePtr(name)
+	return Status(hostSubscribe(event, 0, skip, p, n))
+}
+
+// namePtr is the (pointer, length) a named subscription sends.
+//
+// A RAW PAIR rather than a tier-2 string, which is fk_log's shape and not the
+// filter's. It allocates nothing and writes no dyn, which keeps both wrappers
+// small enough that TinyGo keeps inlining them -- and the event id therefore
+// keeps arriving at the import as a compile-time constant, which is what prunes
+// the packaged event table. A wrapper that grew until it stopped being inlined
+// is R6, measured downstream at 85 KB of Lua per load.
+//
+// The host reads the bytes inside the call, which is the standing rule for a
+// (pointer, length) a guest hands over: nothing may buffer one.
+func namePtr(name string) (uint32, uint32) {
+	if len(name) == 0 {
+		return 0, 0
+	}
+	return uint32(uintptr(unsafe.Pointer(unsafe.StringData(name)))), uint32(len(name))
+}
 
 // SubscribeMasked subscribes and declares the payload fields this guest never
 // reads, so the host stops encoding them.
@@ -1632,7 +1695,7 @@ func Subscribe(event uint32) Status { return Status(hostSubscribe(event, 0, 0)) 
 // The LAYOUT DOES NOT MOVE. Fields keep the offsets they were compiled at; only
 // their contents go away.
 func SubscribeMasked(event, skip uint32) Status {
-	return Status(hostSubscribe(event, 0, skip))
+	return Status(hostSubscribe(event, 0, skip, 0, 0))
 }
 
 // SubscribeFiltered subscribes with Factorio's own event filters, which the
@@ -1692,13 +1755,13 @@ func SubscribeFiltered(event uint32, filters ...Value) Status {
 // encode the fields it will not read from the ones that survive.
 func SubscribeFilteredMasked(event, skip uint32, filters ...Value) Status {
 	if len(filters) == 0 {
-		return Status(hostSubscribe(event, 0, skip))
+		return Status(hostSubscribe(event, 0, skip, 0, 0))
 	}
 	mark := allocMark()
 	defer allocRelease(mark)
 	b := (*[dynW]byte)(block(dynW))
 	writeDyn(&b[0], OfArray(filters...))
-	return Status(hostSubscribe(event, ptr(&b[0]), skip))
+	return Status(hostSubscribe(event, ptr(&b[0]), skip, 0, 0))
 }
 
 // NameFilter builds the commonest event filter there is: only these prototype

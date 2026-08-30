@@ -72,6 +72,12 @@ func TestGeneratedBindingsCompile(t *testing.T) {
 // here are unmoved by which one a call site uses, and the corpus would otherwise
 // have had no caller of TypeFilter at all. A helper nothing calls is a helper
 // nothing compiles.
+//
+// ...AND SO IS THE NAMED FORM, for the same reason and against the same risk.
+// SubscribeNamed carries a string, so it is bigger than Subscribe, and a wrapper
+// that grows until the toolchain stops inlining it is R6 exactly. The seventh
+// id is the custom-input subscription, and it is the one whose absence from this
+// count would mean every mod using a keybind ships all 219 descriptors.
 func TestTheEventIdSurvivesTheGeneratedSubscribeWrapper(t *testing.T) {
 	ok, why := guest.Available()
 	if !ok {
@@ -100,9 +106,10 @@ func TestTheEventIdSurvivesTheGeneratedSubscribeWrapper(t *testing.T) {
 			"event descriptor there is: fkapi.Subscribe or fkapi.SubscribeFiltered " +
 			"is no longer being inlined")
 	}
-	if len(ids) != 6 {
-		t.Errorf("examples/api subscribes to exactly six events, four of them "+
-			"filtered -- three by NameFilter and one by TypeFilter; the scan "+
+	if len(ids) != 7 {
+		t.Errorf("examples/api subscribes to exactly seven events -- two plain, "+
+			"four filtered (three by NameFilter and one by TypeFilter) and one by "+
+			"NAME, which is the only way a custom input can be reached; the scan "+
 			"proved %d", len(ids))
 	}
 }
@@ -142,10 +149,10 @@ func TestTheEventIdSurvivesTheGeneratedRustSubscribeWrapper(t *testing.T) {
 			"event descriptors: fkapi::subscribe, fkapi::subscribe_filtered or " +
 			"fkapi::subscribe_filtered_masked is no longer being inlined")
 	}
-	if len(ids) != 6 {
-		t.Errorf("the Rust examples/api subscribes to exactly six events, four of "+
-			"them filtered -- three by name_filter and one by type_filter -- and "+
-			"one of those also masked; the scan proved %d", len(ids))
+	if len(ids) != 7 {
+		t.Errorf("the Rust examples/api subscribes to exactly seven events -- two "+
+			"plain, four filtered (three by name_filter and one by type_filter, one "+
+			"of those also masked) and one by NAME; the scan proved %d", len(ids))
 	}
 
 	// ...AND THE SAME SCAN OVER fk.define, which is the other all-or-nothing

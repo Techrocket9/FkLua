@@ -12,7 +12,7 @@ Binding coverage is essentially total: 4,857 of 4,859 members bind at the 2.1.16
 
 | Gap | Verdict | Genre it hits | Shape | Cost |
 |---|---|---|---|---|
-| Custom-input event subscription | **BLOCKS** | keybinds, GUI apps, selection tools (9 of 13 mods) | a name parameter widening `fk.subscribe` | S |
+| Custom-input event subscription | **BLOCKS** | keybinds, GUI apps, selection tools (9 of 13 mods) | **SHIPPED (2026-08-30)**: a name parameter widening `fk.subscribe` | S |
 | Mod-defined event subscription | **BLOCKS** | cross-mod integrations (LTN-style ecosystems) | third `fk.register` kind | M |
 | `LuaGuiElement.style = "name"` | **BLOCKS** | any GUI that restyles at runtime | **FIXED (2026-08-30)**: an attribute write whose union would collapse to one handle arm crosses as tier 2 | S |
 | `on_nth_tick` binds but is unfillable | **BLOCKS, silently** | polling mods | **the five handler members are DEFERRED (2026-08-30)**; first-class hook later | S then M |

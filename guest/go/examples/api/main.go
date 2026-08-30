@@ -28,6 +28,7 @@ const (
 	evOnRobotBuiltEntity  = fkapi.EventOnRobotBuiltEntity
 	evOnPlayerMinedEntity = fkapi.EventOnPlayerMinedEntity
 	evOnRobotMinedEntity  = fkapi.EventOnRobotMinedEntity
+	evCustomInput         = fkapi.EventCustomInputEvent
 )
 
 var ticksSeen uint32
@@ -113,6 +114,27 @@ func init() {
 	// should not be writing names. Terms OR together within a call, so the
 	// mixed form is append(NameFilter(...), TypeFilter(...)...).
 	fkapi.SubscribeFiltered(evOnRobotMinedEntity, fkapi.TypeFilter("container")...)
+
+	// ...AND ONE BY NAME, which is the only way a CUSTOM INPUT can be reached.
+	//
+	// A custom input is Factorio's keybind: a mod declares a custom-input
+	// prototype at the data stage and subscribes to it by that prototype's own
+	// NAME. It has no defines.events entry at all -- measured, the table has 233
+	// keys and CustomInputEvent is not one of them -- so the numeric form logs
+	// that it could not resolve the event and the hotkey never fires.
+	//
+	// THE PROTOTYPE DELIBERATELY DOES NOT EXIST HERE. This example is a control
+	// stage with no data stage, so what the in-game gate reaches is the ENGINE's
+	// own refusal (`Unknown event name: ...`) arriving as one log line with the
+	// mod still loading and every later leg still running -- which is the half
+	// no host-side stub can produce, and the half a guest author gets wrong with
+	// a typo. The success path needs a data stage and is the custom-input gate's.
+	//
+	// It is here for the PRUNING as well: SubscribeNamed carries a string, and a
+	// wrapper that grew until the toolchain stopped inlining it is exactly R6.
+	// The count in TestTheEventIdSurvivesTheGeneratedSubscribeWrapper is what
+	// says it still inlines.
+	fkapi.SubscribeNamed(evCustomInput, "fklua-example-input")
 }
 
 //go:wasmexport fk_on_tick

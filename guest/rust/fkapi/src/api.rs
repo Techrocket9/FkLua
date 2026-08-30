@@ -18,7 +18,7 @@ extern "C" {
     #[link_name = "call"]
     fn fk_call(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
     #[link_name = "subscribe"]
-    fn fk_subscribe(event: u32, filterp: u32, skip: u32) -> u32;
+    fn fk_subscribe(event: u32, filterp: u32, skip: u32, namep: u32, namelen: u32) -> u32;
     #[link_name = "define"]
     fn fk_define(id: u32) -> u32;
     // RETAIN AND RELEASE, which this backend simply did not declare until
@@ -126,7 +126,49 @@ impl Status {
 /// part rather than the size.
 #[inline(always)]
 pub fn subscribe(event: u32) -> Status {
-    Status(unsafe { fk_subscribe(event, 0, 0) })
+    Status(unsafe { fk_subscribe(event, 0, 0, 0, 0) })
+}
+
+/// Subscribes to an event addressed by NAME rather than by defines.events,
+/// which is how Factorio delivers a CUSTOM INPUT -- the keybind a mod declares
+/// with a custom-input prototype at the data stage.
+///
+///     subscribe_named(EVENT_CUSTOMINPUTEVENT, "my-mod-hotkey");
+///
+/// THE EVENT ID IS STILL THE PAYLOAD'S and is still a constant at the call site.
+/// It says what the handler will be handed -- CustomInputEvent's player_index,
+/// input_name, cursor_position and the rest -- and the NAME says what to
+/// register under. defines.events.CustomInputEvent does not exist in any
+/// Factorio (measured: the table has 233 keys and that is not one of them), so
+/// without a name there is nothing to register at all.
+///
+/// SEVERAL CUSTOM INPUTS SHARE ONE HANDLER, because they all carry the same
+/// payload descriptor and therefore the same id. Read input_name out of the
+/// payload to tell them apart.
+///
+/// A name no custom-input prototype in this game has is refused by the ENGINE at
+/// subscribe time; it comes back as a status here and as one line in the log
+/// carrying the engine's own words, and the mod keeps running.
+///
+/// #[inline(always)] for the pruning reason its siblings carry -- see
+/// subscribe_filtered.
+#[inline(always)]
+pub fn subscribe_named(event: u32, name: &str) -> Status {
+    Status(unsafe { fk_subscribe(event, 0, 0, name.as_ptr() as u32, name.len() as u32) })
+}
+
+/// subscribe_named and subscribe_masked at once: registered by name, and the
+/// host does not encode the fields this guest will not read. CustomInputEvent
+/// has three maskable ones -- SKIP_CUSTOM_INPUT_EVENT_CURSOR_DIRECTION,
+/// ..._SELECTED_PROTOTYPE and ..._ELEMENT.
+///
+/// There is deliberately no named-and-FILTERED form. Factorio's event filters
+/// are declared per described event, as the Lua<Event>EventFilter concepts, and
+/// a custom input has none -- so the combination would be a binding that exists
+/// and always fails.
+#[inline(always)]
+pub fn subscribe_named_masked(event: u32, skip: u32, name: &str) -> Status {
+    Status(unsafe { fk_subscribe(event, 0, skip, name.as_ptr() as u32, name.len() as u32) })
 }
 
 /// Subscribes and declares the payload fields this guest never reads, so the
@@ -157,7 +199,7 @@ pub fn subscribe(event: u32) -> Status {
 /// subscribe_filtered.
 #[inline(always)]
 pub fn subscribe_masked(event: u32, skip: u32) -> Status {
-    Status(unsafe { fk_subscribe(event, 0, skip) })
+    Status(unsafe { fk_subscribe(event, 0, skip, 0, 0) })
 }
 
 /// Subscribes with Factorio's own event filters, which the engine applies in
@@ -245,7 +287,7 @@ pub fn subscribe_filtered_masked(event: u32, skip: u32, filters: &[Value]) -> St
     let p = galloc(DYN_W as u32);
     let d = unsafe { core::slice::from_raw_parts_mut(p as *mut u8, DYN_W) };
     write_dyn(d, &Value::Array(filters.to_vec()));
-    Status(unsafe { fk_subscribe(event, p, skip) })
+    Status(unsafe { fk_subscribe(event, p, skip, 0, 0) })
 }
 
 /// The descriptor kinds fk.register takes, mirroring fk_mod.lua's REG_COMMAND

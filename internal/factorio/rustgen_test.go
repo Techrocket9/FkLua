@@ -330,9 +330,14 @@ func TestRustEventPayloadsGetAStructAndAReader(t *testing.T) {
 	for _, want := range []string{
 		"pub const SKIP_ON_UNDO_APPLIED_ACTIONS: u32 = 1 << 1;",
 		"pub const SKIP_ON_BUILT_ENTITY_TAGS: u32 = 1 << 3;",
-		"fn fk_subscribe(event: u32, filterp: u32, skip: u32) -> u32;",
+		// FIVE PARAMETERS since the name widening: the last two are the
+		// registration key a CUSTOM INPUT is addressed by. An old guest declares
+		// this import with fewer and gets nil for the rest, which reads as 0.
+		"fn fk_subscribe(event: u32, filterp: u32, skip: u32, namep: u32, namelen: u32) -> u32;",
 		"pub fn subscribe_masked(event: u32, skip: u32) -> Status {",
 		"pub fn subscribe_filtered_masked(event: u32, skip: u32, filters: &[Value]) -> Status {",
+		"pub fn subscribe_named(event: u32, name: &str) -> Status {",
+		"pub fn subscribe_named_masked(event: u32, skip: u32, name: &str) -> Status {",
 	} {
 		if !strings.Contains(r.Source, want) {
 			t.Errorf("the generated bindings have no %s", want)

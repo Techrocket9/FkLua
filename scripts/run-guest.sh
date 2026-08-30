@@ -38,7 +38,12 @@ case "$GUEST" in
   hello) MODNAME=fk-hello; INIT_RE="hello from (Go|Rust)|fnv64"; RUN_RE="(tick [0-9]+ seen=)" ;;
   goroutine) MODNAME=fk-gor; INIT_RE="goroutines:|pipeline sum:"
          RUN_RE="(tick [0-9]+ goroutines-run=)"; WASI=1 ;;
-  api)   MODNAME=fk-api;   INIT_RE="reaching Factorio|defines\\.direction\\.east = 4"
+  # The named-subscription line is here because examples/api subscribes to a
+  # custom input whose prototype it deliberately does not define, so what this
+  # reaches is the ENGINE's own refusal arriving as one log line with the mod
+  # still loading. The SUCCESS path needs a data stage and is
+  # scripts/run-custominput.sh's.
+  api)   MODNAME=fk-api;   INIT_RE="reaching Factorio|defines\\.direction\\.east = 4|refused the event name"
          # The last two are the closeout round's binding shapes, and they are in
          # this pattern because a line nobody prints is a line nobody checks:
          # both ran green in game for two milestones' worth of runs before

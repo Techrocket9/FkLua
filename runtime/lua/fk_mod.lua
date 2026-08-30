@@ -104,11 +104,15 @@ local imports = {
     -- subscribes during _initialize is doing so at load.
     -- filterp is a pointer to a tier-2 dynamic value, or 0 for unfiltered.
     -- mask is a bitmask of the event's field indices the guest never reads, or
-    -- 0 for the whole payload. A guest compiled before either existed declares
-    -- this import with fewer parameters and Lua hands the rest a nil, which
-    -- reads the same as 0 -- so neither addition changed the wire for a mod
-    -- already in the field.
-    subscribe = function(id, filterp, mask) return subscribe(id, filterp, mask) end,
+    -- 0 for the whole payload. (namep, namelen) is a NAME to register under
+    -- instead of a defines.events number, which is how a CUSTOM INPUT is
+    -- addressed -- see subscribe below. A guest compiled before any of the
+    -- three existed declares this import with fewer parameters and Lua hands
+    -- the rest a nil, which reads the same as 0 -- so no addition here has ever
+    -- changed the wire for a mod already in the field.
+    subscribe = function(id, filterp, mask, namep, namelen)
+      return subscribe(id, filterp, mask, namep, namelen)
+    end,
     -- Read a defines.* value, by the per-build id the generated table names.
     -- One array index: the path was resolved at load.
     define = function(id) return DEFV[id] or 0 end,
@@ -343,7 +347,19 @@ local function merge_filter(which, flt)
   return cur, true
 end
 
-function on_event(which, fn, flt)
+-- `protect` asks for the FIRST registration to be attempted under pcall and for
+-- a failure to be rolled back and reported rather than raised. It exists for one
+-- caller: a subscription addressed by NAME, where `which` is a custom-input
+-- prototype's name and the engine answers `Unknown event name: <name>` if no
+-- such prototype exists -- measured on 2.0.77, and a typo in a guest must not
+-- take the whole mod down at load.
+--
+-- OFF FOR A NUMERIC id, and that is the point of the parameter rather than
+-- protecting unconditionally. A numeric registration cannot raise on the id (it
+-- came out of defines.events, so the engine has it), and if it ever did, failing
+-- loudly is the right answer where silently not registering is not. Returns
+-- whether the event is registered.
+function on_event(which, fn, flt, protect)
   local use, moved = merge_filter(which, flt)
   local list = registered[which]
   if list then
@@ -361,7 +377,7 @@ function on_event(which, fn, flt)
             "dropped and it will be entered for every one of them.")
       end
     end
-    return
+    return true
   end
   list = { fn }
   registered[which] = list
@@ -382,7 +398,25 @@ function on_event(which, fn, flt)
     end
   end
   if use == nil then
-    script.on_event(which, handler)
+    if protect then
+      -- ROLLED BACK ON FAILURE, and the rollback is the part that is not
+      -- obvious: `registered[which]` and `filters[which]` are already set, so
+      -- leaving them behind would make a later subscription to the same name
+      -- append to a list Factorio never registered a dispatcher for -- silently,
+      -- because the second call takes the `if list` arm above and returns
+      -- success.
+      local ok, err = pcall(script.on_event, which, handler)
+      if not ok then
+        registered[which] = nil
+        filters[which] = nil
+        log("fklua: script.on_event refused the event name " ..
+            tostring(which) .. ": " .. tostring(err) ..
+            ". The guest will not receive it. The mod keeps running.")
+        return false
+      end
+    else
+      script.on_event(which, handler)
+    end
   elseif not pcall(script.on_event, which, handler, use) then
     -- Same reasoning as above: an event that takes no filters is a mistake in
     -- the guest, and running unfiltered with a line in the log beats failing to
@@ -392,6 +426,7 @@ function on_event(which, fn, flt)
     log("fklua: this event takes no filters, so the guest's list was dropped " ..
         "and it will be entered for every one of them.")
   end
+  return true
 end
 
 -- The inverse, and the reason `registered` holds a list rather than a function:
@@ -652,16 +687,62 @@ local function dispatch_depth() return depth end
 -- absent or as empty and never as a plausible zero; H.mask_fields is where that
 -- is enforced and a refused bit is logged rather than fatal. Mask 0 is exactly
 -- today's behaviour, which is what an old guest sends by not sending anything.
-function subscribe(id, filterp, mask)
+--
+-- (namep, namelen) IS A REGISTRATION KEY, AND IT IS WHAT MAKES A CUSTOM INPUT
+-- REACHABLE AT ALL. `LuaEventType` is a union of four arms and this import
+-- reached exactly one of them, the described `defines.events` set, through a
+-- dense index. A CUSTOM INPUT is name-addressed -- `script.on_event("my-input",
+-- f)` -- and has NO defines.events entry, measured: `defines.events
+-- .CustomInputEvent` is nil on 2.0.77 while the table holds 233 other keys. The
+-- trap was that the description carries CustomInputEvent as an ordinary event,
+-- so the generator emitted a complete binding -- id constant, payload struct,
+-- reader, three field masks -- and a guest that found the right constant was
+-- told this Factorio has no such event, which is a falsehood about the one
+-- mistake it made.
+--
+-- THE ID STAYS AN i32 CONSTANT IN ITS OWN OPERAND, which is the whole reason
+-- this is a widening of `subscribe` rather than a third `fk.register` kind.
+-- `fklua mod` prunes the packaged event table by scanning the wasm for a
+-- constant reaching operand 0, so a register DESCRIPTOR -- a tier-2 blob -- would
+-- prune the payload descriptor out of the very mod that needs it. The id
+-- supplies the LAYOUT and the name supplies the KEY, and neither is the other's
+-- business.
+--
+-- SEVERAL CUSTOM INPUTS CAN SHARE ONE GUEST REGISTRATION and disambiguate on
+-- the payload's own `input_name`, because every one of them encodes through the
+-- same CustomInputEvent descriptor. The guest sees one id and reads the field.
+--
+-- A RAW (ptr, len) RATHER THAN A TIER-2 STRING, which is `fk_log`'s and
+-- `fk.last_error`'s shape and not `filterp`'s. It costs the guest no allocation
+-- and no write_dyn, which keeps the wrapper small enough that the constant scan
+-- keeps inlining it -- the R6 defect, where a wrapper that grew stopped being
+-- inlined and every mod using it silently shipped all 219 event descriptors. The
+-- bytes are read INSIDE this call, which is the standing rule for a (ptr, len) a
+-- guest hands the host.
+function subscribe(id, filterp, mask, namep, namelen)
   local ev = API.events and API.events[id]
   if ev == nil then return H.ERR_NO_MEMBER end
   if not E.fk_on_event then return H.ERR_NO_MEMBER end
 
-  local which = defines.events[ev.name]
-  if which == nil then
-    log("fklua: this Factorio has no event " .. ev.name ..
-        ", so the guest will not receive it. The mod keeps running.")
-    return H.ERR_NO_MEMBER
+  local which, named
+  if namep and namep ~= 0 and namelen and namelen > 0 then
+    which = guest_string(namep, namelen)
+    named = true
+  else
+    which = defines.events[ev.name]
+    if which == nil then
+      -- TWO CAUSES, ONE SYMPTOM, and the message names both because the second
+      -- one is the likelier and used to be misdiagnosed as the first. An event
+      -- can be absent because this Factorio does not have it, or because it is
+      -- not addressed by defines.events at all.
+      log("fklua: fk.subscribe could not resolve defines.events." .. ev.name ..
+          " -- either this Factorio has no such event, or the event is " ..
+          "addressed by NAME. A custom input is delivered to its own prototype " ..
+          "name and has no defines.events entry, so subscribe to it with the " ..
+          "name form (SubscribeNamed in Go, subscribe_named in Rust). The mod " ..
+          "keeps running.")
+      return H.ERR_NO_MEMBER
+    end
   end
 
   -- A malformed filter must not take the mod down at load. Unfiltered is the
@@ -716,7 +797,14 @@ function subscribe(id, filterp, mask)
     return E.fk_on_event(id, buf)
   end
 
-  on_event(which, function(e) dispatch(run_event, e) end, flt)
+  if not on_event(which, function(e) dispatch(run_event, e) end, flt, named) then
+    -- Only a NAMED registration can get here: `protect` is false for a numeric
+    -- id, so on_event returns true or raises. The name did not name a
+    -- custom-input prototype this game has, on_event has said so by name and
+    -- rolled its own state back, and the guest is told with the status a
+    -- subscription to something absent has always used.
+    return H.ERR_NO_MEMBER
+  end
   return H.OK
 end
 

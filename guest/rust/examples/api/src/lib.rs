@@ -18,7 +18,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use fkapi::{
     defines_direction_east, defines_inventory_chest, read_on_player_created, read_on_tick,
     LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaProfiler, LuaStr, LuaSurface,
-    Object, Value, EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED, EVENT_ON_PLAYER_MINED_ENTITY,
+    Object, Value, EVENT_CUSTOMINPUTEVENT, EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED,
+    EVENT_ON_PLAYER_MINED_ENTITY,
     EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, HELPERS, SCRIPT,
     SETTINGS, SKIP_ON_BUILT_ENTITY_TAGS,
 };
@@ -121,6 +122,20 @@ pub extern "C" fn _initialize() {
         EVENT_ON_ROBOT_MINED_ENTITY,
         &fkapi::type_filter(&["container"]),
     );
+
+    // ...AND ONE BY NAME, which is the only way a CUSTOM INPUT can be reached.
+    //
+    // A custom input is Factorio's keybind: a mod declares a custom-input
+    // prototype at the data stage and subscribes to it by that prototype's own
+    // NAME. It has no defines.events entry at all -- measured, the table has
+    // 233 keys and CustomInputEvent is not one of them -- so the numeric form
+    // logs that it could not resolve the event and the hotkey never fires.
+    //
+    // THE PROTOTYPE DELIBERATELY DOES NOT EXIST HERE, so what the in-game gate
+    // reaches is the ENGINE's own refusal arriving as one log line with the mod
+    // still loading. Mirrors the Go example line for line, which is what makes
+    // the two pruning counts comparable.
+    fkapi::subscribe_named(EVENT_CUSTOMINPUTEVENT, "fklua-example-input");
 }
 
 #[no_mangle]
