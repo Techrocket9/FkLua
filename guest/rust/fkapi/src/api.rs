@@ -829,6 +829,14 @@ fn write_dyn(d: &mut [u8], v: &Value) {
 #[no_mangle]
 pub extern "C" fn fk_api_pin_2_0_77() {}
 
+// The ABI signature: a digest of the ID ASSIGNMENT AND LAYOUT these
+// bindings were generated with, so fklua mod can say when a wasm built
+// against OLDER bindings is being packaged with a fresh member table at
+// the same pin. Language-independent: a Go guest generated from this
+// description carries the same name.
+#[no_mangle]
+pub extern "C" fn fk_api_sig_ed025ff06828() {}
+
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
 // free functions here for that reason. fk_call's handle operand is
 // unread for them and the bindings pass 0.

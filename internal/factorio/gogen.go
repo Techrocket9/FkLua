@@ -320,6 +320,20 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 	w("//go:wasmexport %s\n", PinExport(a.ApplicationVersion))
 	w("func fkAPIPin() {}\n")
 
+	// ...AND THE ABI SIGNATURE, which is the half the pin cannot reach. The pin
+	// proves the guest and the table came from one DESCRIPTION; this proves they
+	// came from one GENERATION, and at one pin the ids move whenever the
+	// generator grows. See internal/factorio/pin.go.
+	w("\n// The ABI signature: a digest of the ID ASSIGNMENT AND LAYOUT these\n")
+	w("// bindings were generated with, so fklua mod can say when a wasm built\n")
+	w("// against OLDER bindings is being packaged with a fresh member table at\n")
+	w("// the same pin -- every id in which resolves to a different member.\n")
+	w("//\n")
+	w("// Language-independent: a Rust guest generated from this description\n")
+	w("// carries the same name.\n")
+	w("//go:wasmexport %s\n", SigExport(APISignature(a)))
+	w("func fkAPISig() {}\n")
+
 	// Group by class so the file reads like the API does.
 	//
 	// bound and declared are what the inheritance pass below needs: the

@@ -1,6 +1,9 @@
 package factorio
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -101,6 +104,124 @@ func GuestPins(m *ir.Module) []string {
 	var out []string
 	for _, e := range m.Exports {
 		if strings.HasPrefix(e.Name, PinExportPrefix) {
+			out = append(out, e.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The ABI SIGNATURE: a generated binding set says, in the compiled guest, WHICH
+// BINDINGS compiled it -- not merely which description they came from.
+//
+// WHAT THIS IS FOR, and it is the half the pin stamp cannot reach. The pin
+// proves the guest and the packaged table came from one DESCRIPTION. It cannot
+// prove they came from one GENERATION, and at one pin the ids move whenever the
+// generator grows: a member kind added, an operator's write half emitted, three
+// global functions appended, a handle variant over an attribute. So a wasm built
+// against older bindings and packaged with a fresh member table at the SAME pin
+// passes every check there is, and every id in it resolves to a different
+// member. Reported by BetterBeltBalancer (FKLUA-GAPS item 18); the first symptom
+// is in a player's game.
+//
+// WHAT IS DIGESTED IS THE PACKAGED TABLE ITSELF -- for every member its id,
+// class, name, kind and both blocks' rendered layout; for every event its id,
+// name, size and layout; for every define its id and dotted path. Not the
+// generated SOURCE, which differs between the two languages and would need three
+// digests where the thing that has to match is one. This is exactly the pairing:
+// what the guest's baked-in ids mean, and what the host will make them mean.
+//
+// LANGUAGE-INDEPENDENT BY CONSTRUCTION, so a Go guest and a Rust guest generated
+// from one description carry the SAME stamp, and a project with both cannot have
+// half of it stale. One function, three callers -- both generators and the
+// packager -- which is PinExport's own argument: two places computing one digest
+// would disagree silently, and a checker that computed a different one would
+// find no match and stay quiet.
+//
+// A WARNING RATHER THAN A REFUSAL, and the reason is that this digest is
+// CONSERVATIVE IN THE WRONG DIRECTION. A generator change that only APPENDS
+// members leaves every existing id meaning exactly what it meant -- the three
+// global functions were appended after every class precisely so that they would
+// -- and a whole-table digest cannot tell that from a renumbering. Refusing
+// would stop builds that are correct, which is the failure mode checkAPIPin's
+// silence-on-absent rule exists to avoid, and this repo's standing rule that a
+// check whose repair cannot be run from the consumer's checkout gets reverted
+// rather than satisfied. The pin stamp keeps refusing the case that is ALWAYS
+// wrong; this one names the case that MAY be.
+//
+// AN ABSENT STAMP STAYS QUIET, exactly as an absent pin does: bindings older
+// than this carry none, and a guest that links no generated bindings carries
+// none either.
+
+// SigExportPrefix is what every signature export name begins with.
+//
+// It does NOT begin with PinExportPrefix, deliberately: GuestPins scans for that
+// prefix and a signature sharing it would be read as a second pin stamp and
+// refuse the package outright.
+const SigExportPrefix = "fk_api_sig_"
+
+// SigExport is the export name a binding set with this signature carries.
+func SigExport(sig string) string { return SigExportPrefix + sig }
+
+// APISignature digests the ID ASSIGNMENT AND LAYOUT one description plus this
+// generator produce: the pairing a guest's baked-in ids are only meaningful
+// against.
+//
+// TRUNCATED TO 12 HEX CHARACTERS, which is 48 bits. The failure this guards is a
+// stale pair rather than an adversary, so what matters is that an unrelated
+// generation is overwhelmingly unlikely to collide, and 48 bits is far past that
+// for a space whose whole population is the generations of one compiler. What it
+// buys is an export name short enough to read in a refusal.
+func APISignature(a *API) string {
+	r := GenerateMembers(a)
+	ev := GenerateEvents(a)
+	defs := GenerateDefines(a)
+
+	h := sha256.New()
+	fmt.Fprintf(h, "fklua/api-sig/v1\x00%s\x00%d\n", a.ApplicationVersion, a.APIVersion)
+	for _, m := range r.Members {
+		args, rets, err := m.blocks()
+		if err != nil {
+			// A member whose layout does not compute is one LuaSourceWith would
+			// refuse to render, so the packaged table cannot exist either. Fold
+			// the error in rather than dropping the member: two different broken
+			// generations must not digest the same.
+			fmt.Fprintf(h, "%d\t%s\t%s\t%d\tERR %v\n", m.ID, m.Class, m.Name, m.Kind, err)
+			continue
+		}
+		fmt.Fprintf(h, "%d\t%s\t%s\t%d\t%s\t%s\n",
+			m.ID, m.Class, m.Name, m.Kind, args.LuaTable(), rets.LuaTable())
+	}
+	for _, e := range ev.Events {
+		blk, err := LayoutStruct(e.Fields)
+		if err != nil {
+			fmt.Fprintf(h, "e%d\t%s\tERR %v\n", e.ID, e.Name, err)
+			continue
+		}
+		fmt.Fprintf(h, "e%d\t%s\t%d\t%s\n", e.ID, e.Name, blk.Size, blk.LuaTable())
+	}
+	// The hook payload is in the packaged table too, and its layout can move
+	// without any member id moving -- which is precisely the class of change
+	// this digest exists to notice.
+	if ev.ConfChanged != nil {
+		if blk, err := LayoutStruct(ev.ConfChanged); err == nil {
+			fmt.Fprintf(h, "h\t%s\t%d\t%s\n", ConfChangedConcept, blk.Size, blk.LuaTable())
+		}
+	}
+	for _, d := range defs.Defines {
+		fmt.Fprintf(h, "d%d\t%s\n", d.ID, d.Path)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// GuestSigs reports the signature export names a compiled guest carries, sorted.
+//
+// Zero results means UNPROVEN, not matched. See the header above: an absent
+// stamp is silence.
+func GuestSigs(m *ir.Module) []string {
+	var out []string
+	for _, e := range m.Exports {
+		if strings.HasPrefix(e.Name, SigExportPrefix) {
 			out = append(out, e.Name)
 		}
 	}

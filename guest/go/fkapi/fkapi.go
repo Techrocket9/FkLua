@@ -835,6 +835,17 @@ func fkFree(p uint32) {
 //go:wasmexport fk_api_pin_2_0_77
 func fkAPIPin() {}
 
+// The ABI signature: a digest of the ID ASSIGNMENT AND LAYOUT these
+// bindings were generated with, so fklua mod can say when a wasm built
+// against OLDER bindings is being packaged with a fresh member table at
+// the same pin -- every id in which resolves to a different member.
+//
+// Language-independent: a Rust guest generated from this description
+// carries the same name.
+//
+//go:wasmexport fk_api_sig_ed025ff06828
+func fkAPISig() {}
+
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
 // package-level here for that reason. fk.call's handle operand is
 // unread for them and the bindings pass 0.

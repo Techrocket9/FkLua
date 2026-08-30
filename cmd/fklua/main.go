@@ -924,6 +924,10 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 	if err := checkAPIPin(im, a.ApplicationVersion, pin); err != nil {
 		return err
 	}
+	// ...AND THE OTHER HALF, which the pin cannot reach: whether the guest was
+	// built against THESE bindings or against an older generation of the same
+	// description. A warning rather than a refusal -- see warnAPISignature.
+	warnAPISignature(im, a, pin)
 	report := factorio.GenerateMembers(a)
 	events := factorio.GenerateEvents(a)
 	defs := factorio.GenerateDefines(a)
@@ -1013,6 +1017,68 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 type pinSource struct {
 	what string // "fklua.toml, [fklua] api", "the --api flag ...", the default
 	file string // the manifest that chose it, or "" when nothing did
+}
+
+// warnAPISignature says when a guest was built against a DIFFERENT GENERATION of
+// the bindings than the table about to be attached comes from.
+//
+// THE DEFECT, as BetterBeltBalancer reported it (FKLUA-GAPS item 18): `fklua
+// mod` packages a wasm built against old bindings with a fresh member table AT
+// THE SAME PIN without complaint. The pin stamp proves both halves came from one
+// DESCRIPTION and cannot prove they came from one GENERATION, and at one pin the
+// ids move whenever the generator grows -- a member kind added, an operator's
+// write half emitted, three global functions appended, a handle variant over an
+// attribute. Every id then resolves to a different member, silently wherever the
+// kinds line up, with the first symptom in a player's game.
+//
+// A WARNING RATHER THAN A REFUSAL, and the reasoning is worth having beside the
+// code because the pin's own check goes the other way. The digest is
+// CONSERVATIVE IN THE WRONG DIRECTION: a generator change that only APPENDS
+// members leaves every existing id meaning exactly what it meant -- the three
+// global functions were appended after every class precisely so that they would
+// -- and a whole-table digest cannot tell that from a renumbering. Refusing
+// would stop builds that are correct, which is what `checkAPIPin`'s
+// silence-on-absent rule and this repo's "a check whose repair cannot be run
+// from the consumer's checkout gets reverted rather than satisfied" both point
+// at. The pin keeps refusing the case that is ALWAYS wrong; this names the case
+// that MAY be, loudly, with the repair.
+//
+// THE LOCK HASH WAS THE OTHER CANDIDATE AND IT IS THE WRONG INSTRUMENT. It
+// answers whether the generated bindings TREE matches what `fklua lock` last
+// recorded -- which is `fklua lock --check`'s question -- and the wasm is in
+// neither. An author who regenerated, re-locked and did not rebuild has a
+// current lock and a stale wasm, which is exactly the reported defect and
+// exactly what a lock-hash comparison cannot see.
+//
+// AN ABSENT STAMP IS SILENCE, as an absent pin is: bindings older than the stamp
+// carry none, and a guest linking no generated bindings carries none either.
+func warnAPISignature(im *ir.Module, a *factorio.API, from pinSource) {
+	sigs := factorio.GuestSigs(im)
+	if len(sigs) == 0 {
+		return
+	}
+	want := factorio.SigExport(factorio.APISignature(a))
+	if len(sigs) == 1 && sigs[0] == want {
+		return
+	}
+	repin := "fklua gen-bindings"
+	if from.file != "" {
+		repin = "fklua gen-bindings (this project pins " + a.ApplicationVersion +
+			" in " + from.file + ")"
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: this guest was built against a DIFFERENT GENERATION of the "+
+			"API %s bindings\n"+
+			"  what the module says: it exports %s\n"+
+			"  what this generator produces: %s\n"+
+			"Member, event and define ids are dense sorted indices over one\n"+
+			"GENERATION's table, and they move whenever the generator grows -- so a\n"+
+			"guest compiled against older bindings can call different members than\n"+
+			"the table being packaged names, silently wherever the kinds line up.\n"+
+			"An id that only MOVED because members were appended after it is still\n"+
+			"correct, which is why this is a warning and not a refusal.\n"+
+			"Regenerate and REBUILD THE GUEST: %s, then build again.\n",
+		a.ApplicationVersion, strings.Join(sigs, " and "), want, repin)
 }
 
 func checkAPIPin(im *ir.Module, version string, from pinSource) error {

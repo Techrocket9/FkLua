@@ -309,6 +309,17 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 	w("#[no_mangle]\n")
 	w("pub extern \"C\" fn %s() {}\n", PinExport(a.ApplicationVersion))
 
+	// ...AND THE ABI SIGNATURE, the Go generator's line for line. The pin proves
+	// one DESCRIPTION; this proves one GENERATION, and at one pin the ids move
+	// whenever the generator grows. See internal/factorio/pin.go.
+	w("\n// The ABI signature: a digest of the ID ASSIGNMENT AND LAYOUT these\n")
+	w("// bindings were generated with, so fklua mod can say when a wasm built\n")
+	w("// against OLDER bindings is being packaged with a fresh member table at\n")
+	w("// the same pin. Language-independent: a Go guest generated from this\n")
+	w("// description carries the same name.\n")
+	w("#[no_mangle]\n")
+	w("pub extern \"C\" fn %s() {}\n", SigExport(APISignature(a)))
+
 	byClass := map[string][]Member{}
 	var classes []string
 	for _, m := range r.Members {

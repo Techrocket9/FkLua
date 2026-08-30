@@ -131,18 +131,40 @@ The census cannot see most of what this survey found: a member that binds and ca
 
 ## The queue (2026-08-26)
 
-The four rounds above are QUEUED as executable work; none is started. Amendments
-since the survey was written, folded into their rounds:
+The four rounds above are executable work. **ROUND 1 IS SHIPPED (2026-08-30)**
+and the other three are queued. Amendments since the survey was written, folded
+into their rounds:
 
-- **Round 1** drops "the defines wiring for `api check`": it shipped with the
-  survey itself (leaf-path keying and event-payload concept collection, both
-  red-proven, merged). It gains the rename table for the two standing
-  name-collision deferrals (takes both languages' deferrals to zero and turns
-  the emission-ordering accident into a decision), and the packaging half of
-  the one open downstream ledger item: `fklua mod` packages a stale wasm
-  against fresh bindings without complaint at the same pin
-  (BetterBeltBalancer's FKLUA-GAPS item 18); the lock hash is in hand at
-  package time, so a mismatch should be at least a loud warning.
+- **Round 1 SHIPPED on 2026-08-30**, and its record is CLAUDE.md's "The
+  event-delivery round". It dropped "the defines wiring for `api check`", which
+  shipped with the survey itself, and gained two amendments: the rename table
+  for the two standing name-collision deferrals, and the packaging half of the
+  one open downstream ledger item (BetterBeltBalancer's FKLUA-GAPS item 18).
+  What landed:
+  - the subscribe NAME widening, `fk.subscribe(id, filterp, mask, namep,
+    namelen)`, with `SubscribeNamed`/`subscribe_named` and their masked twins,
+    the raw `(ptr, len)` keeping both wrappers inlined so the constant-id scan
+    still prunes, and the false log sentence replaced by one naming both causes
+    and the remedy. Verified in a real Factorio, including the two walls: a
+    custom input has a real numeric event id and still cannot be raised from
+    script;
+  - the five handler members DEFERRED under a new census reason, `handler is a
+    Lua function`, guest-side only, so no member id moved;
+  - the `LuaGuiElement.style` write half generated as tier 2, from a rule over
+    the SHAPE (an attribute write whose union would collapse to one handle arm)
+    rather than a name;
+  - `ConfigurationChangedData` marshalled into `fk_on_configuration_changed` as
+    a typed struct, pruned by the EXPORT, with the no-argument form preserved
+    and `mod_changes` read back out of a real version bump in game;
+  - the rename table, taking both languages' member deferrals to the five
+    handlers and nothing else, with an unlisted collision now failing a gate BY
+    NAME rather than moving a census count;
+  - the ABI SIGNATURE stamp, `fk_api_sig_<hex>`, which is what actually catches
+    a stale wasm at one pin. **The lock hash was evaluated and NOT taken**: it
+    answers whether the bindings TREE matches the lock, which is
+    `fklua lock --check`'s question, and the wasm is in neither -- an author who
+    regenerated, re-locked and did not rebuild has a current lock and a stale
+    wasm, which IS the reported defect.
 - **Round 2** gains the typed `ModSetting` accessors (Bool/Number/String over
   the untyped Value field).
 - **Round 3** gains the verify-then-publish of the simulation bridge recipe
