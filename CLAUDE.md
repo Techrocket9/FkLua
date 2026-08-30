@@ -785,6 +785,8 @@ The recipe is in [`docs/from-lua.md`](docs/from-lua.md) with that last row in it
 
 **An idle guest registers nothing**, which is the standing property every one-shot in `fk_mod.lua` protects and is the first line of the test. **No census row**, and that is a judgement rather than an omission: the census counts what a DESCRIPTION produced, and what would have caught this hook's absence is the `Hooks` two-way mirror — `fk_on_nth_tick` is in that table, so `TestEveryReportedHookIsActuallyRegistered` and `TestEveryExportControlLuaCallsIsListedInHooks` fail if either half moves alone.
 
+**VERIFIED IN A REAL FACTORIO 2.0.77**, which is what says `script.on_nth_tick` is the thing this runtime believes it is. A guest arming 60 and 180 from `init` and disarming 180 after its third fire, over `--benchmark-ticks 1200`: **`ticks=1200 n60=20 n180=3`**. 1200/60 is 20 exactly, so the ENGINE's own scheduling is what fired it; 180 would have fired six times over the same window and fired three, **so the disarm held** — which no arithmetic on one counter could fake. `fklua mod` reports `wired fk_on_nth_tick -> fk.on_nth_tick, every n ticks`. Transcript: [`scratchpad/r3/RESULTS.txt`](scratchpad/r3/RESULTS.txt).
+
 *Red-proven three times, each firing something different: the load-path re-arm removed (an armed period is gone after a save), the disarm leaving its `storage` flag behind (`after disarm [60,180]` where the rig disarmed one — the exact class the deferred flush's design notes warn about), and the re-arm walking in reverse rather than sorted order (`order [180,60]`).*
 
 ### Guests (M4, M8, M10)
