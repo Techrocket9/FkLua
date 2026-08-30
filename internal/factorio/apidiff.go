@@ -249,6 +249,14 @@ func diffSignature(id string, o, n Method, add func(ChangeKind, string, string))
 		add(Breaking, id, "calling convention changed between positional and table")
 		return
 	}
+	// ...AND THE VARIANT GROUPS, which this walk did not read and which decide
+	// the same thing the takes-table flag does. See diffVariantGroups: a method
+	// that gains its first group or loses its last flips its whole argument
+	// binding between one tier-2 value and a laid-out block, and the parameter
+	// walk below would have reported that as an ordinary list of fields.
+	if diffVariantGroups(id, o.VariantGroups, n.VariantGroups, add) {
+		return
+	}
 	oldP := map[string]Parameter{}
 	for _, p := range o.Parameters {
 		oldP[p.Name] = p
@@ -377,6 +385,15 @@ func diffConcepts(from, to *API, add func(ChangeKind, string, string)) {
 // shapes are not comparable field-wise, because "it changed and here is both"
 // still beats silence.
 func diffShape(name string, o, n Type, add func(ChangeKind, string, string)) {
+	// BEFORE the signature comparison, because typeSig does not carry variant
+	// groups: a table concept that gained one with its ordinary fields untouched
+	// has an identical signature and a completely different binding. Same rule as
+	// a method's, one kind of declaration over -- mapType hands back a bare
+	// KindDyn for a table with any variant group and a laid-out struct for one
+	// with none.
+	if diffVariantGroups(name, o.VariantGroups, n.VariantGroups, add) {
+		return
+	}
 	if typeSig(o) == typeSig(n) {
 		return
 	}
@@ -414,6 +431,59 @@ func diffShape(name string, o, n Type, add func(ChangeKind, string, string)) {
 				"field %q added, which moves the fields after it", p.Name))
 		}
 	}
+}
+
+// diffVariantGroups reports a change to the conditional half of an argument
+// table, and answers whether the BINDING SHAPE flipped -- in which case nothing
+// the caller would walk next is comparable and it should stop.
+//
+// THE BLIND SPOT THIS CLOSES. A variant group is what makes a method's argument
+// table a discriminated union, and both generators branch on the group count
+// being zero: with none, the shared parameters lay out as a tier-1 struct (or as
+// positional arguments); with any, the whole table crosses as ONE tier-2 value
+// and the typed form is a block plus an `extra` slot. So a method that gains its
+// FIRST group or loses its LAST changes the shape of every call to it, and the
+// diff walked only the top-level parameters -- which would have reported that as
+// an ordinary list of fields, or, where the shared parameters happened not to
+// move, as nothing at all. The same is true of a table CONCEPT, where mapType
+// makes the identical decision.
+//
+// It is BREAKING in both directions, and that is a judgement worth stating.
+// Gaining a group is additive in Factorio's terms -- old calls still work -- and
+// it is not additive here, because the guest's argument encoding changes: a
+// binding compiled before the flip writes a block where the host now decodes a
+// tier-2 value, or the reverse. That is the same reasoning `takes_table`'s own
+// flip already carries one line up.
+//
+// IT REPORTS THE FLIP AND NOT THE GROUPS' CONTENTS, and that is proportionality
+// rather than an omission. Past the flip a variant group's parameters are keys
+// inside a tier-2 value the guest writes BY NAME: nothing about the wire depends
+// on them, the engine is what validates them, and reporting them costs twenty
+// findings per committed pair against a diff whose value is that a human reads
+// it. The same boundary the diff already declines to police everywhere else.
+//
+// THE AMENDMENT THAT ASKED FOR THIS SAID ZERO INSTANCES EXISTED IN ANY SHIPPED
+// PAIR AND THAT IS FALSE, which the detector's first run found:
+// LuaSimulation::get_widget_position is (data, data2, type) with no groups at
+// 2.1.14 and (type) with SIXTEEN at 2.1.16, so its whole argument encoding
+// flipped inside a pair this repo committed. The old walk was not silent about
+// it -- it reported two parameters removed, which is Breaking -- but it named the
+// wrong cause, and had the shared parameters happened not to move it would have
+// reported nothing at all. That instance is pinned by name rather than asserted
+// away, and the synthetic pair beside it covers the direction no committed
+// description has.
+func diffVariantGroups(id string, o, n []VariantGroup, add func(ChangeKind, string, string)) bool {
+	if (len(o) == 0) == (len(n) == 0) {
+		return false
+	}
+	was, now := "a laid-out argument block", "one dynamic value"
+	if len(o) > 0 {
+		was, now = now, was
+	}
+	add(Breaking, id, fmt.Sprintf(
+		"variant parameter groups %d -> %d, so its arguments cross as %s rather "+
+			"than %s", len(o), len(n), now, was))
+	return true
 }
 
 // diffUnion reports which alternatives a union gained or lost.
