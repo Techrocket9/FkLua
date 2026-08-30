@@ -1,0 +1,59 @@
+=== anti-vacuity: every leg really did its work ===
+percall_status=0 v=103
+bulk_status=0 n=200 first=100 last=299
+bulkpc_n=200
+bulkbare_n=200
+bulkinline_status=0 n=200 first=1000 last=1199
+batchdyn_status=0 made=50 adds=50
+batchtyped_status=0 made=50 adds=50
+encodings_agree=true type=label name=row-1-cell
+addpercall_status=0 adds=1
+
+=== 4a  BULK ATTRIBUTE READ  (N = 200 entities per iteration) ===
+  floor (a plain Lua call)        18.9 ns   (A/A 19 and 19 ns, spread 0.8% -- this run's resolution)
+  leg                         ns/iter   ns/element  vs percall  vs hand Lua
+  lua_poll                       4218         21.1      0.022x         1.0x
+  percall                      195703        978.5      1.000x        46.4x
+  percall_str                  307810       1539.1      1.573x        73.0x
+  dispatch                      95074        475.4      0.486x        22.5x
+  bulk_full                     83562        417.8      0.427x        19.8x
+  bulk_encode_rets             133310        666.6      0.681x        31.6x
+  bulk_batchpcall               66252        331.3      0.339x        15.7x
+  bulk_bare                     63594        318.0      0.325x        15.1x
+  bulk_bare_u32                 36729        183.6      0.188x         8.7x
+  bulk_read_only                23622        118.1      0.121x         5.6x
+  bulk_resolve_only             22107        110.5      0.113x         5.2x
+  bulk_ld32_only                12665         63.3      0.065x         3.0x
+  bulk_store_f64                37802        189.0      0.193x         9.0x
+  bulk_store_u32                14391         72.0      0.074x         3.4x
+  bulk_direct_inline             8612         43.1      0.044x         2.0x
+  bulk_direct                   12895         64.5      0.066x         3.1x
+  bulk_direct_raw                3710         18.6      0.019x         0.9x
+
+=== 4b  BATCHED GUI ADD  (G = 50 elements per iteration) ===
+  floor (a plain Lua call)        19.5 ns   (A/A 20 and 19 ns, spread 2.4%)
+  leg                         ns/iter   ns/element  vs percall  vs hand Lua
+  lua_add                        9596        191.9      0.010x         1.0x
+  add_percall                 1009192      20183.8      1.000x       105.2x
+  add_batch_dyn                890997      17819.9      0.883x        92.9x
+  add_batch_typed              325815       6516.3      0.323x        34.0x
+  decode_dyn                   897308      17946.2      0.889x        93.5x
+  decode_typed                 298457       5969.1      0.296x        31.1x
+  decode_typed_pooled          146158       2923.2      0.145x        15.2x
+  decode_typed_strings         276819       5536.4      0.274x        28.8x
+  decode_typed_table             8643        172.9      0.009x         0.9x
+  decode_typed_interned         23220        464.4      0.023x         2.4x
+  decode_typed_mixed            86659       1733.2      0.086x         9.0x
+
+NOISE: the two A/A spreads are 0.8% and 2.4%. A ratio inside them is not a measurement.
+
+=== 4a  AMORTIZATION: does one crossing pay for itself at small N? ===
+       N   percall ns/el   bulk_full ns/el   bulk_inline ns/el   best vs percall
+       1          1035.1            1173.3               831.4            0.803x
+       2          1032.5             823.2               437.5            0.424x
+       4          1018.0             655.4               259.2            0.255x
+       8          1006.5             504.1               144.6            0.144x
+      16          1054.6             471.3                90.9            0.086x
+      64          1019.5             432.3                52.0            0.051x
+     256           982.4             399.5                43.9            0.045x
+    1024          1055.7             433.9                42.7            0.040x
