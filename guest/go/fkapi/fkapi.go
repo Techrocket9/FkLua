@@ -855,7 +855,7 @@ type dumper struct {
 	n   int
 }
 
-func (d *dumper) s(x string) { d.n += copy(d.dst[min(d.n, len(d.dst)):], x) }
+func (d *dumper) s(x string) { d.n += copy(d.dst[dmin(d.n, len(d.dst)):], x) }
 
 func (d *dumper) value(v Value) {
 	switch v.Tag {
@@ -963,10 +963,14 @@ func (d *dumper) uint(v uint64) {
 			break
 		}
 	}
-	d.n += copy(d.dst[min(d.n, len(d.dst)):], b[i:])
+	d.n += copy(d.dst[dmin(d.n, len(d.dst)):], b[i:])
 }
 
-func min(a, b int) int {
+// dmin rather than min, which is a BUILTIN since Go 1.21: a package-level
+// definition shadows it for the whole generated package, so a later generator
+// change that emitted min over two floats would stop compiling for a reason
+// nothing here names. Same family rule the emitter follows one layer down.
+func dmin(a, b int) int {
 	if a < b {
 		return a
 	}
