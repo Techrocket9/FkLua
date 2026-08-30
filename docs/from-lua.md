@@ -99,3 +99,24 @@ Said out loud, because both are things a Lua author does and neither has a guest
 **`migrations/*.lua` is not FkLua's state-migration mechanism.** A mod's own state is the guest's heap, and the heap is migrated by `fk_migrate`, which the runtime calls on a fresh heap when the build changed. A Lua migration runs before the heap has been adopted, so anything dispatched into a guest from one would run against a heap the adoption then overwrites. The file type stays available through the include tree as a hand-written escape hatch; JSON migrations are data rather than Lua and are unaffected.
 
 **A cross-mod protocol whose extension point is Lua source cannot host a guest.** If another mod's contract is "give me a function" or "give me a chunk to `load()`", there is nothing a compiled guest can hand it. The remote interface seam works in both directions and is the sanctioned surface; if you are designing such a protocol, make the payload data.
+
+## A simulation, and the one line of Lua it needs
+
+A `SimulationDefinition` -- what a tips-and-tricks entry, a Factoriopedia entry or a main-menu scene runs -- carries its script as an `init` string that the engine executes as a **silent console command**. A console command has no `require`, so that string can never load a compiled module. That is a property of the entry point rather than a gap in the compiler, and it is not going to change.
+
+What it can do is CALL into the mod, and `SimulationDefinition.mods` is the field that makes that possible: it is documented as an array of mods whose runtime scripts are loaded for the simulation. So a mod that lists itself there and registers a remote interface keeps the whole screenplay in the guest and leaves one line of Lua in the prototype:
+
+```go
+// the data guest
+fkdata.KVs("factoriopedia_simulation", fkdata.Obj(
+    fkdata.KVs("mods", fkdata.Arr(fkdata.Str("my-mod"))),
+    fkdata.KVs("init", fkdata.Str(`remote.call("my-mod", "run_demo")`)),
+    fkdata.KVs("length", fkdata.Num(600)),
+))
+```
+
+with `run_demo` registered from the control guest's `init` the way any other remote method is. See [factorio-api.md](factorio-api.md).
+
+**What is verified, and what is not, because the difference matters here.** The prototype loads: a `factoriopedia_simulation` carrying `mods` and `init` is accepted by a real 2.0.77 and reaches the prototype dump verbatim. The init string is executable and reaches the seam: the exact text above, loaded as a bare chunk with no `require` available to it, calls through to the guest's handler. **What has not been verified is a real simulation running it**, because nothing headless runs a simulation at all -- there is no command-line flag for one and a headless log never mentions one -- so that half needs a client that renders the tips or Factoriopedia GUI.
+
+**And the engine does not check the string when the prototype loads**, measured: an `init` with an unbalanced parenthesis loads with a clean exit and is stored as written. So a mod that loads is no evidence that its simulation will run; test the init string on its own before shipping it.

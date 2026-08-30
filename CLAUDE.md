@@ -683,6 +683,33 @@ subsection below and each shipped with its own red proof.
 
 *Red-proven three times: the Go preamble's kind number moved off the host's (the gate names both values and says a descriptor of one kind would be read as another), the host losing a kind the two guests still spell (both writers reported by name), and the ROLLBACK removed — where a second registration to the refused name comes back `st 0`, silently succeeding into a dispatcher Factorio never registered, with the engine's refusal logged once for two attempts.*
 
+#### The 4d fold — one config, two stages, and the probe that over-answered
+
+**Q5 asked for "a documented convention, or a helper, for the data stage to publish a blob the guest can read at load", and two of its three forms had closed themselves without anybody writing it down.** [`agents/drafts/r4d-q5-build-time-configuration.md`](agents/drafts/r4d-q5-build-time-configuration.md) is the design; what shipped is the doctrine, in [`docs/data-stage.md`](docs/data-stage.md)'s "Sharing one config between the two stages", plus the probe that draft named as its one open question.
+
+**A config known at AUTHORING time is an ordinary import**, because the two stages are two `main` packages in ONE Go module. The constraint that makes it work is what makes it memorable: `fklua mod` refuses a data module that imports `fkapi` and a control guest cannot import `fkdata`, **so the shared package must import neither** — which is exactly what BetterBeltBalancer derived unaided three times over. Three derivations of one pattern is the report.
+
+**A config the data stage COMPUTES goes in a `mod-data` prototype**, and **THE PROBE ANSWERS MORE THAN THE DRAFT ASKED**. It asked for a `--dump-data` run; the read side ran in the same session, so the channel is proven end to end rather than inferred from the bindings. Measured on 2.0.77: the prototype is accepted and lands in `data.raw` with its `data_type` and `data` intact, and the CONTROL guest reads all five keys back from `fk_on_init` through `ModDataRaw()` + `Get()` + `LuaModData.Data()` — the nested table arriving as a map and both numbers exact. Full transcript: [`scratchpad/r3/RESULTS.txt`](scratchpad/r3/RESULTS.txt).
+
+**AND THE QUEUE AMENDMENT'S PHRASING IS WITHDRAWN.** It read *"a config written once reaching both a build tag and a startup setting"*; the whole ports campaign contains **no mention of build tags at all**, and Q5's own text is about one config reaching two STAGES, both at load, neither of them a compile. Left standing it asks the next agent to build a mechanism for a requirement nobody filed. The refusal also stands on its own terms: a build tag is fixed when the author compiles and a startup setting is chosen by the player, so the two can only ever agree about the DEFAULT.
+
+**Deliberately NOT an `fklua.toml` key**, which is the one alternative worth recording as refused rather than unconsidered: a config in the manifest that both guests then have to agree with is Q5's own defect with the second copy moved into a TOML file, and `agents/abi.md` already refused the manifest for the callback seam on that ground, citing Q5 by name.
+
+**Two residuals, stated rather than rounded off**: the Rust shared-crate half is the same shape and is unbuilt here, and `AnyBasic` means a `mod-data` blob is data rather than a value, so the guest still writes a decoder.
+
+#### The SIMULATION BRIDGE, published to exactly what was proven
+
+**The charter's rule for this one is verify-then-publish, and the verification splits three ways.** A `SimulationDefinition`'s `init` is a silent console command, so it can never load a compiled module — a property of the entry point rather than a gap in the compiler — and what FkLua owes it is the one-line bridge: `SimulationDefinition.mods` loads the listed mods' runtime scripts into the simulation, so an `init` of `remote.call("my-mod", "run_demo")` keeps the whole screenplay in the guest.
+
+| | |
+|---|---|
+| **PROVEN** | the prototype LOADS. A `factoriopedia_simulation` carrying `mods` and `init` is accepted by a real 2.0.77 and reaches `data-raw-dump.json` verbatim. `PrototypeBase.factoriopedia_simulation` is the cheapest carrier there is — every prototype has one, so no tips-and-tricks category and no main-menu override is needed |
+| **PROVEN** | the INIT STRING is executable and REACHES THE SEAM. The exact text, loaded as a bare chunk in an environment with no `require`, calls through to the guest's registered remote method and gets its result back (`TestASimulationsInitStringReachesTheRemoteSeam`) |
+| **NOT PROVEN** | a real simulation running it. **Nothing headless runs a simulation** — zero mentions in `--help` and zero across `--dump-data`, `--create` and `--benchmark` logs — so the last hop needs a client that renders the tips or Factoriopedia GUI |
+| **MEASURED AND NEGATIVE** | **the engine does NOT validate the init string at load.** An `init` with an unbalanced parenthesis loads with exit 0 and is stored as written. So "the prototype loads" is no evidence whatever that the init will run, and the published recipe says to test the string on its own |
+
+The recipe is in [`docs/from-lua.md`](docs/from-lua.md) with that last row in it, which is the charter's own instruction: publish to the extent proven and say where the proof stops.
+
 #### `migrations/*.lua` — the audit line, and two caveats a Lua author carries over
 
 **The doctrine was already decided and the mechanism was not built: a mod's own state is the guest's heap, the heap is migrated by `fk_migrate`, and `migrations/*.lua` stays available through the include tree with the status of INLINE ASSEMBLY — permitted, marked, minimised, never generated.** What was owed was the MARK. `fklua mod` prints one line naming each Lua migration an include tree carried, so a repository greps its own build output for the count of hand-written Lua instead of remembering to look. **A JSON migration is a prototype-rename TABLE rather than a program and is deliberately not counted**: there is nothing there a compiler could have replaced, and reporting one would be reporting an author for using the format correctly. A `.lua` file BELOW `migrations/` is not counted either — Factorio reads that directory and not a tree under it, so one is the author's own module.
@@ -958,9 +985,11 @@ scripts/            the in-game and corpus tooling, five families: run-* (guest,
                     ipc-probe-driver.py, and lib-engine.sh -- SOURCED, not run:
                     what the INSTALLED engine is, which is a different axis
                     from the API pin, and the one place that derivation lives
-scratchpad/         COMMITTED measurement harnesses (the GC arc's Python models +
-                    RESULTS.txt) — not scratch despite the name; the git-ignored
-                    scratch dir is scratch_tmp/ below
+scratchpad/         COMMITTED measurement harnesses (the GC arc's Python models,
+                    round 4's design benches, round 3's in-game probes, each
+                    with its RESULTS) — not scratch despite the name; the
+                    git-ignored scratch dir is scratch_tmp/ below. A guest kept
+                    here is a .go.txt so `go build ./...` does not walk it
 bench/kernels/      hand-written Lua: the performance ceiling
 bench/wasm/         .wat kernels + drivers compiled at each -opt level; the only
                     thing that measures a pass

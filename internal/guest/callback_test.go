@@ -159,6 +159,90 @@ handlers[1]({ tick = 1 })
 	}
 }
 
+// THE SIMULATION BRIDGE, to the exact extent it can be verified without a
+// graphical client.
+//
+// A SimulationDefinition's `init` is run as a SILENT CONSOLE COMMAND inside the
+// simulation, so it can never `require` and can never load a compiled module --
+// that is a property of the entry point rather than a gap in the compiler. What
+// FkLua owes it is the one-line bridge: a simulation that lists the mod in
+// `SimulationDefinition.mods` (documented as "an array of mods whose runtime
+// scripts will be loaded for this simulation") and calls into the mod's REMOTE
+// SEAM keeps the whole screenplay in the guest.
+//
+// WHAT THIS PINS is that the init string is EXECUTABLE and REACHES THE SEAM: the
+// exact text a SimulationDefinition would carry, loaded as a chunk with no
+// `require` available to it, against a state where the guest has registered its
+// interface. What it cannot pin is that a real simulation's Lua state has that
+// interface in it, which needs a client that renders one -- and a headless
+// Factorio never runs a simulation at all (measured: zero mentions across
+// --dump-data, --create and --benchmark, and no flag in --help). The prototype
+// half IS verified in a real 2.0.77: a factoriopedia_simulation carrying `mods`
+// and `init` loads and reaches data-raw-dump.json verbatim.
+//
+// AND THE ENGINE DOES NOT VALIDATE THE STRING AT LOAD -- measured, an init with
+// an unbalanced parenthesis loads with exit 0 and is stored as written. So "the
+// prototype loads" is no evidence at all that the init will run, which is
+// exactly why this test evaluates the string rather than trusting the dump.
+func TestASimulationsInitStringReachesTheRemoteSeam(t *testing.T) {
+	h := needGuest(t)
+	root, tmp := repoRoot(t), t.TempDir()
+	out := filepath.Join(tmp, "callback.wasm")
+	if err := guest.Build(filepath.Join(root, "guest", "go"),
+		"./examples/callback", out); err != nil {
+		t.Fatalf("building the callback guest: %v", err)
+	}
+	dir := packageCallbackGuest(t, root, tmp, out)
+
+	// The literal a SimulationDefinition would carry. It goes into the Lua as a
+	// long string so the quotes inside it are the ones a prototype would hold,
+	// unescaped and unchanged.
+	got, err := runCallbackHost(t, h, dir, `
+-- A console command has no require, which is the whole reason the bridge is a
+-- remote call rather than a module load. The chunk is given an environment with
+-- require REMOVED, so a recipe that quietly depended on one fails here rather
+-- than in somebody's main menu.
+local sandbox = { remote = remote }
+-- The result is ASSIGNED rather than returned, because a console command
+-- discards what its last expression evaluates to -- which is one of the
+-- restrictions that makes this an init STRING rather than a function.
+local init = [[greeting = remote.call("fk-callback-demo", "greet", "simulation")]]
+local f, lerr = load(init, "simulation-init", "t", sandbox)
+print("SIM loaded " .. tostring(f ~= nil) .. " " .. tostring(lerr))
+local ok, err_ = pcall(f)
+print("SIM ran " .. tostring(ok) .. " " .. tostring(err_))
+print("SIM reached " .. tostring(sandbox.greeting))
+print("SIM norequire " .. tostring(sandbox.require == nil))
+`)
+	if err != nil {
+		t.Fatalf("running the mod: %v\n%s", err, got)
+	}
+	// The tail, because the guest's own registration lines come first: what is
+	// under test is the four lines the init string produced.
+	want := []string{
+		"LOG loaded true nil",
+		"LOG ran true nil",
+		"LOG reached hello, simulation",
+		"LOG norequire true",
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(got), "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "SIM ") {
+			lines = append(lines, "LOG "+strings.TrimPrefix(l, "SIM "))
+		}
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("expected %d SIM lines, got %d:\n%s", len(want), len(lines), got)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("line %d:\n  got  %s\n  want %s\n(the init string a simulation "+
+				"would carry has to be executable as a bare chunk and has to reach "+
+				"the guest through the remote seam)", i+1, lines[i], want[i])
+		}
+	}
+}
+
 // A GUEST THAT EXPORTS NO fk_on_call CANNOT REGISTER ANYTHING, and says so
 // rather than installing a closure that would raise when a player typed the
 // command.

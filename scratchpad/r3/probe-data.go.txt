@@ -1,0 +1,56 @@
+// The r3 probe's DATA guest: two questions in one dump.
+//
+//  1. Does the engine accept a `mod-data` prototype emitted from a data guest,
+//     and does it reach data-raw-dump.json? That is the ONE open question in
+//     agents/drafts/r4d-q5-build-time-configuration.md, whose recommendation
+//     says not to publish the mod-data half of the doctrine until somebody has
+//     run this.
+//  2. Does a SimulationDefinition carrying `mods` and an `init` console command
+//     load? That is the first half of the simulation bridge the survey asks to
+//     be verified before it is published.
+package main
+
+import "github.com/Techrocket9/fklua/guest/go/fkdata"
+
+//go:wasmexport fk_data
+func onData() {
+	// (1) THE CONFIG BLOB. AnyBasic is scalars, strings, booleans and nested
+	// tables of them, so the shapes below are the four a real config uses.
+	fkdata.Extend(fkdata.Obj(
+		fkdata.KVs("type", fkdata.Str("mod-data")),
+		fkdata.KVs("name", fkdata.Str("r3probe-config")),
+		fkdata.KVs("data_type", fkdata.Str("config")),
+		fkdata.KVs("data", fkdata.Obj(
+			fkdata.KVs("rungs", fkdata.Num(8)),
+			fkdata.KVs("scale", fkdata.Num(0.05)),
+			fkdata.KVs("label", fkdata.Str("mining-speed")),
+			fkdata.KVs("enabled", fkdata.Bool(true)),
+			fkdata.KVs("nested", fkdata.Obj(
+				fkdata.KVs("inner", fkdata.Str("yes")),
+			)),
+		)),
+	))
+
+	// (2) THE SIMULATION, on a prototype cheap enough to define: every
+	// PrototypeBase carries an optional factoriopedia_simulation, so this needs
+	// no tips-and-tricks category and no main-menu override.
+	//
+	// `mods` is what the bridge rests on -- the docs say it is "an array of mods
+	// whose runtime scripts will be loaded for this simulation" -- and `init` is
+	// a console command, which is why it can never load a compiled module and
+	// has to call INTO one.
+	fkdata.Extend(fkdata.Obj(
+		fkdata.KVs("type", fkdata.Str("item")),
+		fkdata.KVs("name", fkdata.Str("r3probe-item")),
+		fkdata.KVs("icon", fkdata.Str("__base__/graphics/icons/iron-plate.png")),
+		fkdata.KVs("stack_size", fkdata.Num(50)),
+		fkdata.KVs("factoriopedia_simulation", fkdata.Obj(
+			fkdata.KVs("mods", fkdata.Arr(fkdata.Str("r3probe"))),
+			fkdata.KVs("init", fkdata.Str(
+				`remote.call("r3probe", "from_simulation", "hello")`)),
+			fkdata.KVs("length", fkdata.Num(60)),
+		)),
+	))
+}
+
+func main() {}

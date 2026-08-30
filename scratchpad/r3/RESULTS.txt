@@ -1,0 +1,92 @@
+Round 3, the seam round -- the in-game probes and what they answered.
+Factorio 2.0.77 (build 84539, mac-arm64, steam), 2026-08-30.
+The guests are .go.txt so `go build ./...` does not walk them; copy one into
+guest/go/examples/<name>/main.go to rebuild it.
+
+
+1. THE mod-data CHANNEL  (probe-moddata.sh; agents/drafts/r4d's ONE open question)
+======================================================================
+
+The draft asked for a --dump-data run over a guest emitting a mod-data
+prototype, and said the recommendation should not be published until somebody
+had done it. It was run, and the READ side was run in the same session, so the
+channel is proven end to end rather than inferred from the bindings.
+
+--dump-data, the data guest's output as the engine stored it:
+
+  mod-data present in data.raw: True
+  entries: ['r3probe-config']
+  data_type: config
+  data: {"enabled": true, "label": "mining-speed", "nested": {"inner": "yes"},
+         "rungs": 8, "scale": 0.05}
+
+--create, the CONTROL guest reading it back from fk_on_init through
+ModDataRaw() + LuaCustomTable.Get() + LuaModData.Data():
+
+  R3PROBE data_type is config
+  R3PROBE blob has 5 keys
+  R3PROBE   enabled = bool true
+  R3PROBE   label = str mining-speed
+  R3PROBE   nested = tag 6
+  R3PROBE   rungs = num 8000/1000
+  R3PROBE   scale = num 50/1000
+
+Five keys out, five back, the nested table arriving as a map (tag 6) and both
+numbers exact. AnyBasic is scalars, strings, booleans and nested tables of
+them, so the guest reads tier-2 values rather than a typed struct: that is the
+residual and it is much smaller than a base-N string codec.
+
+
+2. THE SIMULATION BRIDGE  (probe-moddata.sh + probe-simulation-and-nth.sh)
+======================================================================
+
+PROVEN -- the prototype loads and reaches the dump verbatim. Every
+PrototypeBase carries an optional factoriopedia_simulation, which is the
+cheapest carrier there is (no tips-and-tricks category, no main-menu override):
+
+  item present: True
+  factoriopedia_simulation present: True
+  simulation: {"init": "remote.call(\"r3probe\", \"from_simulation\", \"hello\")",
+               "length": 60, "mods": ["r3probe"]}
+
+PROVEN -- the init string is executable and reaches the seam. Pinned host-side
+rather than here, by internal/guest's TestASimulationsInitStringReachesTheRemoteSeam:
+the exact text, loaded as a bare chunk in an environment with no `require`,
+calls through to the guest's registered remote method and gets its result back.
+
+NOT PROVEN, and this is the honest half -- a real simulation running it.
+NOTHING HEADLESS RUNS A SIMULATION:
+
+  --help mentions of "simulation":                     0
+  log mentions across --dump-data, --create, --benchmark: 0
+
+So the last hop needs a client that renders the tips or Factoriopedia GUI.
+
+MEASURED AND NEGATIVE -- the engine does NOT validate the init string at load.
+A second data guest with an unbalanced parenthesis in its init:
+
+  init: remote.call("r3bad", "from_simulation"
+  exit 0
+  Prototype list checksum: 3942962406
+  the mod with the BROKEN init loaded: True
+  init as stored: "remote.call(\"r3bad\", \"from_simulation\""
+
+So "the prototype loads" is no evidence at all that the init will run, which is
+why the published recipe says to test the string on its own.
+
+
+3. THE PERIODIC HOOK  (probe-simulation-and-nth.sh)
+======================================================================
+
+A guest arming 60 and 180 from init, disarming 180 after its third fire, and
+reporting at tick 1200. --create then --benchmark-ticks 1200:
+
+  wired fk_on_nth_tick -> fk.on_nth_tick, every n ticks
+  R3NTH first fire at period 60
+  R3NTH disarmed 180 after 3
+  R3NTH ticks=1200 n60=20 n180=3
+
+1200 / 60 = 20 exactly, so the engine's own scheduling is what fired it. 180
+would have fired 6 times over the same window and fired 3, so the DISARM held
+-- which no arithmetic on one counter could fake. The period is handed back,
+which is what lets one export serve both.

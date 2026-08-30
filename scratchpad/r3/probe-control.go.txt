@@ -1,0 +1,94 @@
+// The r3 probe's CONTROL guest: the READ side of the mod-data channel, and the
+// remote seam a simulation's init string would call into.
+package main
+
+import (
+	"github.com/Techrocket9/fklua/guest/go/fk"
+	"github.com/Techrocket9/fklua/guest/go/fkapi"
+)
+
+const mFromSimulation = 1
+
+func init() {
+	fkapi.AddInterface("r3probe",
+		fkapi.InterfaceMethod{Name: "from_simulation", ID: mFromSimulation})
+}
+
+//go:wasmexport fk_on_call
+func onCall(id, argp, retp uint32) uint32 {
+	if id == mFromSimulation {
+		args := fkapi.ReadDyn(argp).Array
+		got := ""
+		if len(args) > 0 {
+			got = args[0].StrOr("?")
+		}
+		fk.Log("R3PROBE simulation reached the seam: " + got)
+		fkapi.WriteDyn(retp, fkapi.OfString("ok"))
+	}
+	return 0
+}
+
+//go:wasmexport fk_on_init
+func onInit() {
+	// THE READ SIDE: prototypes.mod_data is a LuaCustomTable<string, LuaModData>,
+	// so the handle twin is the cheap way in and the materialising read is the
+	// control. Both are exercised, because what is under test is whether the
+	// blob the data stage emitted is THERE at all.
+	raw, err := fkapi.Prototypes.ModDataRaw()
+	if err != nil {
+		fk.Log("R3PROBE mod_data raw failed: " + err.Error())
+		return
+	}
+	md, err := fkapi.LuaCustomTable{Object: raw}.Get(fkapi.OfString("r3probe-config"))
+	if err != nil {
+		fk.Log("R3PROBE mod_data lookup failed: " + err.Error())
+		return
+	}
+	if !md.Object.Valid() {
+		fk.Log("R3PROBE mod_data has no r3probe-config")
+		return
+	}
+	m := fkapi.LuaModData{Object: md.Object}
+	if ok, _ := m.DataTypeIs("config"); ok {
+		fk.Log("R3PROBE data_type is config")
+	}
+	blob, err := m.Data()
+	if err != nil {
+		fk.Log("R3PROBE data read failed: " + err.Error())
+		return
+	}
+	fk.Log("R3PROBE blob has " + itoa(uint32(len(blob))) + " keys")
+	for _, kv := range blob {
+		v := kv.Val
+		switch v.Tag {
+		case fkapi.TagNumber:
+			fk.Log("R3PROBE   " + kv.Key + " = num " + itoa(uint32(v.Number*1000)) + "/1000")
+		case fkapi.TagString:
+			fk.Log("R3PROBE   " + kv.Key + " = str " + v.Str)
+		case fkapi.TagBool:
+			b := "false"
+			if v.Bool {
+				b = "true"
+			}
+			fk.Log("R3PROBE   " + kv.Key + " = bool " + b)
+		default:
+			fk.Log("R3PROBE   " + kv.Key + " = tag " + itoa(uint32(v.Tag)))
+		}
+	}
+}
+
+func itoa(v uint32) string {
+	if v == 0 {
+		return "0"
+	}
+	var b [10]byte
+	i := len(b)
+	for v > 0 {
+		i--
+		b[i] = byte('0' + v%10)
+		v /= 10
+	}
+	return string(b[i:])
+}
+
+func main() {}

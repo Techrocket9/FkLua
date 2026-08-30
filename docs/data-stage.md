@@ -157,6 +157,64 @@ Three rules follow from that:
 - **No `settings` at the settings stage.** A mod's startup settings are not readable while they are being declared, so `StartupSetting` answers `false` for everything there.
 - **No collector and no persistence.** A data module runs once and dies with the Lua state, so it is compiled `--persist=none` and `-gc=leaking` whatever the control guest uses.
 
+## Sharing one config between the two stages
+
+A mod's two stages are two wasm modules in two Lua states, so a value both of them need has to reach both. There are three channels, and which one you want is decided by WHEN the value is known.
+
+**A config you know when you write the mod goes in a package both guests import.** The data module and the control guest are two `main` packages in ONE Go module (or two crates in one Cargo workspace), so this is an ordinary import and needs no mechanism at all. The one constraint is the reason it works: `fklua mod` refuses a data module that imports `fkapi`, and a control guest cannot import `fkdata`, **so the shared package must import neither**.
+
+```go
+// guest/go/cfg/cfg.go -- imports nothing
+package cfg
+
+type Category struct {
+    Name  string
+    Rungs int
+}
+
+var Categories = []Category{{"mining-speed", 8}, {"lab-speed", 6}}
+
+const SettingPrefix = "my-mod-"
+```
+
+Both `main` packages import `cfg`, and one edit moves both stages together. Writing the table twice is what this replaces, and a disagreement between two copies is a mod that toggles technologies that do not exist.
+
+**A config the data stage COMPUTES goes in a `mod-data` prototype.** When the value depends on a startup setting, or on what other mods defined, the shared package cannot hold it: it is not known until the data stage runs. Factorio's own answer is a prototype whose whole purpose is to carry a block of arbitrary data across into the runtime.
+
+```go
+// the data guest, after it has computed whatever it computed
+fkdata.Extend(fkdata.Obj(
+    fkdata.KVs("type", fkdata.Str("mod-data")),
+    fkdata.KVs("name", fkdata.Str("my-mod-config")),
+    fkdata.KVs("data_type", fkdata.Str("config")),
+    fkdata.KVs("data", fkdata.Obj(
+        fkdata.KVs("rungs", fkdata.Num(8)),
+        fkdata.KVs("label", fkdata.Str("mining-speed")),
+    )),
+))
+```
+
+```go
+// the control guest, at load
+raw, err := fkapi.Prototypes.ModDataRaw()
+if err != nil {
+    return
+}
+md, err := fkapi.LuaCustomTable{Object: raw}.Get(fkapi.OfString("my-mod-config"))
+if err != nil || !md.Object.Valid() {
+    return
+}
+blob, err := fkapi.LuaModData{Object: md.Object}.Data()
+```
+
+`data_type` is a free-form string a mod declares so another mod can find its block, and `DataTypeIs` compares it on the host. The blob is `AnyBasic`: numbers, strings, booleans and nested tables of them, so the guest reads it as tier-2 values rather than as a typed struct. That is the residual, and it is much smaller than encoding a config into a settings string and decoding it back.
+
+Determinism is the data stage's, and it is already settled: every client runs the data stage, and a client whose prototype set differs from the server's is refused at join rather than desyncing. So a blob computed from startup settings is identical on every peer that could join at all, which is exactly the property a control guest branching on it needs.
+
+**A startup setting is readable from both stages and is not a channel.** The data guest reads one with `StartupSetting` and the control guest reads `settings.startup` at runtime, so a value the PLAYER chose needs nothing here. What a setting cannot carry is a value DERIVED from it, which is what sends people to smuggling data through the `order` fields of hidden prototypes. Use `mod-data` for that.
+
+The Rust side of the shared-crate pattern is the same shape and is unverified here: a crate declaring no features is outside the workspace feature-unification hazard that makes the collector a command-line flag rather than a manifest one, but nothing has built it.
+
 ## Keeping your section functions
 
 A data stage is usually a few hundred straight-line prototype definitions, and if you split them across section functions for readability the optimizer will inline those sections back into one. Past a certain size that produces a function Lua cannot parse, because a single jump inside it exceeds what Lua can encode. Packaging catches it and names the function, but the error is easiest to avoid up front: put `//go:noinline` (Go) or `#[inline(never)]` (Rust) on each section function. This is the guest shape most likely to reach that limit; see [Limits a generated guest can reach](lua-limits.md).

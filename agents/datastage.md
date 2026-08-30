@@ -299,6 +299,45 @@ It changes nothing about the ABI, which sorts either way, and nothing about Fact
 
 ---
 
+## Sharing one config with the control stage — the channel, and the probe that proved it
+
+**Two of Q5's three forms were closed before anybody wrote them down, which is why fklua-ports filed the item and three mods solved it independently.**
+
+**Q5-a, a config known at AUTHORING time, is closed by the data stage being a guest.** The two modules are two `main` packages in ONE Go module, so a shared package is an ordinary import. The constraint that makes it work is the reason it is worth stating rather than assuming: `fklua mod` REFUSES a data module that imports `fkapi`, and a control guest cannot import `fkdata`, **so the shared package must import neither** — which is exactly what BetterBeltBalancer's `guest/go/obs/protos` says in its own note, having derived it unaided three times over (`engine`, `skin`, `protos`). Three derivations of one pattern is the report; the gap was that FkLua never wrote it down.
+
+**Q5-b, a config the data stage COMPUTES, is closed by the engine.** `ModData` — prototype type `mod-data`, `data` a `dictionary[string -> AnyBasic]` plus an optional `data_type` — is read at runtime through `LuaPrototypes::mod_data`, and both halves bind at every committed pin.
+
+**PROBED 2026-08-30 ON 2.0.77, AND IT ANSWERS MORE THAN THE DRAFT ASKED.** The draft's recommendation was not to publish the `mod-data` half until somebody had run `--dump-data` over a guest emitting one. That ran, and the read side ran in the same session:
+
+```
+mod-data present in data.raw: True
+entries: ['r3probe-config']
+data_type: config
+data: {"enabled": true, "label": "mining-speed", "nested": {"inner": "yes"}, "rungs": 8, "scale": 0.05}
+```
+
+and then, from the CONTROL guest's `fk_on_init` in a `--create` of the same mod, through `ModDataRaw()` + `Get()` + `LuaModData.Data()`:
+
+```
+R3PROBE data_type is config
+R3PROBE blob has 5 keys
+R3PROBE   enabled = bool true
+R3PROBE   label = str mining-speed
+R3PROBE   nested = tag 6
+R3PROBE   rungs = num 8000/1000
+R3PROBE   scale = num 50/1000
+```
+
+Five keys out, five keys back, the nested table arriving as a map and both numbers exact. **So the channel is proven end to end rather than inferred from the bindings**, which is a stronger position than the draft's recommendation asked for.
+
+**Q5-c, a config selecting COMPILED CODE, is refused and the queue amendment that asked for it is withdrawn.** The ports campaign contains no mention of build tags at all, and the refusal stands on its own terms: a build tag is fixed when the author compiles and a startup setting is chosen by the player, so the two can only ever agree about the DEFAULT.
+
+**It is deliberately NOT an `fklua.toml` key.** A config in the manifest that both guests then have to agree with is Q5's own defect with the second copy moved into a TOML file — and `agents/abi.md` already refused the manifest for the callback seam on that ground, citing Q5 by name. The Go package IS the single source.
+
+**Two residuals, stated.** The Rust shared-crate half is the same shape and is unbuilt here: a crate declaring no features is outside the v2-resolver feature-unification hazard that makes the collector a command-line flag, but "therefore" is not a measurement. And `AnyBasic` means a `mod-data` blob is data rather than a value, so the guest still writes a decoder — much smaller than a base-N string codec, and it is the residual.
+
+The user-facing page is `docs/data-stage.md`, "Sharing one config between the two stages".
+
 ## Open items
 
 - **The golden has a line per engine and both series are recorded**: 2.0.77 and 2.1.16. base's own prototypes move between series, so a hash taken on one says nothing about the other; the mod-set column is what makes the difference legible, since 2.1 bundles `recycler` and 2.0.77 does not. Both arms produce an identical dump from the Go and the Rust guest, and both are deterministic across two runs.

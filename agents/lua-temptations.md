@@ -13,9 +13,9 @@ Binding coverage is essentially total: 4,857 of 4,859 members bind at the 2.1.16
 | Gap | Verdict | Genre it hits | Shape | Cost |
 |---|---|---|---|---|
 | Custom-input event subscription | **BLOCKS** | keybinds, GUI apps, selection tools (9 of 13 mods) | **SHIPPED (2026-08-30)**: a name parameter widening `fk.subscribe` | S |
-| Mod-defined event subscription | **BLOCKS** | cross-mod integrations (LTN-style ecosystems) | third `fk.register` kind | M |
+| Mod-defined event subscription | **SHIPPED (2026-08-30)**: the third `fk.register` kind | cross-mod integrations (LTN-style ecosystems) | `REG_MODEVENT`, payload as one tier-2 value through `fk_on_call` | M |
 | `LuaGuiElement.style = "name"` | **BLOCKS** | any GUI that restyles at runtime | **FIXED (2026-08-30)**: an attribute write whose union would collapse to one handle arm crosses as tier 2 | S |
-| `on_nth_tick` binds but is unfillable | **BLOCKS, silently** | polling mods | **the five handler members are DEFERRED (2026-08-30)**; first-class hook later | S then M |
+| `on_nth_tick` binds but is unfillable | **BOTH HALVES SHIPPED (2026-08-30)**: the five handler members deferred, then `fk.on_nth_tick` | polling mods | one import with two operands, the engine's own shape | S then M |
 | `fk_on_configuration_changed` discards its payload | **BLOCKS an idiom** | per-neighbour compatibility | **SHIPPED (2026-08-30)**: a typed struct in the existing hook, pruned by the export | S-M |
 | `api check` blind to defines | **BLOCKS the gate's promise** | every guest reading a define | wire `UsedDefines` in; leaf-aware define diff | S |
 | GUI at application scale | TEMPTS, hard | GUI applications | `Value` accessors, typed `add`, batched add | S / M / M-L |
@@ -25,11 +25,11 @@ Binding coverage is essentially total: 4,857 of 4,859 members bind at the 2.1.16
 | Line builder duplicated per guest | TEMPTS | every guest | ship `fklog` in both languages | S |
 | No way to inspect a `Value` | TEMPTS | every guest | `Value.Dump` plus a debugging doc | S |
 | Optional-pointer fields force globals | TEMPTS | every guest | builder methods on args structs | M |
-| Custom-table methods lack handle twins | TEMPTS | prototype browsers | lift twin emission into method returns | S |
-| `remote.interfaces` has no point query | TEMPTS | overhauls' guard idiom | point-query member or seam helper | S |
+| Custom-table methods lack handle twins | **SHIPPED (2026-08-30)** | prototype browsers | kind 10, appended after everything so no id moves; 11 members at every pin | S |
+| `remote.interfaces` has no point query | **CLOSED AS A NO-OP (2026-08-30)** | overhauls' guard idiom | the status already answers it; documented, nothing shipped | S doc |
 | Data-stage emit vs the Lua function-length ceiling | TEMPTS | overhaul-scale data stages | split over-long functions, or a named check | M |
-| `migrations/*.lua` | TEMPTS; defer the feature | mods with historical migrations | doctrine now, hook only on demand | S doc |
-| Scenario packaging | small gap | mod-shipped scenarios | `[scenarios.<name>]` manifest key | S |
+| `migrations/*.lua` | **SHIPPED (2026-08-30)**: the audit line and the two caveats | mods with historical migrations | doctrine kept; no hook | S doc |
+| Scenario packaging | **SHIPPED (2026-08-30)** | mod-shipped scenarios | `[scenarios]`, shaped as `[stages]` | S |
 | Simulations, instrument mode, `load()`, Lua libraries, console Lua | OUT OF SCOPE | | doctrine, stated below | S doc |
 
 ## The blocks
@@ -109,7 +109,7 @@ The doctrine: a mod's own state is the guest's heap, and the heap is migrated by
 
 ## Out of scope, with the doctrine stated
 
-- **Simulations** (tips, Factoriopedia, main menu): an `init` string is executed as a console command, so it can never load a compiled module; that is a property of the entry point, not a gap in the compiler. The base game and DLC carry about 352 KB of such inline Lua; mod uptake is thin. FkLua owes this entry point the one-line bridge, so the Lua a mod hand-writes here is a call and not a program: a simulation that lists the mod in `SimulationDefinition.mods` and calls into its remote seam keeps the whole screenplay in the guest. That recipe is assembled from documented pieces and has not been probed end to end; verify before publishing it.
+- **Simulations** (tips, Factoriopedia, main menu): an `init` string is executed as a console command, so it can never load a compiled module; that is a property of the entry point, not a gap in the compiler. The base game and DLC carry about 352 KB of such inline Lua; mod uptake is thin. FkLua owes this entry point the one-line bridge, so the Lua a mod hand-writes here is a call and not a program: a simulation that lists the mod in `SimulationDefinition.mods` and calls into its remote seam keeps the whole screenplay in the guest. **PROBED 2026-08-30 AND PUBLISHED TO EXACTLY WHAT IT PROVED** (`docs/from-lua.md`): the prototype loads on a real 2.0.77 and reaches the dump verbatim, and the init string is executable as a bare chunk with no `require` and REACHES THE SEAM. What is NOT proven is a real simulation running it -- nothing headless runs one, so the last half needs a graphical client -- and the engine does NOT validate the init string at load, measured, so a mod that loads says nothing about whether its simulation will run.
 - **Scenarios**: a scenario's `control.lua` is a full control stage, and the base game's own convention is a one-line require shim into the mod's tree, which is exactly the shape the packager already generates for the mod root. This is a packaging gap (a manifest key placing a generated shim under `scenarios/<name>/`), cost S, and low priority: a third of one percent of the portal ships scenarios, and the flagship scenario projects have migrated to mod form.
 - **Instrument mode**: it injects Lua into other mods' states and disables multiplayer; an FkLua guest's program is not in its Lua state, so a debugger for it is a Go or Rust debugger. One sentence in the docs.
 - **`load()` and published-Lua plugin protocols**: a cross-mod contract may be a protocol, not a program. The remote seam in both directions is the sanctioned surface; a mod whose extension point is Lua source cannot host an FkLua guest, and one shipped port dropped exactly such a mechanism. Say the loss out loud, and recommend data-payload protocols (the `mod_data` reads bind) to anyone designing one. The audited case of user-typed Lua (a formula bar, a Lua-syntax import format) is a bounded parser reimplementation, with the import case costing interoperability with strings users already share.
@@ -124,15 +124,16 @@ Recorded because absence of a gap is a result too: combat and unit AI (compound 
 
 1. **The event-delivery round** (unblocks genres, mostly S): the subscribe name widening plus the corrected log sentence; defer the five unfillable handler members under a new census reason; the `style` union write fix; the configuration-changed payload; the defines wiring for `api check`.
 2. **The GUI-and-hands round** (retires the widest temptations): `Value` accessors; typed args for the four variant-defeated members; description prose into doc comments and docs rendering; `fklog` and `Value.Dump`; the docs relocation (rules, debugging, randomness, the retention note, the flib mapping table).
-3. **The seam round** (M items with designs in hand): the third register kind for runtime event ids; the first-class periodic hook; the custom-table method twins and the remote point query; the scenario shim key; the migrations audit line and the guest-notes rows (adopt ordering, build stamp versus version).
+3. **The seam round** (M items with designs in hand): the third register kind for runtime event ids; the first-class periodic hook; the custom-table method twins and the remote point query; the scenario shim key; the migrations audit line and the guest-notes rows (adopt ordering, build stamp versus version). **SHIPPED 2026-08-30**, with the remote point query closed as a documented no-op and this file's own "zero instances" claim about the variant-group detector disproved by the detector's first run.
 4. **The long levers** (L, schedule on demand): the bulk attribute read, which decides the polling genre; the batched GUI add, which decides the GUI-application genre at scale; the data-stage function splitter, which decides the overhaul genre's data half.
 
 The census cannot see most of what this survey found: a member that binds and cannot fire, a hook that discards its payload, a check that is blind to a whole id space, and every ergonomic temptation are all invisible to a bound-versus-deferred count. Where a new capability lands, the census should grow the row that would have caught its absence, which is this project's own standing rule about zeros nobody writes down.
 
 ## The queue (2026-08-26)
 
-The four rounds above are executable work. **ROUNDS 1 AND 2 ARE SHIPPED
-(2026-08-30)** and the other two are queued. Amendments since the survey was written, folded
+The four rounds above are executable work. **ROUNDS 1, 2 AND 3 ARE SHIPPED
+(2026-08-30)**, and round 4 is queued less Q5, whose doctrine shipped with
+round 3. Amendments since the survey was written, folded
 into their rounds:
 
 - **Round 1 SHIPPED on 2026-08-30**, and its record is CLAUDE.md's "The
@@ -214,17 +215,58 @@ into their rounds:
   did, `ed025ff06828` -> `be51c0c62aca`, identically in both languages, because
   the typed block is part of the wire and is folded into the digest --
   **so a downstream consumer needs a rebuild, not a re-pin.**
-- **Round 3** gains the verify-then-publish of the simulation bridge recipe
-  (`SimulationDefinition.mods` plus a remote call into the seam; assembled
-  from documented pieces, never probed end to end), and the diff blind spot
-  the 2.1.17 bump measured: `api diff` walks a method's top-level parameters
-  and never its variant groups, so a method gaining its first group or losing
-  its last would flip its binding shape between dyn and positional silently.
-  Zero instances existed in any shipped pair; the detector belongs beside the
-  takes-table flip the diff already reports.
-- **Round 4** gains Q5, the build-time configuration channel (a config written
-  once reaching both a build tag and a startup setting), which the ports
-  campaign left open.
+- **Round 3 SHIPPED on 2026-08-30**, and its record is CLAUDE.md's "The seam
+  round". All seven of its items landed plus the folded 4d work, and three of
+  them landed in a shape the queue did not describe:
+  - the **third `fk.register` kind** for a mod-defined event, `REG_MODEVENT`,
+    with `RegisterModEvent`/`RegisterModEventNamed` in both languages and the
+    payload crossing as one tier-2 value through `fk_on_call`. It is the
+    OPPOSITE answer from round 1's custom input and for a stated reason: there
+    the register shape would have pruned the payload descriptor out of the mod
+    that needs it, and here the payload is undescribed so there is nothing to
+    prune. The four spellings of the three kinds are a gate now;
+  - the **first-class periodic hook**, `fk.on_nth_tick(n, arm)` -- one import
+    with two operands, which is `script.on_nth_tick(tick, handler)`'s own
+    shape, rather than the arm/disarm PAIR this file's frame would otherwise
+    have suggested. Several periods, the fired one handed back, the armed set
+    in `storage` and re-armed SORTED. Verified in a real 2.0.77: 1,200 ticks,
+    20 fires at 60, 3 at 180 and then a disarm that held;
+  - the **method half of the custom-table handle twin**, kind 10, appended
+    after everything so no member id moved. `custom_table_handle_methods`
+    0 -> 11 at all five pins;
+  - the **scenario shim key**, `[scenarios]`, shaped as `[stages]` is;
+  - the **migrations audit line** and the two guest-notes caveats;
+  - **`remote.interfaces` gets NO point query**, which is this file's own
+    invitation taken: `fk.remote_call` already answers with a status, so the
+    guard idiom's whole reason does not exist here and a member would have
+    been FAKED over a plain dictionary. Documented, nothing shipped;
+  - the **variant-group detector**, and **THIS FILE'S OWN CLAIM ABOUT IT WAS
+    WRONG.** "Zero instances existed in any shipped pair" is false:
+    `LuaSimulation::get_widget_position` is `(data, data2, type)` with no
+    variant groups at 2.1.14 and `(type)` with SIXTEEN at 2.1.16, so its whole
+    argument encoding flipped inside a committed pair -- the very boundary
+    round 2 recorded `typed_arg_members` going 4 -> 5 across without connecting
+    it to the diff. The instance is pinned by name; an expectation of zero
+    would have been wrong on the day it was written;
+  - the **simulation bridge**, verified to exactly the extent it can be. The
+    prototype loads (a `factoriopedia_simulation` with `mods` and `init`
+    reaches the dump verbatim on 2.0.77) and the init string is executable and
+    REACHES THE SEAM (the exact text, as a bare chunk with no `require`).
+    **Nothing headless runs a simulation** -- no flag, no mention in any log --
+    so the last half needs a graphical client and the recipe is published
+    saying so. And **the engine does not validate the init string at load**,
+    measured with an unbalanced parenthesis, so a mod that loads is no evidence
+    its simulation will run.
+- **Round 4** gains Q5, and **THE AMENDMENT'S PHRASING IS WITHDRAWN.** It read
+  "a config written once reaching both a build tag and a startup setting"; the
+  ports campaign contains no mention of build tags anywhere, and Q5's own text
+  is about one config reaching two STAGES, both at load, neither of them a
+  compile. Two of its three forms were already closed -- one by the data stage
+  becoming a guest, one by the `mod-data` prototype -- and the doctrine SHIPPED
+  in round 3, in `docs/data-stage.md`. The open probe that draft named is run:
+  a data guest's `mod-data` prototype is accepted, lands in the dump, and is
+  read back at runtime by a control guest in the same session. What is left of
+  round 4 is 4a's bulk attribute read and 4b's batched GUI add.
 
 Execution notes for whoever picks a round up: each round is a worktree off
 master with the house gates (build the lua52f oracle first or thirty tests
