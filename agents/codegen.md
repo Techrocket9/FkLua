@@ -122,9 +122,51 @@ This matters beyond code size: the M0 kernels were hand-written in the forwarded
 
 **What the scan does not pair, and what that is worth.** Three constructs carry an `sBx` jump the emitter never writes as a `goto`: a counted loop's `FORPREP`/`FORLOOP` over the `for` body, the implicit jump over a multi-line `if ... then ... end` (a `br_if` that copies a value, and a loop guard's seed), and a branch-table chain. All three are bounded by construction — a guard seed and a value copy are a handful of statements, and a counted loop is a wasm loop, which is wrapped in a block whose exit branch the scan *does* pair. Measured across those 2,713 functions, the largest `sBx` span in any function whose goto-to-label distance was under 200 bytes is **42 instructions**, three orders of magnitude below the limit.
 
-**The remedy the message gives is `//go:noinline` in Go and `#[inline(never)]` in Rust**, on the boundaries the author already thinks of as sections. Proven on the reproduction: twenty section functions of sixteen prototypes each are inlined into one whose jump crosses 1,556,741 bytes and is refused, and the same source with the pragmas packages. **The size win reported downstream does not generalise, and the message says so**: that guest came out 27% smaller once its six sections stopped being inlined, and this reproduction goes 0.2% the *other* way. Both are real; it is a property of a particular guest's shape rather than a rule, and an error message that promised it would be wrong most of the time.
+**AND WHAT IT DID NOT PAIR UNTIL 2026-08-30 IS A CHAIN, WHICH IS A DIFFERENT KIND OF MISS.** `::A::` immediately followed by a BARE `goto B` — nothing between the label and the jump — does not produce two independent jumps. `luaK_patchtohere` puts the jumps pending at A into `fs->jpc`; the very next instruction emitted is the relaying jump, and `luaK_jump` begins by taking `fs->jpc` and `luaK_concat`ing it onto the new jump, so the two lists MERGE and every jump in them is patched to B's eventual target. A ladder `A → B → C → L` is therefore ONE jump from every entry point straight to `L`, and Lua measures it that way. Measured under `bin/lua52f` (`scratchpad/r4/RESULTS-jumplimit.txt`), every hop 50,000 instructions against a limit of 131,071:
 
-**Splitting the function in the emitter instead is designed and not built.** See the `function split` row in `CLAUDE.md`'s deliverables table for the shape, the costs and why it is a milestone rather than a follow-up.
+| | |
+|---|---|
+| bare ladder, 2 hops × 50,000 | loads, returns 100,000 |
+| bare ladder, 4 hops × 50,000 | **refused** — control structure too long |
+| bare ladder, 10 hops × 50,000 | **refused** |
+| **separated** ladder, 10 hops × 50,000 | **loads**, returns 500,000 |
+
+Every goto-to-label distance in all four programs is 50,003 bytes, so the pre-fix scan measured one hop and passed the three refused ones. `maxJumpSpan` resolves the chain now — `labelIndex` records what each label relays to, looking past blank lines, comments and further labels because none of them emits an instruction, and `resolveChain` follows it with a visited set so `::A:: goto A` terminates. **The blind spot was latent and not live**: three real guests at `-opt=0`, 2 and 3 emit zero instances of that shape. It stopped being optional the moment the relay below started emitting it deliberately.
+
+### The relay — a too-long jump becomes a ladder of short ones
+
+**Since 2026-08-30 an over-long jump is RELAYED before anything is refused**, and only what cannot be relayed is refused. `relayOrRefuse` in the same file is the shipping path: check, and on failure relay, re-check and accept, and on failure again return the original error.
+
+The transform inserts, at function-body level, a station of five lines and points the original `goto` at it:
+
+```lua
+  goto LTs3            -- the guard: the straight-line path steps over the station
+  ::LT3::              -- the trampoline the previous hop lands on
+  if 0 ~= 0 then end   -- the separating statement
+  goto LT4             -- the next hop, or the original label
+  ::LTs3::
+```
+
+Both extra lines are load-bearing and neither is decoration. **The separator is what makes the ladder legal rather than a workaround** — without it the hops chain and the whole ladder is patched as one jump, which is the finding above; `0 ~= 0` is chosen because it names nothing (a guest function may have no locals, no memory, no globals and no scratch registers) and because Lua 5.2 does not fold it: `luaK_posfix` sends `OPR_NE` to `codecomp` and `constfolding` is reached only from `codearith`, so it really does emit an `OP_EQ` and `luaK_code` discharges the pending list on the way past. **The guard is what stops control falling into the station**, which on the dominant shape would take the jump to the trap; `TestATrampolineIsNeverFallenInto` asserts it as a TEXT property, because a missing guard costs an answer on one fixture and is invisible on every fixture whose straight-line path happens not to reach that far.
+
+| decision | why |
+|---|---|
+| runs on the EMITTED TEXT, where the check already runs | renumbers nothing, so `analysis.Plan`, `Wrap`, `Align`, the counted-loop recogniser, the loop guards and every `lg`/`lw`/`fk` name spelled from a step index are untouched by construction |
+| relay, not outline | the recorded outlining design split at a point where the operand AND control stacks are empty, and **that point is by construction outside every jump's span** — a wasm branch targets an ENCLOSING construct, so control depth is ≥ 1 at every step strictly inside a span. Measured on the reproduction: 4 such points, all four the prologue and the tail |
+| hops at HALF the threshold | stations are planned against the ORIGINAL offsets and each insertion pushes what follows along by ~80 bytes, so the emitted hops are a little wider than the planned ones. The slack is four orders of magnitude more than that drift can use, and `relayOrRefuse` re-measures regardless |
+| stations only at DEPTH 1, never before a block closer, never inside the prologue | a `goto` may leave a block but never enter one, so a body-level label is the only one every jump can reach; inserting before `end`/`else`/`elseif`/`until` would put the station inside the block being closed; and a station between two `local`s would relay a jump INTO a local's scope, which is Invariant B seen from the other side and which Lua rejects outright |
+| both directions | Lua's test is `abs(offset)`, so a loop back edge over an enormous body gets the same ladder with the sign flipped |
+| plan in order of first appearance, greedy over line offsets | the transform is a pure function of the emitted text, so two builds of one module produce the same bytes |
+
+**Measured.** One fixture emitted twice: at a raised threshold it is 2,300,141 bytes and Lua refuses it in its own words; at the shipped threshold it is relayed to a widest span of 327,706 bytes, loads, and **returns the same answer the direct one does** (`TestARelayedJumpLoadsWhereTheDirectOneDoesNot`, `TestARelayedFunctionComputesTheSameAnswer`). **It is a byte-for-byte no-op on everything this repo emits** — 15 guests at `-opt=3`, 1,979 function texts, nothing changed — which is what says the feature costs the ordinary path nothing (`TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay`).
+
+**And a no-op audit is a statement about the early-out, not about the transform**, so the threshold is also driven DOWN until the relay fires on the whole corpus and every result is handed to the real parser: **19 emissions, 15 relayed, 1,227 stations, every one parses** (`TestARelayedRealGuestStillParses`). That is the only place the three insertion-point rules meet the shapes they were written for — nested `if`, `do return end`, branch tables, loop guards, spilled frames — because every fixture that fires the relay directly is a four-line hand-written WAT. Red-proven: remove the block-closer rule and eleven guests emit Lua that does not parse, while nothing else in the suite notices. It asks whether the chunk PARSES and not whether it runs, since a guest chunk calls `fk_import` for host functions no host-side harness supplies; reaching that call is proof the whole chunk compiled, and the first draft of the test reported all twelve guests broken for missing it.
+
+**What it does NOT solve, said plainly.** A single basic block longer than the limit, with no body-level statement between the goto and its label to hang a station on. The ladder relays a jump; it cannot shorten a distance the intervening code genuinely has to cover. That shape has never been observed — the failure this feature exists for is a merged trap block reached by `br_if` from everywhere, where every branch goes to one label and the ladder relays all of them — and the check is the backstop for it.
+
+**The remedy the message gives is `//go:noinline` in Go and `#[inline(never)]` in Rust**, on the boundaries the author already thinks of as sections, and it is now what is left when the relay could not help rather than the first answer. Proven on the reproduction: twenty section functions of sixteen prototypes each are inlined into one whose jump crosses 1,556,741 bytes and is refused, and the same source with the pragmas packages. **The size win reported downstream does not generalise, and the message says so**: that guest came out 27% smaller once its six sections stopped being inlined, and this reproduction goes 0.2% the *other* way. Both are real; it is a property of a particular guest's shape rather than a rule, and an error message that promised it would be wrong most of the time.
+
+`JumpSpanError` is a TYPE rather than an `fmt.Errorf` string, because `relayOrRefuse` has to tell "this function would have been refused, try the relay" apart from any other failure, and a caller further out may want the same distinction without matching on prose.
 
 ### Every identifier the emitter emits, and why the table is exhaustive
 
@@ -147,10 +189,12 @@ Each family is indexed by a counter of its own, and **no two of those counters a
 | **loop guard shard table** | `ls41_0` | **STEP index**, base | function |
 | counted-loop control variable | `fk41` | **STEP index** | the `for` |
 | branch label | `::L3::` | label index | Lua's label namespace |
+| **relay trampoline label** | `::LT3::` | **per-function TRAMPOLINE index** | Lua's label namespace |
+| **relay skip label** | `::LTs3::` | **per-function TRAMPOLINE index** | Lua's label namespace |
 
 `MEMMAX` was in that fixed row and is gone. It held a compile-time constant read at exactly ONE site, the `memory.grow` lowering, which prints it as a numeral now — a chunk local spent for the life of every guest to save nothing at runtime. Its slot is what `SHBOUND` spends; see the budget section below.
 
-**The last five are the dangerous ones**, because a step index is a dense small number counted per function and so collides with any other dense small number. The guard's names were `g41`/`w41_0` until 2026-08-01, and `g%d` is also a module global: a guarded loop whose header step index fell below the module's global count declared a *function-scoped* local named `g0`, which shadowed the global for the whole function — `global.set` wrote the flag, `global.get` read a boolean. In TinyGo output `g0` is the **shadow-stack pointer**. See [`agents/optimizer.md`](optimizer.md), "The guard's names were in the globals' namespace".
+**The last seven are the dangerous ones**, because a step index — and a trampoline index, and a label index — is a dense small number counted per function and so collides with any other dense small number. `LT3` against the branch label `L3` is one character away and `LTs3` against the guard's `ls3_0` is one case change away, which is why the relay's two families were added to `nameFamilies` before the first one was emitted rather than after the first collision. The guard's names were `g41`/`w41_0` until 2026-08-01, and `g%d` is also a module global: a guarded loop whose header step index fell below the module's global count declared a *function-scoped* local named `g0`, which shadowed the global for the whole function — `global.set` wrote the flag, `global.get` read a boolean. In TinyGo output `g0` is the **shadow-stack pointer**. See [`agents/optimizer.md`](optimizer.md), "The guard's names were in the globals' namespace".
 
 **The rule: a family indexed by a step index owns a prefix nothing else uses.** `lg`/`lw`/`ls` and `fk%d` are those prefixes. Adding a lowering that names something new means adding it to `nameFamilies` in `internal/luagen/loopguard_test.go`, which enumerates every family above over a generous range of every index and demands the sets be pairwise disjoint — a proof over every module rather than over the guests that happen to be checked in. Prefix-by-eye is not enough: `g` against `gh` would pass an eyeball and collide on an i64 global.
 

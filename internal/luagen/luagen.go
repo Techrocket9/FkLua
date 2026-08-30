@@ -352,9 +352,24 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	if err := checkChunkLocals(src, m); err != nil {
 		return "", err
 	}
+	// Each function is measured against Lua's sBx limit, and one that is over it
+	// has its jump RELAYED through a ladder of trampolines before anything is
+	// refused -- see funclimit.go, where the relay lives along with the theorem
+	// that retired the outlining design it replaces. The relay rewrites one
+	// function's text in place, so every span after it shifts by whatever was
+	// inserted; nothing outside that function moves, and no local is added, so
+	// checkChunkLocals above stays valid.
+	delta := 0
 	for _, e := range spans {
-		if err := checkJumpSpan(e.name, src[e.start:e.end]); err != nil {
+		start, end := e.start+delta, e.end+delta
+		body := src[start:end]
+		fixed, err := relayOrRefuse(e.name, body)
+		if err != nil {
 			return "", err
+		}
+		if fixed != body {
+			src = src[:start] + fixed + src[end:]
+			delta += len(fixed) - len(body)
 		}
 	}
 	return src, nil

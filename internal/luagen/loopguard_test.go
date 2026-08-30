@@ -777,6 +777,16 @@ func nameFamilies() []nameFamily {
 		{"a branch label (label index)", seq(func(i int) string {
 			return labelName(ir.Label(i))
 		})},
+		// The relay's two families, both indexed by a per-function trampoline
+		// counter -- a dense small number, so the same hazard class as a step
+		// index, and `LT3` against a branch label `L3` would be exactly the
+		// mistake the loop guard's `g%d` was. See funclimit.go.
+		{"a relay trampoline label (trampoline index)", seq(func(i int) string {
+			return relayTrampolineName(i)
+		})},
+		{"a relay skip label (trampoline index)", seq(func(i int) string {
+			return relaySkipName(i)
+		})},
 		{"a scratch register", func() []string {
 			return []string{"t0", "t1", "t2", "t3"}
 		}},
