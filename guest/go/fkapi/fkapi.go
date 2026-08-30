@@ -70090,6 +70090,50 @@ type EntryUint32Uint32 struct {
 	Val uint32
 }
 
+// EntryStringModChangeData is one entry of a dictionary. A SLICE of pairs rather than a
+// Go map, for either of two reasons depending on where it appears.
+// A struct field crosses in BOTH directions, and Go randomizes map
+// iteration -- which in a lockstep game reaches the engine as a
+// per-client ordering, i.e. a desync. And a tier-2 Value key holds
+// slices, so it could not be a Go map key at all.
+//
+// DO NOT BUILD A GO MAP FROM IT FOR LOOKUP, which is what this
+// comment used to advise. Measured by fklua-ports on
+// force.technologies: one read is 14,544 B of guest heap and the
+// advised map adds 12,512 B on top -- 27,056 B, WORSE than the
+// 24,576 B Go map the slice replaced. For a point lookup use the
+// <Name>Raw accessor, which returns the LuaCustomTable HANDLE and
+// costs one Get(key); for a scan, scan the slice, which allocates
+// nothing. The order you send is the order the game sees, and the
+// order you RECEIVE is the host's pairs() order -- deliberately
+// unpromised, so sort by index where order matters.
+type EntryStringModChangeData struct {
+	Key string
+	Val ModChangeData
+}
+
+// EntryStringSliceEntryStringString is one entry of a dictionary. A SLICE of pairs rather than a
+// Go map, for either of two reasons depending on where it appears.
+// A struct field crosses in BOTH directions, and Go randomizes map
+// iteration -- which in a lockstep game reaches the engine as a
+// per-client ordering, i.e. a desync. And a tier-2 Value key holds
+// slices, so it could not be a Go map key at all.
+//
+// DO NOT BUILD A GO MAP FROM IT FOR LOOKUP, which is what this
+// comment used to advise. Measured by fklua-ports on
+// force.technologies: one read is 14,544 B of guest heap and the
+// advised map adds 12,512 B on top -- 27,056 B, WORSE than the
+// 24,576 B Go map the slice replaced. For a point lookup use the
+// <Name>Raw accessor, which returns the LuaCustomTable HANDLE and
+// costs one Get(key); for a scan, scan the slice, which allocates
+// nothing. The order you send is the order the game sees, and the
+// order you RECEIVE is the host's pairs() order -- deliberately
+// unpromised, so sort by index where order matters.
+type EntryStringSliceEntryStringString struct {
+	Key string
+	Val []EntryStringString
+}
+
 // Nested-container codecs. A container's element or a dictionary's
 // VALUE can itself be a container -- dictionary[string -> dictionary[
 // string -> boolean]] is UtilityConstants's own
@@ -70259,6 +70303,38 @@ func valCtnSliceFloat64(v []float64) Value {
 		a[i] = OfNumber(float64(v[i]))
 	}
 	return OfArray(a...)
+}
+
+func decCtnSliceEntryStringString(p *byte) []EntryStringString {
+	h := unsafe.Slice(p, 8)
+	base := uintptr(*(*uint32)(unsafe.Pointer(&h[0])))
+	n := int(*(*uint32)(unsafe.Pointer(&h[4])))
+	v := make([]EntryStringString, n)
+	for i := 0; i < n; i++ {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(base+uintptr(i)*16)), 16)
+		v[i] = EntryStringString{Key: getStr(&d[0]), Val: getStr(&d[8])}
+	}
+	return v
+}
+
+func encCtnSliceEntryStringString(p *byte, v []EntryStringString) {
+	h := unsafe.Slice(p, 8)
+	q := fkAlloc(uint32(len(v)) * 16)
+	for i := range v {
+		d := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(q)+uintptr(i)*16)), 16)
+		putStr(&d[0], v[i].Key)
+		putStr(&d[8], v[i].Val)
+	}
+	*(*uint32)(unsafe.Pointer(&h[0])) = q
+	*(*uint32)(unsafe.Pointer(&h[4])) = uint32(len(v))
+}
+
+func valCtnSliceEntryStringString(v []EntryStringString) Value {
+	m := make([]KeyValue, len(v))
+	for i := range v {
+		m[i] = KeyValue{Key: OfString(v[i].Key), Val: OfString(v[i].Val)}
+	}
+	return OfMap(m...)
 }
 
 // SignalID mirrors the API type of the same name, laid out to match the
@@ -102285,6 +102361,164 @@ func (v ScriptRaisedTeleported) ToValue() Value {
 	return OfMap(kv...)
 }
 
+// ConfigurationChangedData mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type ConfigurationChangedData struct {
+	OldVersion                *string
+	NewVersion                *string
+	ModChanges                []EntryStringModChangeData
+	ModStartupSettingsChanged bool
+	MigrationApplied          bool
+	Migrations                []EntryStringSliceEntryStringString
+}
+
+func (v ConfigurationChangedData) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 44)
+	for i := range d {
+		d[i] = 0
+	}
+	if v.OldVersion != nil {
+		d[0] = 1
+		putStr(&d[4], (*v.OldVersion))
+	}
+	if v.NewVersion != nil {
+		d[12] = 1
+		putStr(&d[16], (*v.NewVersion))
+	}
+	pModChanges := fkAlloc(uint32(len(v.ModChanges)) * 32)
+	for i := range v.ModChanges {
+		e := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pModChanges)+uintptr(i)*32)), 32)
+		putStr(&e[0], v.ModChanges[i].Key)
+		v.ModChanges[i].Val.encodeAt(&e[8])
+	}
+	*(*uint32)(unsafe.Pointer(&d[24])) = pModChanges
+	*(*uint32)(unsafe.Pointer(&d[28])) = uint32(len(v.ModChanges))
+	*(*bool)(unsafe.Pointer(&d[32])) = v.ModStartupSettingsChanged
+	*(*bool)(unsafe.Pointer(&d[33])) = v.MigrationApplied
+	pMigrations := fkAlloc(uint32(len(v.Migrations)) * 16)
+	for i := range v.Migrations {
+		e := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(pMigrations)+uintptr(i)*16)), 16)
+		putStr(&e[0], v.Migrations[i].Key)
+		encCtnSliceEntryStringString(&e[8], v.Migrations[i].Val)
+	}
+	*(*uint32)(unsafe.Pointer(&d[36])) = pMigrations
+	*(*uint32)(unsafe.Pointer(&d[40])) = uint32(len(v.Migrations))
+}
+
+func decodeConfigurationChangedData(p *byte) ConfigurationChangedData {
+	var v ConfigurationChangedData
+	d := unsafe.Slice(p, 44)
+	if d[0] != 0 {
+		x := getStr(&d[4])
+		v.OldVersion = &x
+	}
+	if d[12] != 0 {
+		x := getStr(&d[16])
+		v.NewVersion = &x
+	}
+	{
+		base := uintptr(*(*uint32)(unsafe.Pointer(&d[24])))
+		n := int(*(*uint32)(unsafe.Pointer(&d[28])))
+		v.ModChanges = make([]EntryStringModChangeData, n)
+		for i := 0; i < n; i++ {
+			e := unsafe.Slice((*byte)(unsafe.Pointer(base+uintptr(i)*32)), 32)
+			v.ModChanges[i] = EntryStringModChangeData{Key: getStr(&e[0]), Val: decodeModChangeData(&e[8])}
+		}
+	}
+	v.ModStartupSettingsChanged = *(*bool)(unsafe.Pointer(&d[32]))
+	v.MigrationApplied = *(*bool)(unsafe.Pointer(&d[33]))
+	{
+		base := uintptr(*(*uint32)(unsafe.Pointer(&d[36])))
+		n := int(*(*uint32)(unsafe.Pointer(&d[40])))
+		v.Migrations = make([]EntryStringSliceEntryStringString, n)
+		for i := 0; i < n; i++ {
+			e := unsafe.Slice((*byte)(unsafe.Pointer(base+uintptr(i)*16)), 16)
+			v.Migrations[i] = EntryStringSliceEntryStringString{Key: getStr(&e[0]), Val: decCtnSliceEntryStringString(&e[8])}
+		}
+	}
+	return v
+}
+
+// ToValue renders ConfigurationChangedData as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v ConfigurationChangedData) ToValue() Value {
+	kv := make([]KeyValue, 0, 6)
+	if v.OldVersion != nil {
+		kv = append(kv, KeyValue{Key: OfString("old_version"), Val: OfString((*v.OldVersion))})
+	}
+	if v.NewVersion != nil {
+		kv = append(kv, KeyValue{Key: OfString("new_version"), Val: OfString((*v.NewVersion))})
+	}
+	if v.ModChanges != nil {
+		m := make([]KeyValue, len(v.ModChanges))
+		for i := range v.ModChanges {
+			m[i] = KeyValue{Key: OfString(v.ModChanges[i].Key), Val: v.ModChanges[i].Val.ToValue()}
+		}
+		kv = append(kv, KeyValue{Key: OfString("mod_changes"), Val: OfMap(m...)})
+	}
+	kv = append(kv, KeyValue{Key: OfString("mod_startup_settings_changed"), Val: OfBool(v.ModStartupSettingsChanged)})
+	kv = append(kv, KeyValue{Key: OfString("migration_applied"), Val: OfBool(v.MigrationApplied)})
+	if v.Migrations != nil {
+		m := make([]KeyValue, len(v.Migrations))
+		for i := range v.Migrations {
+			m[i] = KeyValue{Key: OfString(v.Migrations[i].Key), Val: valCtnSliceEntryStringString(v.Migrations[i].Val)}
+		}
+		kv = append(kv, KeyValue{Key: OfString("migrations"), Val: OfMap(m...)})
+	}
+	return OfMap(kv...)
+}
+
+// ModChangeData mirrors the API type of the same name, laid out to match the
+// wire exactly: fields at fixed offsets, an optional as a pointer.
+type ModChangeData struct {
+	OldVersion *string
+	NewVersion *string
+}
+
+func (v ModChangeData) encodeAt(p *byte) {
+	d := unsafe.Slice(p, 24)
+	for i := range d {
+		d[i] = 0
+	}
+	if v.OldVersion != nil {
+		d[0] = 1
+		putStr(&d[4], (*v.OldVersion))
+	}
+	if v.NewVersion != nil {
+		d[12] = 1
+		putStr(&d[16], (*v.NewVersion))
+	}
+}
+
+func decodeModChangeData(p *byte) ModChangeData {
+	var v ModChangeData
+	d := unsafe.Slice(p, 24)
+	if d[0] != 0 {
+		x := getStr(&d[4])
+		v.OldVersion = &x
+	}
+	if d[12] != 0 {
+		x := getStr(&d[16])
+		v.NewVersion = &x
+	}
+	return v
+}
+
+// ToValue renders ModChangeData as the tier-2 table the engine expects, so a
+// union-typed field can be filled from the typed struct instead of from
+// hand-written key strings. An absent optional is omitted.
+func (v ModChangeData) ToValue() Value {
+	kv := make([]KeyValue, 0, 2)
+	if v.OldVersion != nil {
+		kv = append(kv, KeyValue{Key: OfString("old_version"), Val: OfString((*v.OldVersion))})
+	}
+	if v.NewVersion != nil {
+		kv = append(kv, KeyValue{Key: OfString("new_version"), Val: OfString((*v.NewVersion))})
+	}
+	return OfMap(kv...)
+}
+
 // Event payload readers. fk_on_event is handed an id and a pointer;
 // switch on the id and call the matching reader.
 
@@ -103162,6 +103396,23 @@ func ReadScriptRaisedSetTiles(p uint32) ScriptRaisedSetTiles {
 
 func ReadScriptRaisedTeleported(p uint32) ScriptRaisedTeleported {
 	return decodeScriptRaisedTeleported((*byte)(unsafe.Pointer(uintptr(p))))
+}
+
+// ReadConfigurationChangedData decodes what script.on_configuration_changed handed the
+// hook. fk_on_configuration_changed is called with a pointer into the
+// host's event buffer, which lives for exactly this dispatch, so the
+// decoder copies every string and slice out of it.
+//
+// A guest that exports fk_on_configuration_changed WITHOUT a parameter is
+// unchanged: an extra argument to a wasm function of no parameters is
+// discarded by the generated Lua, so the no-argument form still works and
+// still means what it meant.
+//
+// ModChanges is the one most guests want -- one entry per mod ADDED,
+// REMOVED or moved version, keyed by mod name, with OldVersion nil for an
+// addition and NewVersion nil for a removal.
+func ReadConfigurationChangedData(p uint32) ConfigurationChangedData {
+	return decodeConfigurationChangedData((*byte)(unsafe.Pointer(uintptr(p))))
 }
 
 // Event ids. Per-build, like member ids: regenerated with the table

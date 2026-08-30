@@ -66477,6 +66477,36 @@ pub fn val_ctn_vec_f64(v: &Vec<f64>) -> Value {
     Value::Array(a)
 }
 
+pub fn dec_ctn_map_luastr_luastr(d: &[u8]) -> BTreeMap<LuaStr, LuaStr> {
+    let base = rd_u32(&d[..], 0) as usize;
+    let n = rd_u32(&d[..], 4) as usize;
+    let mut v = BTreeMap::new();
+    for i in 0..n {
+        let s = unsafe { core::slice::from_raw_parts((base + i * 16) as *const u8, 16) };
+        v.insert(get_str(&s[..], 0), get_str(&s[..], 8));
+    }
+    v
+}
+
+pub fn enc_ctn_map_luastr_luastr(d: &mut [u8], v: &BTreeMap<LuaStr, LuaStr>) {
+    let q = galloc((v.len() * 16) as u32);
+    for (i, (k, e)) in v.iter().enumerate() {
+        let s = unsafe { core::slice::from_raw_parts_mut((q as usize + i * 16) as *mut u8, 16) };
+        put_str(&mut s[..], 0, k.as_bytes());
+        put_str(&mut s[..], 8, e.as_bytes());
+    }
+    wr_u32(&mut d[..], 0, q);
+    wr_u32(&mut d[..], 4, v.len() as u32);
+}
+
+pub fn val_ctn_map_luastr_luastr(v: &BTreeMap<LuaStr, LuaStr>) -> Value {
+    let mut m: Vec<(Value, Value)> = Vec::new();
+    for (k, e) in v.iter() {
+        m.push((Value::Str(k.clone()), Value::Str(e.clone())));
+    }
+    Value::Map(m)
+}
+
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct SignalID {
@@ -96502,6 +96532,154 @@ impl ScriptRaisedTeleported {
     }
 }
 
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
+pub struct ConfigurationChangedData {
+    pub old_version: Option<LuaStr>,
+    pub new_version: Option<LuaStr>,
+    pub mod_changes: BTreeMap<LuaStr, ModChangeData>,
+    pub mod_startup_settings_changed: bool,
+    pub migration_applied: bool,
+    pub migrations: BTreeMap<LuaStr, BTreeMap<LuaStr, LuaStr>>,
+}
+
+impl ConfigurationChangedData {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..44].iter_mut() { *b = 0; }
+        if let Some(v) = &self.old_version {
+            d[0] = 1;
+            put_str(&mut d[..], 4, v.as_bytes());
+        }
+        if let Some(v) = &self.new_version {
+            d[12] = 1;
+            put_str(&mut d[..], 16, v.as_bytes());
+        }
+        let p = galloc((self.mod_changes.len() * 32) as u32);
+        for (i, (k, v)) in self.mod_changes.iter().enumerate() {
+            let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 32) as *mut u8, 32) };
+            put_str(&mut s[..], 0, k.as_bytes());
+            v.encode_at(&mut s[8..]);
+        }
+        wr_u32(&mut d[..], 24, p);
+        wr_u32(&mut d[..], 28, self.mod_changes.len() as u32);
+        d[32] = if self.mod_startup_settings_changed { 1 } else { 0 };
+        d[33] = if self.migration_applied { 1 } else { 0 };
+        let p = galloc((self.migrations.len() * 16) as u32);
+        for (i, (k, v)) in self.migrations.iter().enumerate() {
+            let s = unsafe { core::slice::from_raw_parts_mut((p as usize + i * 16) as *mut u8, 16) };
+            put_str(&mut s[..], 0, k.as_bytes());
+            enc_ctn_map_luastr_luastr(&mut s[8..], v);
+        }
+        wr_u32(&mut d[..], 36, p);
+        wr_u32(&mut d[..], 40, self.migrations.len() as u32);
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        if d[0] != 0 {
+            v.old_version = Some(get_str(&d[..], 4));
+        }
+        if d[12] != 0 {
+            v.new_version = Some(get_str(&d[..], 16));
+        }
+        {
+            let base = rd_u32(&d[..], 24) as usize;
+            let n = rd_u32(&d[..], 28) as usize;
+            for i in 0..n {
+                let s = unsafe { core::slice::from_raw_parts((base + i * 32) as *const u8, 32) };
+                v.mod_changes.insert(get_str(&s[..], 0), ModChangeData::decode_at(&s[8..]));
+            }
+        }
+        v.mod_startup_settings_changed = d[32] != 0;
+        v.migration_applied = d[33] != 0;
+        {
+            let base = rd_u32(&d[..], 36) as usize;
+            let n = rd_u32(&d[..], 40) as usize;
+            for i in 0..n {
+                let s = unsafe { core::slice::from_raw_parts((base + i * 16) as *const u8, 16) };
+                v.migrations.insert(get_str(&s[..], 0), dec_ctn_map_luastr_luastr(&s[8..]));
+            }
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(6);
+        if let Some(x) = &self.old_version {
+            kv.push((Value::Str(LuaStr::from("old_version")), Value::Str(x.clone())));
+        }
+        if let Some(x) = &self.new_version {
+            kv.push((Value::Str(LuaStr::from("new_version")), Value::Str(x.clone())));
+        }
+        if !self.mod_changes.is_empty() {
+            let mut m: Vec<(Value, Value)> = Vec::new();
+            for (k, v) in self.mod_changes.iter() {
+                m.push((Value::Str(k.clone()), v.to_value()));
+            }
+            kv.push((Value::Str(LuaStr::from("mod_changes")), Value::Map(m)));
+        }
+        kv.push((Value::Str(LuaStr::from("mod_startup_settings_changed")), Value::Bool(self.mod_startup_settings_changed)));
+        kv.push((Value::Str(LuaStr::from("migration_applied")), Value::Bool(self.migration_applied)));
+        if !self.migrations.is_empty() {
+            let mut m: Vec<(Value, Value)> = Vec::new();
+            for (k, v) in self.migrations.iter() {
+                m.push((Value::Str(k.clone()), val_ctn_map_luastr_luastr(v)));
+            }
+            kv.push((Value::Str(LuaStr::from("migrations")), Value::Map(m)));
+        }
+        Value::Map(kv)
+    }
+}
+
+/// Mirrors the API type of the same name, laid out to match the wire.
+#[derive(Clone, Debug, Default)]
+pub struct ModChangeData {
+    pub old_version: Option<LuaStr>,
+    pub new_version: Option<LuaStr>,
+}
+
+impl ModChangeData {
+    pub fn encode_at(&self, d: &mut [u8]) {
+        for b in d[..24].iter_mut() { *b = 0; }
+        if let Some(v) = &self.old_version {
+            d[0] = 1;
+            put_str(&mut d[..], 4, v.as_bytes());
+        }
+        if let Some(v) = &self.new_version {
+            d[12] = 1;
+            put_str(&mut d[..], 16, v.as_bytes());
+        }
+    }
+
+    pub fn decode_at(d: &[u8]) -> Self {
+        let mut v = Self::default();
+        if d[0] != 0 {
+            v.old_version = Some(get_str(&d[..], 4));
+        }
+        if d[12] != 0 {
+            v.new_version = Some(get_str(&d[..], 16));
+        }
+        v
+    }
+
+    /// Renders this as the tier-2 table the engine expects, so a
+    /// union-typed field can be filled from the typed struct instead of
+    /// from hand-written key strings. An absent optional is omitted.
+    pub fn to_value(&self) -> Value {
+        let mut kv: Vec<(Value, Value)> = Vec::with_capacity(2);
+        if let Some(x) = &self.old_version {
+            kv.push((Value::Str(LuaStr::from("old_version")), Value::Str(x.clone())));
+        }
+        if let Some(x) = &self.new_version {
+            kv.push((Value::Str(LuaStr::from("new_version")), Value::Str(x.clone())));
+        }
+        Value::Map(kv)
+    }
+}
+
 /// Event payload readers. `fk_on_event` is handed an id and a pointer;
 /// match on the id and call the matching reader.
 
@@ -98474,6 +98652,23 @@ pub fn read_script_raised_set_tiles(p: u32) -> ScriptRaisedSetTiles {
 /// returned value holds is copied out of it and is the guest's.
 pub fn read_script_raised_teleported(p: u32) -> ScriptRaisedTeleported {
     ScriptRaisedTeleported::decode_at(unsafe { core::slice::from_raw_parts(p as *const u8, 40) })
+}
+
+/// Decodes what `script.on_configuration_changed` handed the hook.
+///
+/// `fk_on_configuration_changed` is called with a pointer into the
+/// host's event buffer, which lives for exactly this dispatch, so the
+/// decoder copies every string and container out of it.
+///
+/// A guest that exports `fk_on_configuration_changed` WITHOUT a
+/// parameter is unchanged: an extra argument to a wasm function of no
+/// parameters is discarded by the generated Lua.
+///
+/// `mod_changes` is the one most guests want -- one entry per mod ADDED,
+/// REMOVED or moved version, keyed by mod name, with `old_version` None
+/// for an addition and `new_version` None for a removal.
+pub fn read_configuration_changed_data(p: u32) -> ConfigurationChangedData {
+    ConfigurationChangedData::decode_at(unsafe { core::slice::from_raw_parts(p as *const u8, 44) })
 }
 
 /// Event ids. Per-build, like member ids: regenerated with the table

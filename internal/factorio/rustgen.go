@@ -527,6 +527,19 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 		eventStructs = append(eventStructs, eventStruct{name, "read_" + rustName(e.Name)})
 	}
 
+	// ...AND THE ONE HOOK PAYLOAD, which is a struct by the same machinery and
+	// is not an event. See gogen.go's twin of this block.
+	confChanged := ""
+	if evs.ConfChanged != nil {
+		n := exportName(ConfChangedConcept)
+		if !structs.taken(n) {
+			if _, _, ok := structs.add(FieldSpec{Kind: KindStruct,
+				TypeName: ConfChangedConcept, Struct: evs.ConfChanged}, n); ok {
+				confChanged = n
+			}
+		}
+	}
+
 	structs.emit(w)
 
 	// One reader per event. The pointer is into the event scratch buffer, which
@@ -545,6 +558,21 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 			w("    %s::decode_at(unsafe { core::slice::from_raw_parts(p as *const u8, %d) })\n}\n",
 				es.typ, structs.byName[es.typ].Size)
 		}
+	}
+	if confChanged != "" {
+		w("\n/// Decodes what `script.on_configuration_changed` handed the hook.\n")
+		w("///\n/// `fk_on_configuration_changed` is called with a pointer into the\n")
+		w("/// host's event buffer, which lives for exactly this dispatch, so the\n")
+		w("/// decoder copies every string and container out of it.\n")
+		w("///\n/// A guest that exports `fk_on_configuration_changed` WITHOUT a\n")
+		w("/// parameter is unchanged: an extra argument to a wasm function of no\n")
+		w("/// parameters is discarded by the generated Lua.\n")
+		w("///\n/// `mod_changes` is the one most guests want -- one entry per mod ADDED,\n")
+		w("/// REMOVED or moved version, keyed by mod name, with `old_version` None\n")
+		w("/// for an addition and `new_version` None for a removal.\n")
+		w("pub fn read_configuration_changed_data(p: u32) -> %s {\n", confChanged)
+		w("    %s::decode_at(unsafe { core::slice::from_raw_parts(p as *const u8, %d) })\n}\n",
+			confChanged, structs.byName[confChanged].Size)
 	}
 	out.EventStructs = len(eventStructs)
 

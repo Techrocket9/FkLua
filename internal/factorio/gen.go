@@ -1918,11 +1918,37 @@ type EventDef struct {
 	Fields []FieldSpec
 }
 
+// ConfChangedConcept is the concept script.on_configuration_changed hands its
+// handler, and the one HOOK PAYLOAD that is not an event.
+//
+// It is a described concept like any other -- three booleans-and-strings plus
+// two dictionaries -- and nothing in the API references it, so no generator had
+// ever emitted it and the hook dispatched with no arguments at all. A guest
+// therefore could not read `mod_changes` (which neighbour appeared, disappeared
+// or moved version, and from what), `mod_startup_settings_changed` or
+// `migration_applied`. Four of the thirteen mods the temptations survey audited
+// branch on mod_changes directly, and every consumer of the ecosystem's standard
+// migration module does so transitively.
+const ConfChangedConcept = "ConfigurationChangedData"
+
 // EventReport is the generated event table plus what it could not express.
 type EventReport struct {
 	Events  []EventDef
 	Skipped []Skip
 	Reasons map[string]int
+	// ConfChanged is ConfChangedConcept's field list, or nil when this
+	// description does not carry the concept or this layer cannot express it.
+	//
+	// IN THE EVENT REPORT rather than in a table of its own, because it IS an
+	// event payload in every way that matters here: the host encodes it with
+	// H.write_struct into the same per-level scratch buffer, the guest decodes it
+	// with a generated reader, and the layout is computed by the same
+	// LayoutStruct. What differs is only that Factorio raises it through a hook
+	// rather than through script.on_event, so it has no id and no filters.
+	ConfChanged []FieldSpec
+	// ConfChangedSkip is why there is no layout, for the census. Empty when
+	// there is one.
+	ConfChangedSkip string
 	// Omitted mirrors Report.Omitted for event payload fields. No event carries
 	// one today; the row exists so that a payload that grows one is a number in
 	// the census rather than a field that quietly stops arriving.
@@ -1965,7 +1991,43 @@ func GenerateEvents(a *API) EventReport {
 	for i := range r.Events {
 		r.Events[i].ID = i + 1
 	}
+
+	// THE HOOK PAYLOAD, through the same mapper and the same layout.
+	//
+	// Asked for by NAME rather than found by walking members, because nothing in
+	// the API references this concept -- which is exactly why it had never
+	// generated. A description that stops carrying it leaves ConfChanged nil and
+	// the hook dispatches with no argument, which is what it always did.
+	m.owner = append(m.owner, ConfChangedConcept)
+	if f, err := m.mapType(Type{Name: ConfChangedConcept}, 0); err != nil {
+		r.ConfChangedSkip = err.Error()
+	} else if f.Kind != KindStruct {
+		r.ConfChangedSkip = "not a struct"
+	} else if _, err := LayoutStruct(f.Struct); err != nil {
+		r.ConfChangedSkip = err.Error()
+	} else {
+		r.ConfChanged = f.Struct
+	}
+	m.owner = m.owner[:len(m.owner)-1]
+
 	r.Omitted, r.OmittedBy = m.omissions()
+	return r
+}
+
+// WithoutConfChanged drops the hook payload's layout.
+//
+// PRUNED BY THE GUEST'S EXPORT, which is the one pruning key in this file that
+// is not a constant-id scan: there is no id to find, because the host raises the
+// hook rather than the guest asking for it. A guest that does not export
+// fk_on_configuration_changed can never be handed one, so the layout would be
+// bytes in every save for a dispatch that cannot happen -- and a mod that
+// exported nothing new must package exactly what it packaged before.
+func (r EventReport) WithoutConfChanged() EventReport {
+	// The SKIP reason is deliberately kept. It says the layer could not express
+	// the concept, which is a fact about the description and the generator and
+	// stays true whichever guest is being packaged; what is dropped is the
+	// layout, which is a fact about this package.
+	r.ConfChanged = nil
 	return r
 }
 
@@ -1973,7 +2035,8 @@ func GenerateEvents(a *API) EventReport {
 // guest baked them in, so renumbering would subscribe it to the wrong events.
 func (r EventReport) Only(ids map[int]bool) EventReport {
 	out := EventReport{Skipped: r.Skipped, Reasons: r.Reasons, MaxSize: r.MaxSize,
-		Omitted: r.Omitted, OmittedBy: r.OmittedBy}
+		Omitted: r.Omitted, OmittedBy: r.OmittedBy,
+		ConfChanged: r.ConfChanged, ConfChangedSkip: r.ConfChangedSkip}
 	for _, e := range r.Events {
 		if ids[e.ID] {
 			out.Events = append(out.Events, e)
@@ -1986,7 +2049,29 @@ func (r EventReport) Only(ids map[int]bool) EventReport {
 func (r EventReport) luaEvents() (string, error) {
 	var b []byte
 	add := func(f string, a ...any) { b = append(b, []byte(fmt.Sprintf(f, a...))...) }
-	add("  event_scratch = %d,\n", r.MaxSize)
+
+	// THE SCRATCH BUFFER HAS TO HOLD THE HOOK PAYLOAD TOO, and only when the
+	// payload is actually packaged. control.lua allocates one buffer per nesting
+	// level at this size and encodes the configuration-changed payload into it
+	// like an event; folding the size in unconditionally would move
+	// event_scratch for every mod in existence, including ones that do not
+	// export the hook and can never be handed one.
+	scratch := r.MaxSize
+	var ccBlk StructBlock
+	if r.ConfChanged != nil {
+		blk, err := LayoutStruct(r.ConfChanged)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", ConfChangedConcept, err)
+		}
+		ccBlk = blk
+		if blk.Size > scratch {
+			scratch = blk.Size
+		}
+	}
+	add("  event_scratch = %d,\n", scratch)
+	if r.ConfChanged != nil {
+		add("  confchanged = {size=%d,fields=%s},\n", ccBlk.Size, ccBlk.LuaTable())
+	}
 	add("  events = {\n")
 	for _, e := range r.Events {
 		blk, err := LayoutStruct(e.Fields)

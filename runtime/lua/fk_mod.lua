@@ -2037,11 +2037,50 @@ end
 -- outermost dispatch, no arena bracket, no scratch reset, no sync_memory. The
 -- registration is guarded the other way for the same reason -- `persisting` on
 -- its own would leave a --persist=none guest that exports the hook unwired.
+--
+-- AND IT CARRIES ITS PAYLOAD SINCE 2026-08-30, which is the other half of being
+-- told. ConfigurationChangedData is a described concept -- old_version,
+-- new_version, mod_changes, mod_startup_settings_changed, migration_applied and
+-- migrations -- and nothing in the API references it, so no generator had ever
+-- emitted it and this hook dispatched with no arguments at all. A guest could
+-- hear that SOMETHING moved and never what: which neighbour appeared,
+-- disappeared or changed version, and from what.
+--
+-- ENCODED LIKE AN EVENT, into the same per-level scratch buffer through the same
+-- H.write_struct, because it IS an event payload in every way that matters here
+-- -- what differs is only that Factorio raises it through a hook rather than
+-- through script.on_event, so it has no id and no filters. API.confchanged is
+-- the layout, and `fklua mod` packages it only for a guest that exports this
+-- hook: there is no id to prune on, so the EXPORT is the key.
+--
+-- A NO-ARGUMENT GUEST IS UNCHANGED, which is the whole compatibility argument. A
+-- wasm export of no parameters compiles to a Lua function of no parameters, and
+-- Lua discards extra arguments -- so a guest already in the field takes exactly
+-- the path it took before, and one built against older bindings (no
+-- API.confchanged, because the table is generated with the package) falls back
+-- to the no-argument call rather than passing a pointer into a buffer whose
+-- layout it has no reader for.
+local function run_config_changed(data)
+  local cc = API.confchanged
+  if cc == nil or data == nil then
+    return E.fk_on_configuration_changed()
+  end
+  -- depth is already raised, so this names the same per-level buffer run_event
+  -- does. A buffer that could not be allocated is not a reason to skip the
+  -- notification: the hook still fires, with no payload.
+  local buf = event_buffer(depth)
+  if buf == 0 and cc.size > 0 then
+    return E.fk_on_configuration_changed()
+  end
+  H.write_struct(cc.fields, buf, data)
+  return E.fk_on_configuration_changed(buf)
+end
+
 if persisting or E.fk_on_configuration_changed then
-  script.on_configuration_changed(function()
+  script.on_configuration_changed(function(data)
     finish_rebuild()
     if E.fk_on_configuration_changed then
-      dispatch(E.fk_on_configuration_changed)
+      dispatch(run_config_changed, data)
     end
   end)
 end

@@ -529,6 +529,26 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 		eventStructs = append(eventStructs, name)
 	}
 
+	// ...AND THE ONE HOOK PAYLOAD, which is a struct by the same machinery and
+	// is not an event.
+	//
+	// script.on_configuration_changed hands its handler a ConfigurationChangedData
+	// and nothing in the API references the concept, so no generator had ever
+	// emitted it and the hook dispatched with no argument at all. Registered
+	// beside the event payloads because everything downstream is identical: the
+	// host encodes it with H.write_struct into the same per-level buffer and the
+	// guest decodes it with a generated reader.
+	confChanged := ""
+	if evs.ConfChanged != nil {
+		n := exportName(ConfChangedConcept)
+		if !structs.taken(n) {
+			if _, _, ok := structs.add(FieldSpec{Kind: KindStruct,
+				TypeName: ConfChangedConcept, Struct: evs.ConfChanged}, n); ok {
+				confChanged = n
+			}
+		}
+	}
+
 	// Struct declarations last. Go does not care about order at package level,
 	// and collecting them while the methods were generated is what makes the
 	// set exactly what the methods reach.
@@ -544,6 +564,23 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 			w("\nfunc Read%s(p uint32) %s {\n", name, name)
 			w("\treturn decode%s((*byte)(unsafe.Pointer(uintptr(p))))\n}\n", name)
 		}
+	}
+	if confChanged != "" {
+		w("\n// Read%s decodes what script.on_configuration_changed handed the\n", confChanged)
+		w("// hook. fk_on_configuration_changed is called with a pointer into the\n")
+		w("// host's event buffer, which lives for exactly this dispatch, so the\n")
+		w("// decoder copies every string and slice out of it.\n")
+		w("//\n")
+		w("// A guest that exports fk_on_configuration_changed WITHOUT a parameter is\n")
+		w("// unchanged: an extra argument to a wasm function of no parameters is\n")
+		w("// discarded by the generated Lua, so the no-argument form still works and\n")
+		w("// still means what it meant.\n")
+		w("//\n")
+		w("// ModChanges is the one most guests want -- one entry per mod ADDED,\n")
+		w("// REMOVED or moved version, keyed by mod name, with OldVersion nil for an\n")
+		w("// addition and NewVersion nil for a removal.\n")
+		w("func Read%s(p uint32) %s {\n", confChanged, confChanged)
+		w("\treturn decode%s((*byte)(unsafe.Pointer(uintptr(p))))\n}\n", confChanged)
 	}
 	out.EventStructs = len(eventStructs)
 

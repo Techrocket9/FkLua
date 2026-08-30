@@ -550,6 +550,20 @@ Still true and still a trap: adding a hook means editing `runtime/lua/fk_mod.lua
 
 *Red-proven three times: ignoring the name reports `registered false` and the unnamed diagnostic; removing the rollback logs the engine's refusal ONCE for two attempts, which is the second subscription silently succeeding into a dispatcher that does not exist; and restoring the old sentence fails the truthfulness test by name.*
 
+#### `fk_on_configuration_changed` carries its payload
+
+**The hook told a guest that SOMETHING about the mod set moved and never what.** `script.on_configuration_changed` hands its handler a `ConfigurationChangedData` -- `mod_changes` (one entry per mod added, REMOVED or moved version, keyed by mod name, with the old and new versions), `mod_startup_settings_changed`, `migration_applied`, `migrations`, and the map's own old and new version -- and this hook dispatched with no arguments at all. Four of the thirteen audited mods branch on `mod_changes` directly and every consumer of the ecosystem's standard migration module does so transitively; the first FkLua consumer avoided it only because its own migration keys on a marker prototype rather than a version.
+
+**Nothing in the API references the concept, which is exactly why it had never generated.** The encode machinery was there all along: it is a described `table` concept, so `mapFields` and `LayoutStruct` produce a layout the way they do for an event payload, and `H.write_struct` writes it into the same per-level scratch buffer. `GenerateEvents` asks for it **by name** -- there is no member to find it through -- and a description that stops carrying it leaves the layout nil and the hook dispatching with no argument, which is what it always did.
+
+**IN THE EXISTING HOOK, NOT A SIBLING EXPORT, and the compatibility argument is a language rule rather than a promise.** A wasm export of no parameters compiles to a Lua function of no parameters and Lua DISCARDS extra arguments, so a guest already in the field is called with a pointer it never looks at and behaves exactly as it did. That is asserted through the real `control.lua` rather than argued, because the rule is about Lua and the claim is about this runtime's plumbing.
+
+**PRUNED BY AN EXPORT, which is the one key in the packaged table that no constant scan can decide.** Members, events and defines are pruned by finding an i32 constant reaching an import: the guest ASKS, so the ask is in the wasm. Nothing asks for this -- Factorio raises the hook and hands it over -- so what says whether the layout can ever be used is whether the guest exports `fk_on_configuration_changed` at all. And **`event_scratch` moves only when the layout is packaged**: the buffer is sized to the largest thing encoded into it, so folding the payload's size in unconditionally would move that number for every mod in existence. It fits at every committed pin anyway (44 bytes against the largest event's 128), which is why the number does not move at all today.
+
+**Census: `hook_payload_fields` 0 → 6**, a row of its own because it is in none of the others -- not a member, not an event, so `host_members_bound` and `host_events_bound` are both blind to it, and its failure mode is that the hook fires with no argument and nothing says so. Members, ids and every other count are unmoved.
+
+**Verified in a real Factorio 2.0.77**, `scripts/run-confchanged.sh`: ONE wasm packaged at TWO mod versions, a save created with the first and loaded with the second, which is the cheapest real mod-set change there is and the one a player meets every time a mod updates. `told changes=1 startup=0 migrated=0 migrations=42 oldmap=- newmap=-` and `mod fk-confchanged old=0.1.0 new=0.2.0`. **The 42 is the nested dictionary**: `migrations` is `dictionary[IDType -> dictionary[string -> string]]`, filled by the engine with base's own prototype migrations, so what the gate asserts is that it is not zero -- a zero is what a layout that got the nesting wrong would produce, and the count itself is base's. *Red-proven twice: dispatching without the pointer makes a guest that reads one fail on nil arithmetic inside its own decode, and removing the export pruning packages the layout for a guest that can never be handed one.*
+
 ### Guests (M4, M8, M10)
 
 **TinyGo builds at `-opt=2`, not its default `-opt=z`.** That default optimises for SIZE, which is the one cost this target does not have — the day-0 probe measured Factorio parsing 4 MB of Lua in 106 ms and a chunk never appears in a save. It was the single largest win of the M11 perf pass and it is one flag: `real_names` **0.577×**, `real_grid` 0.771×, `pure_sum` 0.770×, `pure_dot` 0.847×, `real_entities` 0.958×, against `-opt=z` through the same compiler. `pure_prng` is ~2% slower and is the only kernel that loses. It also retired a claim: Rust used to beat TinyGo everywhere by 1.05×–1.46×, which was rustc `-O3` measured against TinyGo `-Oz`.
@@ -637,6 +651,7 @@ for G in leaking collected; do ./bin/fklua spectest --gc=$G; done  # ...and in B
 ./scripts/run-guest.sh                                       # guest in real Factorio
 GUEST=gcsave ./scripts/run-guest.sh                          # ...with its heap COLLECTED
 FACTORIO_USERDIR=/tmp/fkcin ./scripts/run-custominput.sh     # a NAME-addressed subscription, real Factorio
+FACTORIO_USERDIR=/tmp/fkcc ./scripts/run-confchanged.sh       # mod_changes reaching a guest, real Factorio
 ./scripts/run-roundtrip.sh                                   # save/load round trip, real Factorio
 FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-ipc.sh            # the fkipc protocol against a live game
 LANG_=rust FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-ipc.sh # ...the Rust arm

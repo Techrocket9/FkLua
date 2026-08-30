@@ -569,6 +569,23 @@ var Hooks = []Hook{
 	{"fk_on_configuration_changed", "script.on_configuration_changed, whenever Factorio raises it", true},
 }
 
+// ConfChangedHook is the export whose presence decides whether the packaged API
+// table carries ConfigurationChangedData's layout.
+//
+// A NAME SPELLED ONCE, because two places spelling one export is this repo's
+// most-repeated failure shape and here it would fail SILENTLY: a packager that
+// mangled the name differently from the Hooks table would find no export, prune
+// the layout, and hand the guest a hook with no payload for the rest of its
+// life. Derived from Hooks rather than written beside it.
+var ConfChangedHook = func() string {
+	for _, h := range Hooks {
+		if strings.HasSuffix(h.Export, "on_configuration_changed") {
+			return h.Export
+		}
+	}
+	panic("Hooks has no configuration-changed hook")
+}()
+
 // collectorPrefix marks the hooks that make up the collector's pacing surface.
 // It is a prefix rather than a flag on Hook so that the list of names lives in
 // exactly one place -- the Hooks table above, which is also what control.lua is

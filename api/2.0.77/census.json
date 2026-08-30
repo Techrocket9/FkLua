@@ -35,6 +35,7 @@
   "fields_omitted_by_reason": {},
   "host_events_bound": 219,
   "event_scratch_bytes": 128,
+  "hook_payload_fields": 6,
   "go_members_bound": 4257,
   "go_members_deferred": 5,
   "go_deferrals_by_reason": {

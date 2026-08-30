@@ -157,8 +157,19 @@ type CensusData struct {
 	FieldsOmittedBy map[string]int `json:"fields_omitted_by_reason"`
 	HostEvents      int            `json:"host_events_bound"`
 	EventScratch    int            `json:"event_scratch_bytes"`
-	GoMembers       int            `json:"go_members_bound"`
-	GoDeferred      int            `json:"go_members_deferred"`
+	// HookPayloadFields is how many fields of ConfigurationChangedData reached
+	// the packaged layout, and 0 when the concept could not be expressed or the
+	// description does not carry it.
+	//
+	// A ROW OF ITS OWN because it is in none of the others. It is not a member
+	// and not an event, so host_members_bound and host_events_bound are both
+	// blind to it -- and its whole failure mode is invisible: the hook still
+	// fires, with no argument, exactly as it did for two milestones while
+	// nothing anywhere said the payload was being discarded. A 0 nobody writes
+	// down is how eleven class operators stayed invisible for five milestones.
+	HookPayloadFields int `json:"hook_payload_fields"`
+	GoMembers         int `json:"go_members_bound"`
+	GoDeferred        int `json:"go_members_deferred"`
 	// GoDeferralsBy is the half of GoDeferred that says what to build next.
 	// Rolled up by shape rather than listed per struct, because the tail is
 	// dozens of one-member structs that are each blocked by one of the three
@@ -328,6 +339,7 @@ func TakeCensus(a *API) (CensusData, error) {
 		c.FieldsOmittedBy[o.Reason]++
 	}
 	c.HostEvents, c.EventScratch = len(ev.Events), ev.MaxSize
+	c.HookPayloadFields = len(ev.ConfChanged)
 
 	g, err := GenerateGoWith(a, r, ev, "fkapi")
 	if err != nil {
@@ -449,6 +461,7 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("struct fields omitted", old.FieldsOmitted, c.FieldsOmitted)
 	cmp("host events bound", old.HostEvents, c.HostEvents)
 	cmp("event scratch bytes", old.EventScratch, c.EventScratch)
+	cmp("hook payload fields", old.HookPayloadFields, c.HookPayloadFields)
 	cmp("Go members bound", old.GoMembers, c.GoMembers)
 	cmp("Go members deferred", old.GoDeferred, c.GoDeferred)
 	cmp("Go literals deferred", old.GoLiteralsDeferred, c.GoLiteralsDeferred)

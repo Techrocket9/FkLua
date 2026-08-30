@@ -881,10 +881,27 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 	used, complete := factorio.UsedMembers(im)
 	usedEv, evComplete := factorio.UsedEvents(im)
 	usedDef, defComplete := factorio.UsedDefines(im)
-	if complete && evComplete && defComplete &&
+	// THE HOOK PAYLOAD IS PRUNED BY AN EXPORT, not by a constant scan, and it is
+	// the only thing in this table that is. There is no id to find: Factorio
+	// raises on_configuration_changed and the guest never asks for it, so what
+	// says whether the layout can ever be used is whether the guest exports the
+	// hook at all. A guest that does not can never be handed one, and packaging
+	// the layout anyway would be bytes in every save for a dispatch that cannot
+	// happen.
+	wantsConfChanged := false
+	for _, e := range pkg.Exports {
+		if e == factorio.ConfChangedHook {
+			wantsConfChanged = true
+			break
+		}
+	}
+	if complete && evComplete && defComplete && !wantsConfChanged &&
 		len(used) == 0 && len(usedEv) == 0 && len(usedDef) == 0 {
 		// Nothing to attach. The packager still writes an empty table, because
 		// control.lua requires the file unconditionally.
+		//
+		// ...unless the guest exports the configuration-changed hook, whose
+		// payload layout is the one entry here that no call site can prove.
 		return nil
 	}
 
@@ -912,6 +929,9 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 	defs := factorio.GenerateDefines(a)
 	full, fullEv, fullDef := len(report.Members), len(events.Events), len(defs.Defines)
 
+	if !wantsConfChanged {
+		events = events.WithoutConfChanged()
+	}
 	if evComplete {
 		events = events.Only(usedEv)
 		if len(events.Events) > 0 {

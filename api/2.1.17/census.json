@@ -37,6 +37,7 @@
   },
   "host_events_bound": 225,
   "event_scratch_bytes": 128,
+  "hook_payload_fields": 6,
   "go_members_bound": 4854,
   "go_members_deferred": 5,
   "go_deferrals_by_reason": {

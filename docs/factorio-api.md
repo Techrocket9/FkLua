@@ -96,6 +96,16 @@ Subscriptions are made from `_initialize` (Go: `func init()`; Rust: `_initialize
 - **An expensive field can be declined.** Some events carry unbounded containers; a subscription can mask a field it does not read, and a masked field decodes as absent or empty. Measured on `on_undo_applied` with 200 actions: 7.49 ms to 2.7 µs per dispatch. Only optional and container fields are maskable, so a masked field can never be mistaken for a real zero.
 - **A keybind is subscribed to BY NAME.** A custom input is delivered to the name of the `custom-input` prototype that declares it, and has no `defines.events` entry at all, so the numeric form cannot reach it. Use `SubscribeNamed(EventCustomInputEvent, "my-mod-hotkey")` in Go or `subscribe_named(EVENT_CUSTOMINPUTEVENT, "my-mod-hotkey")` in Rust, with `SubscribeNamedMasked` / `subscribe_named_masked` when the payload's optional fields are not wanted. Several custom inputs share one handler because they all carry the same payload; read `input_name` to tell them apart. A name no loaded prototype has is refused by the engine and comes back as a status with the engine's own message in the log, so a typo costs the keybind and not the mod.
 
+## When the mod set changes
+
+`fk_on_configuration_changed` fires whenever Factorio raises `on_configuration_changed`: a neighbouring mod added, removed or moved version, a startup setting changed, prototype migrations applied, or the game version moved. It is handed a pointer to a `ConfigurationChangedData`, which `ReadConfigurationChangedData` (Go) or `read_configuration_changed_data` (Rust) decodes.
+
+`mod_changes` is the field most guests want: one entry per mod that moved, keyed by mod name, with `old_version` absent for a mod that was just added and `new_version` absent for one that was just removed. The payload also carries `mod_startup_settings_changed`, `migration_applied`, the map's own `old_version` and `new_version`, and `migrations`, a dictionary of prototype renames per prototype type.
+
+Exporting the hook with no parameter still works and still means what it meant: the extra argument is discarded. The payload's layout is packaged only for a mod that exports the hook, so a mod that does not pays nothing for it.
+
+This hook runs on the peer that loaded the save, before the first tick, so its effects are already in the state a joining client downloads. A guest may write its own state here.
+
 ## Commands and remote interfaces
 
 A wasm guest has no callable Lua value, so callbacks work by id: the host synthesises the closure, hands it to Factorio, and dispatches back in through `fk_on_call` with an id the guest chose. Console commands, remote interfaces in both directions, and `remote.call` out of the guest all work this way. Registrations are made from `_initialize` for the same reason subscriptions are: Factorio does not save them, and `control.lua` re-runs on every load.

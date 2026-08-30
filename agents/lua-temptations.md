@@ -16,7 +16,7 @@ Binding coverage is essentially total: 4,857 of 4,859 members bind at the 2.1.16
 | Mod-defined event subscription | **BLOCKS** | cross-mod integrations (LTN-style ecosystems) | third `fk.register` kind | M |
 | `LuaGuiElement.style = "name"` | **BLOCKS** | any GUI that restyles at runtime | **FIXED (2026-08-30)**: an attribute write whose union would collapse to one handle arm crosses as tier 2 | S |
 | `on_nth_tick` binds but is unfillable | **BLOCKS, silently** | polling mods | **the five handler members are DEFERRED (2026-08-30)**; first-class hook later | S then M |
-| `fk_on_configuration_changed` discards its payload | **BLOCKS an idiom** | per-neighbour compatibility | pass `ConfigurationChangedData` as tier-2 | S-M |
+| `fk_on_configuration_changed` discards its payload | **BLOCKS an idiom** | per-neighbour compatibility | **SHIPPED (2026-08-30)**: a typed struct in the existing hook, pruned by the export | S-M |
 | `api check` blind to defines | **BLOCKS the gate's promise** | every guest reading a define | wire `UsedDefines` in; leaf-aware define diff | S |
 | GUI at application scale | TEMPTS, hard | GUI applications | `Value` accessors, typed `add`, batched add | S / M / M-L |
 | `create_entity` untyped args | TEMPTS, hard | every entity-creating mod | typed args struct plus `Extra` | M |
