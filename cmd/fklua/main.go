@@ -65,6 +65,18 @@ Usage:
                         not be run. --json writes one verdict object to stdout
   fklua init <mod-name> [--lang go,rust] [--api VERSION]
   fklua lock [--check]
+  fklua meta --json     one JSON document describing this project, for tools.
+                        Top-level keys: fklua (this version), manifest (the
+                        file as written), effective (what ` + "`fklua mod`" + ` would
+                        really use after every default -- title falls back to
+                        name, author to "unknown", factorio_version to the
+                        default pin's series, lang to ["go"], and an ABSENT gc
+                        key means "leaking"), package (the identity
+                        <name>_<version>, plus the zip name), and guest (the
+                        per-language directory, generated bindings path and
+                        conventional wasm artifact). --json is required: this
+                        is a data interface with no human-facing form. It reads
+                        fklua.toml and errors without one rather than guessing
   fklua docs [--lang go|rust] [--api VERSION] [-o DIR]
   fklua gen-bindings [--lang go,rust|all] [-o FILE] [--into DIR] [--check]
                                                        (default: fklua.toml's lang)
@@ -163,6 +175,11 @@ func main() {
 	case "lock":
 		if err := runLock(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "fklua lock: %v\n", err)
+			os.Exit(1)
+		}
+	case "meta":
+		if err := runMeta(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "fklua meta: %v\n", err)
 			os.Exit(1)
 		}
 	case "bench":

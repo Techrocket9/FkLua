@@ -142,6 +142,60 @@ Replacement rather than appending is what lets a packaging declare a *smaller* l
 
 Values are passed through verbatim. Factorio is the authority on its own dependency syntax, so nothing here parses it.
 
+## The project, machine-readable: fklua meta
+
+`fklua meta --json` writes one JSON document describing the project in the working directory, so a tool that drives fklua does not have to read `fklua.toml` itself or re-derive the defaults fklua applies to it. `--json` is required: this command is a data interface and has no human-facing form, and the flag is how a caller says it expects standard output to be one JSON document.
+
+```sh
+fklua meta --json
+```
+
+The document has five top-level keys, all always present.
+
+| Key | What it is |
+|---|---|
+| `fklua` | the compiler version, the same string `fklua version` prints |
+| `manifest` | the manifest as written: raw values, with an empty string, an empty list or an empty object wherever the author wrote nothing |
+| `effective` | the same field set after every default `fklua mod` applies |
+| `package` | the identity Factorio finds the built mod by |
+| `guest` | the per-language guest layout, keyed by language |
+
+`manifest` and `effective` carry the same fields, so the two blocks can be compared directly: `name`, `version`, `title`, `author`, `description`, `factorio_version`, `data`, `dependencies`, `api`, `lang`, `gc`, `data_module`, `stages`, `scenarios`. `dependencies` and `lang` are always arrays and `stages` and `scenarios` are always objects, empty rather than `null`, so a consumer can iterate them without checking first.
+
+These are the rules `effective` applies, and they are the rules `fklua mod` applies:
+
+| Field | Rule when the manifest does not set it |
+|---|---|
+| `title` | the mod's `name` |
+| `author` | `"unknown"` |
+| `factorio_version` | the default API pin's `major.minor` series. It is the DEFAULT pin's series and not this project's: `api` never reaches this field, so a project pinned at a 2.1.x description with no `factorio_version` key still declares `2.0`. Set the key when the two axes come apart |
+| `lang` | `["go"]` |
+| `gc` | `"leaking"` |
+| everything else | no default; the effective value is the raw one |
+
+**An absent `gc` key means `"leaking"`, never `"collected"`.** `fklua init` writes `gc = "collected"` into a new project, which makes a manifest without the key look newer rather than older, but the compile-flag default is deliberately unchanged so that an existing build never becomes a compile error naming a flag its author did not choose. `effective.gc` is always one of `"leaking"` or `"collected"`, computed by the same call `fklua mod` makes, and `manifest.gc` is empty when the author wrote nothing, so a tool can still tell "leaking by default" from "leaking on purpose".
+
+One value in `manifest` is not quite as written. An absent `lang` key is normalized to `["go"]` while the file is being read, before this command sees it, so `manifest.lang` reports `["go"]` for a file with no `lang` line. The effective value is the same either way; the only fact that cannot be recovered is whether the author typed it.
+
+`package` is `dir` (`<name>_<version>`, the directory Factorio expects) and `zip` (the same name with `.zip`).
+
+`guest` has one entry per language in `effective.lang`, and a language the project does not build has no key at all. Every path is relative to the project root and uses forward slashes.
+
+| Field | Language | What it is |
+|---|---|---|
+| `dir` | both | the guest source directory: `guest/go` or `guest/rust` |
+| `bindings` | both | where `fklua gen-bindings` writes, and what `fklua lock` hashes by exact name |
+| `wasm` | Go | the conventional artifact at the project root, `<name>.wasm`, which is where the `tinygo build` line `init` prints puts it and what `fklua mod` is then given |
+| `wasm` | Rust | the artifact a release `cargo build` writes, under `guest/rust/target/wasm32-unknown-unknown/release/`. A cdylib is named after the crate with dashes mapped to underscores, so a crate `my-mod-guest` builds `my_mod_guest.wasm` |
+| `crate` | Rust | the cargo package name, the mod name sanitized with a `-guest` suffix |
+| `crate_dir` | Rust | that crate's directory inside the workspace |
+
+The command reads `fklua.toml` from the working directory and errors without one, which is where it differs from `fklua mod` and `fklua compile`: those take their identity from flags when there is no manifest, and this command has nothing to fall back to, since the document is a description of a manifest. A caller one directory above its project gets a failure rather than a plausible answer. A value the toolchain itself would reject is refused here too, with the same message, so a `gc` the compiler will not accept or a `lang` with no generator is reported by this command rather than discovered later in a build.
+
+`[tool]` and `[tool.<name>]` sections never appear in the output. They belong to the tools that write them, and fklua does not read their contents.
+
+Every field name in the document is stable. Parse the JSON rather than any prose fklua prints.
+
 ## A reference to read
 
 `fklua docs` renders a browsable API reference for the pinned description in your language's names (`docs/api-go.md` or `docs/api-rust.md`; `-o` chooses the directory). It is generated from the same description the bindings come from, so it matches what your `fkapi` actually offers.
