@@ -46,6 +46,13 @@ type StageHook struct {
 // checked in BOTH directions for the reason that one was not: Hooks matched
 // control.lua for every hook it listed and had been missing one for two
 // milestones, which silently suppressed a whole class of diagnostics.
+//
+// THE SETTINGS FAMILY IS DELIBERATELY ONE HOOK OF ITS THREE. Factorio runs
+// settings.lua, settings-updates.lua and settings-final-fixes.lua, and only
+// the first is wired: nothing has needed to patch ANOTHER mod's setting the
+// way data-updates patches another mod's prototypes, and wiring one is a
+// one-row addition here plus a stage id the day something does. Written down
+// so the omission reads as a decision rather than as a gap nobody noticed.
 var StageHooks = []StageHook{
 	{"fk_settings", "settings.lua", "settings", 1,
 		"the settings stage: mod settings, before data.raw exists"},
