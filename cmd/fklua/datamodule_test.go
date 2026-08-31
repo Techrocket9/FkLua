@@ -105,7 +105,7 @@ func TestTheStageFlagOrdersTheChain(t *testing.T) {
 	}
 	at := -1
 	for _, w := range []string{`require("prototypes.entity")`,
-		`require("fk_data").run(2)`, `require("prototypes.sprite")`} {
+		`require("fk_data").run(2, "a-mod")`, `require("prototypes.sprite")`} {
 		i := strings.Index(string(body), w)
 		if i < 0 {
 			t.Fatalf("data.lua does not contain %s:\n%s", w, body)
