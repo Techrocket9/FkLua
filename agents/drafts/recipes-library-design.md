@@ -1,6 +1,8 @@
 # The recipes-and-research library — design round
 
-Status: DRAFT for review, 2026-08-31. Nothing here is implemented. This answers the open questions the 2026-08-30 research round collected (agents/library-ecosystem.md carries the verdicts it builds on), recommends where a recommendation is honest, and flags what only the maintainer can decide. The measured engine facts cited (M-numbers) are the 2.1.17 probe set from that round; the enablers it depends on — `env(4)` ModName, `env(5)` defines.prototypes, the settings-dump gate hash, the in-game settings→data round trip — all shipped 2026-08-30.
+Status: DECISIONS RESOLVED 2026-08-31 (see the block above the decisions section); implementation assigned to a standalone-repo build. Original draft text below is kept as written, with resolutions marked.
+
+Status at drafting: DRAFT for review, 2026-08-31. Nothing here is implemented. This answers the open questions the 2026-08-30 research round collected (agents/library-ecosystem.md carries the verdicts it builds on), recommends where a recommendation is honest, and flags what only the maintainer can decide. The measured engine facts cited (M-numbers) are the 2.1.17 probe set from that round; the enablers it depends on — `env(4)` ModName, `env(5)` defines.prototypes, the settings-dump gate hash, the in-game settings→data round trip — all shipped 2026-08-30.
 
 ## Charter
 
@@ -68,12 +70,13 @@ lib.Emit()   // validates (presence, cycles, unit shape), then extends; any
 
 Everything before `Emit` is a PLAN in ordinary values — host-testable with no fkdata, which is where the validator's own tests live. `Emit` is the only fkdata-touching call. Plans are slices in declaration order; no map iteration anywhere (the data-stage determinism rule).
 
-## Maintainer decisions needed before implementation
+## Maintainer decisions — RESOLVED 2026-08-31
 
-1. **Name**: `fkrecipes` (used above), `fktech`, or other.
-2. **Where it lives**: in-repo beside fklog/fkipc (gets the repo's gates; recommended for v1) vs the first external library (dogfoods distribution but forfeits the gates until the harness recipe is proven out-of-tree).
-3. **Q10**: hidden (recommended) vs absent for a disabled generated tech.
-4. **V1 scope cut**: the sketch covers items, recipes, technologies. Trimming items (consumer brings their own item prototypes; library does recipes+techs only) roughly halves v1. Recommendation: keep items — the inline-locale story is most valuable there — but it is a legitimate cut.
+1. **Name: `FkRecipes`** — *"Factorio: konfigurierbare Recipes"*, joining the house pattern (FkLua "Factorio, kein Lua"; fkipc "Factorio, kommunikativ (per IPC)"). Package/crate name `fkrecipes`.
+2. **Where it lives: a STANDALONE REPO** — the maintainer's call, overriding the draft's in-repo recommendation, and the timing is why it is now the better answer: the distribution channel went live the same day (`guest/go/v0.1.0` tagged and pushed; the Rust git+`[patch]` convention decided), so the first library DOGFOODS it — a real `v0.1.0` require in Go, a git dependency in Rust, `fklua init --library` as the bootstrap, and the parity harness built from `docs/library-parity.md`'s recipe out of tree. The repo carries its own CLAUDE.md/agents conventions adapted from FkLua's and BetterBeltBalancer's. What in-repo would have bought (this repo's gates) the standalone build must reconstruct, and the friction it meets doing so is exactly the ecosystem feedback wanted.
+3. **Q10: HIDDEN** for a disabled generated tech, as recommended.
+4. **V1 scope: items KEPT**, as recommended.
+5. **SCOPE ADDITION (maintainer, 2026-08-31): user-configurable CRAFTING TIME.** A recipe's `energy_required` must be bindable to a generated numeric setting exactly as a technology's enablement binds to a bool setting — the settings layer covers it, the surface grows a verb for it, and the engine's floor for the value (whether 0 is refused, what a fractional minimum is) gets probed rather than assumed.
 
 ## What v1 explicitly does not do
 
