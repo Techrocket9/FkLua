@@ -76,6 +76,22 @@ pub extern "C" fn fk_data() {
         fkdata::derived_types("item").len()
     ));
 
+    // THE SETTINGS -> DATA ROUND TRIP. The setting fk_settings declared comes
+    // back here through env(3), and its value lands in the DUMP -- the marker
+    // technology's enabled field below -- so the in-game gate proves the loop
+    // end to end instead of assuming it. Logged too, because a dump hash that
+    // matched while the read silently answered absent is the vacuous pass this
+    // has to be able to fail on.
+    let enabled = fkdata::startup_setting(&name("enabled"));
+    match &enabled {
+        Some(v) => fkdata::log(&format!(
+            "fkdata example: startup {PREFIX}enabled is {}",
+            v.boolean()
+        )),
+        None => fkdata::log(&format!("fkdata example: startup {PREFIX}enabled is ABSENT")),
+    }
+    let enabled_value = enabled.as_ref().map(|v| v.boolean()).unwrap_or(false);
+
     // A computed table. Eight sprites out of one loop, with the offset
     // arithmetic done in Rust rather than written out as sixteen magic numbers
     // -- which is the case the whole feature exists for.
@@ -145,6 +161,9 @@ pub extern "C" fn fk_data() {
             ("icon", str_("__core__/graphics/empty.png")),
             ("icon_size", num(1.0)),
             ("effects", arr(&[])),
+            // The startup setting's value, dump-visible: the round trip's
+            // in-game half.
+            ("enabled", bool_(enabled_value)),
             ("prerequisites", arr(&[str_("logistics")])),
             (
                 "unit",

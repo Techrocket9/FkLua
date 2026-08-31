@@ -63,6 +63,20 @@ func onData() {
 	fkdata.Log("fkdata example: transport-belt is an " + base + "; item derives " +
 		strconv.Itoa(len(fkdata.DerivedTypes("item"))) + " types")
 
+	// THE SETTINGS -> DATA ROUND TRIP. The setting fk_settings declared comes
+	// back here through env(3), and its value lands in the DUMP -- the marker
+	// technology's enabled field below -- so the in-game gate proves the loop
+	// end to end instead of assuming it. Logged too, because a dump hash that
+	// matched while the read silently answered absent is the vacuous pass this
+	// has to be able to fail on.
+	enabled, haveSetting := fkdata.StartupSetting(prefix + "enabled")
+	if haveSetting {
+		fkdata.Log("fkdata example: startup " + prefix + "enabled is " +
+			strconv.FormatBool(enabled.Boolean()))
+	} else {
+		fkdata.Log("fkdata example: startup " + prefix + "enabled is ABSENT")
+	}
+
 	// A computed table. Eight sprites out of one loop, with the offset
 	// arithmetic done in Go rather than written out as sixteen magic numbers --
 	// which is the case the whole feature exists for.
@@ -121,6 +135,9 @@ func onData() {
 			fkdata.KVs("icon", fkdata.Str("__core__/graphics/empty.png")),
 			fkdata.KVs("icon_size", fkdata.Num(1)),
 			fkdata.KVs("effects", fkdata.Arr()),
+			// The startup setting's value, dump-visible: the round trip's
+			// in-game half.
+			fkdata.KVs("enabled", fkdata.Bool(enabled.Boolean())),
 			fkdata.KVs("prerequisites", fkdata.Arr(fkdata.Str("logistics"))),
 			fkdata.KVs("unit", fkdata.Obj(
 				fkdata.KVs("count", count),

@@ -275,13 +275,15 @@ In game: `scripts/run-datastage.sh`.
 
 `scripts/run-datastage.sh`, 15 s for both languages, 2.4 s per `--dump-data`. Three assertions, in order of strength:
 
-1. the normalised dump matches a committed golden;
-2. the **Go and Rust** guests produce the SAME dump -- two hand-written libraries drift and a census cannot see either;
-3. two runs of the same guest produce the same dump.
+1. the normalised dumps match a committed golden -- **BOTH dumps, since 2026-08-30: `data-raw-dump.json` AND `mod-settings-dump.json`.** Setting prototypes live in the settings stage's own Lua state and never reach the data dump, so the data hash alone was green for a guest whose `fk_settings` hook silently did nothing -- the recorded "a gate that cannot fail" shape, met at the settings stage. The golden line carries two hashes now;
+2. the **Go and Rust** guests produce the SAME dumps -- two hand-written libraries drift and a census cannot see either;
+3. two runs of the same guest produce the same dumps.
 
-Plus: the guest's own log lines must be in the run (a dump that matched while the guest never ran is the vacuous pass this has to be able to fail on), and the engine's `Prototype list checksum` is printed and **labelled as a smoke test only**, because it is measured blind to field values.
+Plus: the guest's own log lines must be in the run (a dump that matched while the guest never ran is the vacuous pass this has to be able to fail on); **the settings->data round trip is asserted by name** (the run must log `startup fkd-enabled is true`, the setting `fk_settings` declared read back through env(3) -- the dump hash covers the same fact through the marker technology's `enabled` field, but a hash can only say "different" and this names the cause); and the engine's `Prototype list checksum` is printed and **labelled as a smoke test only**, because it is measured blind to field values.
 
 **The golden line records the MOD SET** as well as the engine, and a mismatch there reads as SKIP rather than as a broken mod: the dump is a function of every mod that ran, and Factorio's bundled DLC data loads whatever `--mod-directory` says, so a machine that owns different DLC produces a different dump for a mod that is perfectly fine.
+
+**A golden line dies with the examples that produced it.** The 2026-08-30 example change (the settings->data round trip landing in the marker technology, plus the env(4)/env(5) lines) invalidated every earlier line at once; the file was re-taken from scratch on the engine then installed, and an engine with no line reads as "record it" rather than as a failure -- switch the Steam branch and run the script to add one.
 
 **The script builds `bin/fklua` itself, every run.** `runtime/lua/fk_data.lua` is embedded in the binary, so a stale `bin/fklua` packages a stale shim -- and that cost a red proof in this round: a defect injected, reverted, and measured again against a binary nobody had rebuilt, which reported the reverted defect as still present. Identical output from a changed input is a bug in the harness until proven otherwise.
 
@@ -345,7 +347,7 @@ The user-facing page is `docs/data-stage.md`, "Sharing one config between the tw
 
 ## Open items
 
-- **The golden has a line per engine and both series are recorded**: 2.0.77 and 2.1.16. base's own prototypes move between series, so a hash taken on one says nothing about the other; the mod-set column is what makes the difference legible, since 2.1 bundles `recycler` and 2.0.77 does not. Both arms produce an identical dump from the Go and the Rust guest, and both are deterministic across two runs.
+- **The golden has a line per engine, and after the 2026-08-30 re-take only the then-installed engine's line exists.** The settings->data round-trip change invalidated every earlier line (2.0.77, 2.1.16, 2.1.17) at once; base's own prototypes move between series, so a hash taken on one engine says nothing about another, and a missing line reads as "record it" rather than as a failure. Re-take a 2.1.x line the next time that branch is installed. The mod-set column is what makes a series difference legible, since 2.1 bundles `recycler` and 2.0.77 does not.
 - **The tier-2 per-leaf cost is derived, not measured.** D-clone's 150-vs-2500 leaf comparison is arithmetic over measured leaf counts; the microseconds are not. If a future round wants a number, measure `read_dyn`/`write_dyn` over a real prototype under `lua52f` before committing to any optimisation.
 - **`helpers` is userdata at both stages** and was not enumerated. If a future data-stage need wants `helpers.*`, probe it before designing around it.
 - **`load()` and `string.dump` are present at the data stage.** Nothing here uses them and nothing should; a future "just `load()` the chunk" shortcut would bypass the factory shape the whole thing rests on.

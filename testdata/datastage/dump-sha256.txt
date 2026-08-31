@@ -1,12 +1,17 @@
 # The data-stage acceptance golden, one line per engine:
 #
-#     <engine>  <sha256 of `jq -S .` over data-raw-dump.json>  <the mod set>
+#     <engine>  <sha256 of `jq -S .` over data-raw-dump.json> <sha256 of `jq -S .` over mod-settings-dump.json>  <the mod set>
 #
 # Written and checked by scripts/run-datastage.sh, which packages
 # guest/{go,rust}/examples/datastage as a mod, runs `factorio --dump-data`, and
-# hashes the normalised dump.
+# hashes both normalised dumps.
 #
-# WHY NORMALISED. Key order in the dump is INSERTION order, so two mods
+# WHY TWO HASHES. Setting prototypes live in the settings stage's own Lua state
+# and never reach data-raw-dump.json, so a golden over the data dump alone is
+# green for a guest whose fk_settings hook silently did nothing. The settings
+# dump is where they land, and hashing it is what lets the settings stage fail.
+#
+# WHY NORMALISED. Key order in the dumps is INSERTION order, so two mods
 # differing only in the order they call data:extend produce dumps that differ at
 # a byte and describe the same game. `jq -S` sorts every object; measured, that
 # removes an ordering difference completely and preserves a real field-value
@@ -19,9 +24,10 @@
 # rather than as a broken mod.
 #
 # WHY PER ENGINE. base's own prototypes move between series, so a hash taken on
-# one engine says nothing about another. Both 2.0.x and 2.1.x are recorded, and
-# the mod-set column is what makes the difference legible rather than mysterious:
-# 2.1 bundles `recycler` and 2.0.77 does not.
-2.0.77  b2f94000d43cedff88af03686774d182883feccba977c27836efcc8cd4e0907c  base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
-2.1.16  d7a87af89e4bb773c60fb6ef690cc6bb202f00beaf892e9f889db57ad2f3a3af  base@2.1.16 core@0.0.0 elevated-rails@2.1.16 fkd-example@0.1.0 quality@2.1.16 recycler@2.1.16 space-age@2.1.16
-2.1.17  4bf04000445104978fb4f843ce20d8d6e3a93d2b9217e2e6f4f94c4d6ddc311b  base@2.1.17 core@0.0.0 elevated-rails@2.1.17 fkd-example@0.1.0 quality@2.1.17 recycler@2.1.17 space-age@2.1.17
+# one engine says nothing about another. A line is re-taken on its own engine
+# whenever the example guests change; the 2026-08-30 change (the settings->data
+# round trip, plus the env(4)/env(5) log lines) invalidated every earlier line
+# at once, so this file was re-taken from scratch on the engine then installed.
+# An engine with no line reads as "record it" rather than as a failure; switch
+# the Steam branch and run the script to add one.
+2.0.77  b94427c6df824f223001ea3a2e2045850d55101eb9a8f6f076fc3985bc7216c0 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e  base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77

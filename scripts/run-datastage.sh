@@ -160,14 +160,21 @@ build_data() {
   esac
 }
 
-# dump_once LANG RUN -> prints the sha256 of the normalised dump
+# dump_once LANG RUN -> prints "<data sha256> <settings sha256>", both over
+# normalised dumps.
+#
+# THE SETTINGS DUMP IS HASHED TOO, and it took a gap to learn why: setting
+# prototypes live in the settings stage's own Lua state and NEVER reach
+# data-raw-dump.json, so a golden over the data dump alone is green for a
+# guest whose fk_settings hook silently did nothing -- the recorded "a gate
+# that cannot fail" shape, met at the settings stage.
 #
 # THE MOD NAME IS THE SAME FOR BOTH LANGUAGES, deliberately: a prototype does
 # not record which mod defined it, so two runs of one name produce comparable
-# dumps where two names would differ in mod-settings-dump.json and nowhere
-# useful.
+# dumps where two names would put a difference in mod-settings-dump.json that
+# says nothing useful.
 dump_once() {
-  local lang="$1" run="$2" out
+  local lang="$1" run="$2" out sout
   rm -rf "$MODDIR"
   mkdir -p "$MODDIR"
   "$ROOT/bin/fklua" mod "$CONTROL" \
@@ -177,14 +184,18 @@ dump_once() {
     -o "$MODDIR" >"$TMPDIR/datastage-package-$lang.log" 2>&1 ||
     { cat "$TMPDIR/datastage-package-$lang.log" >&2; return 1; }
 
-  rm -f "$USERDIR/script-output/data-raw-dump.json"
+  rm -f "$USERDIR/script-output/data-raw-dump.json" \
+        "$USERDIR/script-output/mod-settings-dump.json"
   "$FACTORIO" "${CFGARG[@]}" --mod-directory "$MODDIR" --dump-data \
     >"$TMPDIR/datastage-dump-$lang-$run.log" 2>&1 ||
     { cat "$TMPDIR/datastage-dump-$lang-$run.log" >&2; return 1; }
 
   out="$USERDIR/script-output/data-raw-dump.json"
+  sout="$USERDIR/script-output/mod-settings-dump.json"
   [ -f "$out" ] || { echo "no dump at $out" >&2; return 1; }
-  "${NORMALISE[@]}" < "$out" | shasum -a 256 | cut -d' ' -f1
+  [ -f "$sout" ] || { echo "no settings dump at $sout" >&2; return 1; }
+  echo "$("${NORMALISE[@]}" < "$out" | shasum -a 256 | cut -d' ' -f1) \
+$("${NORMALISE[@]}" < "$sout" | shasum -a 256 | cut -d' ' -f1)"
 }
 
 # mod_set LOG -- the data-stage mod set, as one comparable string.
@@ -216,7 +227,7 @@ for lang in $LANGS; do
 
   echo "  wasm $wasm_bytes B -> fk_data_module.lua $lua_bytes B"
   echo "  ${checksum:-Prototype list checksum: (not logged)}  <- SMOKE TEST ONLY: blind to field values"
-  echo "  sha256 $h1"
+  echo "  sha256 (data, settings) $h1"
 
   if [ "$h1" != "$h2" ]; then
     echo "  FAIL: two runs of the same guest produced different dumps" >&2
@@ -235,6 +246,19 @@ for lang in $LANGS; do
     echo "  ok: the guest ran (its log lines are in the dump run)"
   else
     echo "  FAIL: the guest never logged anything, so the dump says nothing" >&2
+    FAIL=1
+  fi
+
+  # THE SETTINGS -> DATA ROUND TRIP, asserted in game by name: the setting
+  # fk_settings declared came back through env(3) at the data stage with its
+  # default value. The dump hash covers the same fact through the marker
+  # technology's enabled field, but a hash can only say "different"; this
+  # names the cause.
+  if grep -q "fkdata example: startup fkd-enabled is true" \
+    "$TMPDIR/datastage-dump-$lang-2.log"; then
+    echo "  ok: the settings stage's own setting read back at the data stage"
+  else
+    echo "  FAIL: the startup setting never came back at the data stage" >&2
     FAIL=1
   fi
 
@@ -262,8 +286,8 @@ echo "mods: $MODS"
 WANT=""
 WANTMODS=""
 if [ -f "$GOLDEN" ]; then
-  WANT="$(awk -v e="$ENGINE" '$1 == e { print $2 }' "$GOLDEN")"
-  WANTMODS="$(awk -v e="$ENGINE" '$1 == e { $1 = ""; $2 = ""; sub(/^  /, ""); print }' "$GOLDEN")"
+  WANT="$(awk -v e="$ENGINE" '$1 == e { print $2 " " $3 }' "$GOLDEN")"
+  WANTMODS="$(awk -v e="$ENGINE" '$1 == e { $1 = ""; $2 = ""; $3 = ""; sub(/^ +/, ""); print }' "$GOLDEN")"
 fi
 if [ -z "$WANT" ]; then
   echo "no golden recorded for Factorio $ENGINE."

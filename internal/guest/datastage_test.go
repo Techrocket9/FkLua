@@ -45,6 +45,9 @@ func TestAGoProgramBecomesAModsDataStage(t *testing.T) {
 		// env(5): defines.prototypes, both accessors, against the stand-in's
 		// three item deriveds.
 		"LOG fkdata example: transport-belt is an entity; item derives 3 types",
+		// The settings -> data round trip: the setting fk_settings declared,
+		// read back through env(3) at the data stage.
+		"LOG fkdata example: startup fkd-enabled is true",
 		"LOG fkdata example: fastest belt is fkd-belt",
 		"LOG fkdata example: data-final-fixes stage",
 	} {
@@ -66,8 +69,10 @@ func TestAGoProgramBecomesAModsDataStage(t *testing.T) {
 		// data stage gets wrong, and it is what doing it in Go fixes.
 		`SPRITE x=0 shift=0,-0.196`,
 		`SPRITE2 x=192 shift=0,0.404`,
-		// get + extend: the technology's cost is base's own
-		`TECH count=20 time=15 ingr=automation-science-pack/1`,
+		// get + extend: the technology's cost is base's own, and its enabled
+		// field is the startup setting's value -- the round trip, landed in
+		// the built prototype rather than only in a log line
+		`TECH count=20 time=15 ingr=automation-science-pack/1 enabled=true`,
 		// clone + set: the patched fields moved and the untouched leaves did not
 		`CLONE speed=0.25 minable=nil next_upgrade=nil icon=__base__/x.png ` +
 			`coeff=32 anim=16 flags1=not-on-map box=-0.35/-0.35/0.35/0.35`,
@@ -400,7 +405,8 @@ print("SOURCE box=" .. table.concat({srcbelt.collision_box[1][1], srcbelt.collis
 local tech = data.raw.technology["fkd-marker"]
 print("TECH count=" .. tostring(tech.unit.count) .. " time=" .. tostring(tech.unit.time) ..
       " ingr=" .. tostring(tech.unit.ingredients[1][1]) .. "/" ..
-      tostring(tech.unit.ingredients[1][2]))
+      tostring(tech.unit.ingredients[1][2]) ..
+      " enabled=" .. tostring(tech.enabled))
 local sp = data.raw.sprite["fkd-arrow-in-n"]
 print("SPRITE x=" .. tostring(sp.x) .. " shift=" .. tostring(sp.shift[1]) .. "," ..
       tostring(sp.shift[2]))
