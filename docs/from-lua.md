@@ -20,6 +20,25 @@ The ecosystem's shared library is a set of Lua modules that every mod copies int
 
 **The one residual is prototype fragments.** Helper modules that build a piece of a prototype and hand it back to be spliced in do not fit the data ABI's model: a data guest reads and patches `data.raw` through the host and clones a prototype without marshalling it, which is what keeps the untouched fields exactly as the source shipped them. A helper that returns a table for you to merge would have to marshal that table out and back. Building the fragment in the guest and emitting it as a prototype works; adopting somebody else's Lua fragment library does not. See [data-stage.md](data-stage.md).
 
+## flib, and what of it you already have
+
+flib is the most used library on the mod portal, and for a guest it splits three ways.
+
+**The largest slice is free, with no code at all.** flib's data stage ships around forty named GUI styles (`flib_naked_scroll_pane`, `flib_frame_title`, the `flib_slot_button_*` and `flib_technology_slot_*` families and the rest), a set of sprites, and locale for more than forty languages. Styles and sprites live in global prototype namespaces, so a mod that declares the dependency can name them directly:
+
+```toml
+[mod]
+dependencies = ["flib >= 0.17"]
+```
+
+and then write `style: "flib_naked_scroll_pane"` in an add spec, or pass the name to `SetStyle`. No bridging, no port, no Lua.
+
+**Most of the rest is the table above.** The array, table, math and queue modules are answers to Lua's own gaps and land on the language; the migration, tick-scheduling, GUI-dispatch and reverse-defines modules land on surfaces this compiler already provides.
+
+**The genuinely portable remainder is small and known.** The localised-string dictionary machinery (request translations in batches, collect results from `on_string_translated`, publish per-player dictionaries when a language completes) is real state-machine work; every primitive it needs is in the bindings, and a ready-made guest package for it does not exist yet. The geometry and format helpers are a few hundred lines over the generated structs if you prefer them as a package rather than as inline arithmetic.
+
+**Do not reach flib through `remote`.** Nothing flib exposes is service-shaped (it registers no remote interfaces at all), and a remote call pays for decoding its whole payload plus a deep copy in each direction, which for a pure function on data is hundreds of times the cost of computing the same thing in the guest.
+
 ## The `remote.interfaces` guard, which you no longer need
 
 A Lua mod that talks to a neighbour guards every call, because `remote.call` into an interface that is not there RAISES and takes the handler down with it:
