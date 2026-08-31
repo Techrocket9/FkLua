@@ -44,8 +44,10 @@ jobs:
       # TinyGo is deliberately NOT installed here, and the job declares that in
       # its `env:` above so the availability guards skip instead of failing.
       # The cost is real and is the reason: with a toolchain present
-      # internal/guest takes 113 s locally, nearly all of it TinyGo builds, and
-      # that lands on top of a job already running about four minutes. Rust is
+      # internal/guest takes ~245 s locally (re-measured 2026-08-30; it was
+      # 113 s when this was written), nearly all of it TinyGo and cargo wasm
+      # builds, and that lands on top of a job already running about four
+      # minutes. Rust is
       # worth provisioning because it is what gates the generated bindings
       # compiling.
       #
