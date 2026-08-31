@@ -3,10 +3,13 @@ package main
 import (
 	"archive/zip"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Techrocket9/fklua/internal/factorio"
 )
 
 // The smallest thing that packages: one memory, one export.
@@ -303,5 +306,92 @@ func TestWithoutTheFlagTheManifestListIsUntouched(t *testing.T) {
 		deps[0] != "base >= 2.0.0" || deps[1] != "? nullius" {
 		t.Errorf("info.json declares %q (present=%v), want the manifest's own "+
 			"two entries", deps, present)
+	}
+}
+
+// THE ENGINE SERIES LINE SAYS WHERE THE SERIES CAME FROM, AND ITS FALLBACK USED
+// TO NAME THE WRONG PIN.
+//
+// `api` and `factorio_version` are two axes: the pin says which description the
+// packaged tables came from, the series says which engine info.json claims. They
+// are seeded independently -- info.FactorioVersion starts at
+// DefaultFactorioVersion and the project's own pin never reaches it -- so a
+// project pinning a 2.1.x description with no `factorio_version` key really does
+// declare "2.0", and a 2.1 engine refuses that mod at game start. The VALUE is
+// deliberate and documented, and `fklua meta` reports the same one.
+//
+// The ATTRIBUTION was not. The fallback read "(from the <resolved pin>'s
+// series)", so the pinned project above was told its 2.0 came from the 2.1.16
+// pin -- whose series is 2.1. The one reader positioned to catch the game-start
+// refusal, looking at the one line where both axes are visible at once, was told
+// the two already agreed. Asserting the whole line rather than a substring
+// because the failure was a sentence that parsed and was false.
+func TestTheEngineSeriesLineNamesWhereItCameFrom(t *testing.T) {
+	other := otherAPIVersion(t)
+	apiDir := filepath.Join(moduleRoot(t), "api")
+
+	for _, tc := range []struct {
+		name   string
+		key    string   // the [mod] factorio_version line, or nothing
+		args   []string // what the command line adds
+		series string
+		from   string
+	}{
+		// The regression: a non-default pin, no key and no flag. The value is
+		// fklua's default pin's series and the line has to name that pin.
+		{
+			name:   "neither the key nor the flag",
+			series: factorio.DefaultFactorioVersion,
+			from:   "fklua's default " + factorio.DefaultAPIVersion + " pin's series",
+		},
+		{
+			name:   "the manifest key",
+			key:    "factorio_version = \"2.1\"\n",
+			series: "2.1",
+			from:   projectFile,
+		},
+		// The flag overrides a key that is present, which is the case fvFromFlag
+		// exists for -- and the line has to follow it.
+		{
+			name:   "the flag over the key",
+			key:    "factorio_version = \"2.1\"\n",
+			args:   []string{"--factorio-version", "1.1"},
+			series: "1.1",
+			from:   "--factorio-version",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("FKLUA_API_DIR", apiDir)
+			if err := os.WriteFile(filepath.Join(dir, projectFile), []byte(`[mod]
+name = "pinned-mod"
+version = "0.1.0"
+`+tc.key+`
+[fklua]
+api = "`+other+`"
+`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			guest := tinyGuest(t)
+			t.Chdir(dir)
+
+			out := captureStdout(t, func() error {
+				return runMod(append([]string{guest, "-o", filepath.Join(dir, "out")},
+					tc.args...))
+			})
+
+			want := fmt.Sprintf("  info.json declares Factorio %s (from %s)\n",
+				tc.series, tc.from)
+			if !strings.Contains(out, want) {
+				t.Errorf("`fklua mod` printed\n%s\nwant a line reading\n%s", out, want)
+			}
+			// The defect itself, in one assertion: the project's own pin credited
+			// for a series it never supplied.
+			if strings.Contains(out, other+" pin's series") {
+				t.Errorf("the series is credited to the project's %s pin; that pin's "+
+					"series is not %s and nothing derives the series from it",
+					other, tc.series)
+			}
+		})
 	}
 }
