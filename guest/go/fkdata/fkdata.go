@@ -430,6 +430,45 @@ func ModName() string {
 	return envValue(4, &modNameCache).String()
 }
 
+// DerivedTypes is every concrete prototype TYPE under one of the engine's base
+// types, SORTED -- the engine's defines.prototypes["item"] holds "ammo",
+// "armor", "tool" and the rest.
+//
+// This is the enumeration a prototype browser is built on: "every kind of item
+// prototype" is a question data.raw alone cannot answer, because a concrete
+// type carries no marker saying which base type it narrows. Empty for a name
+// that is not a base type.
+func DerivedTypes(base string) []string {
+	v, ok := envValue(5, &protoCache).At(base)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(v.Arr))
+	for _, d := range v.Arr {
+		if d.Tag == TagString {
+			out = append(out, d.Str)
+		}
+	}
+	return out
+}
+
+// BaseType is the base prototype type a concrete TYPE derives from --
+// BaseType("transport-belt") answers "entity" -- and false for a name the
+// engine's defines.prototypes lists nowhere.
+//
+// Should the engine ever list one name under more than one base, the first
+// base in sorted order answers, deterministically.
+func BaseType(derived string) (string, bool) {
+	for _, kv := range envValue(5, &protoCache).Map {
+		for _, d := range kv.Val.Arr {
+			if d.Tag == TagString && d.Str == derived {
+				return kv.Key.String(), true
+			}
+		}
+	}
+	return "", false
+}
+
 // ---------------------------------------------------------------------------
 // The wire.
 // ---------------------------------------------------------------------------
@@ -443,6 +482,7 @@ var (
 	flagsCache   envCache
 	startupCache envCache
 	modNameCache envCache
+	protoCache   envCache
 )
 
 type envCache struct {

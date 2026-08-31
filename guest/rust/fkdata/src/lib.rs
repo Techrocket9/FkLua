@@ -430,6 +430,46 @@ pub fn mod_name() -> String {
     String::from(env_value(4).string())
 }
 
+/// Every concrete prototype TYPE under one of the engine's base types, SORTED
+/// -- the engine's `defines.prototypes["item"]` holds `ammo`, `armor`, `tool`
+/// and the rest.
+///
+/// This is the enumeration a prototype browser is built on: "every kind of
+/// item prototype" is a question `data.raw` alone cannot answer, because a
+/// concrete type carries no marker saying which base type it narrows. Empty
+/// for a name that is not a base type.
+pub fn derived_types(base: &str) -> Vec<String> {
+    match env_value(5).at(base) {
+        Some(V::Arr(items)) => items
+            .iter()
+            .filter_map(|d| match d {
+                V::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The base prototype type a concrete TYPE derives from --
+/// `base_type("transport-belt")` answers `entity` -- and `None` for a name the
+/// engine's `defines.prototypes` lists nowhere.
+///
+/// Should the engine ever list one name under more than one base, the first
+/// base in sorted order answers, deterministically.
+pub fn base_type(derived: &str) -> Option<String> {
+    if let V::Map(pairs) = env_value(5) {
+        for (k, v) in pairs.iter() {
+            if let V::Arr(items) = v {
+                if items.iter().any(|d| d.string() == derived) {
+                    return Some(String::from(k.string()));
+                }
+            }
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // The wire.
 // ---------------------------------------------------------------------------
@@ -445,7 +485,7 @@ const DYN_PW: usize = 32;
 /// `static mut` rather than a lock: wasm without the threads proposal has one
 /// thread, so there is no second accessor to race with -- the same shape every
 /// other guest in this workspace uses for its state.
-static mut ENV_CACHE: [Option<V>; 4] = [None, None, None, None];
+static mut ENV_CACHE: [Option<V>; 5] = [None, None, None, None, None];
 
 fn env_value(which: u32) -> V {
     let idx = (which - 1) as usize;

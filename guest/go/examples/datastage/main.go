@@ -19,7 +19,11 @@
 //	fklua mod control.wasm --data-module datastage.wasm --name fk-datastage ...
 package main
 
-import "github.com/Techrocket9/fklua/guest/go/fkdata"
+import (
+	"strconv"
+
+	"github.com/Techrocket9/fklua/guest/go/fkdata"
+)
 
 // The mod's own prefix, so nothing here can collide with a real mod.
 const prefix = "fkd-"
@@ -52,6 +56,12 @@ func onData() {
 	// library would derive instead of hardcoding, logged so the in-game run
 	// and the mirror test both pin that it arrives.
 	fkdata.Log("fkdata example: mod name is " + fkdata.ModName())
+
+	// defines.prototypes through env(5): the base-type map a prototype browser
+	// needs and data.raw alone cannot answer. One line, both accessors.
+	base, _ := fkdata.BaseType("transport-belt")
+	fkdata.Log("fkdata example: transport-belt is an " + base + "; item derives " +
+		strconv.Itoa(len(fkdata.DerivedTypes("item"))) + " types")
 
 	// A computed table. Eight sprites out of one loop, with the offset
 	// arithmetic done in Go rather than written out as sixteen magic numbers --

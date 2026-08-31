@@ -68,6 +68,14 @@ pub extern "C" fn fk_data() {
     // and the mirror test both pin that it arrives.
     fkdata::log(&format!("fkdata example: mod name is {}", fkdata::mod_name()));
 
+    // defines.prototypes through env(5): the base-type map a prototype browser
+    // needs and data.raw alone cannot answer. One line, both accessors.
+    let base = fkdata::base_type("transport-belt").unwrap_or_default();
+    fkdata::log(&format!(
+        "fkdata example: transport-belt is an {base}; item derives {} types",
+        fkdata::derived_types("item").len()
+    ));
+
     // A computed table. Eight sprites out of one loop, with the offset
     // arithmetic done in Rust rather than written out as sixteen magic numbers
     // -- which is the case the whole feature exists for.

@@ -42,6 +42,9 @@ func TestAGoProgramBecomesAModsDataStage(t *testing.T) {
 		// env(4): the packager's own name, through the REAL generated stage
 		// file -- which is what proves `fklua mod` wrote it into run().
 		"LOG fkdata example: mod name is fkd-example",
+		// env(5): defines.prototypes, both accessors, against the stand-in's
+		// three item deriveds.
+		"LOG fkdata example: transport-belt is an entity; item derives 3 types",
 		"LOG fkdata example: fastest belt is fkd-belt",
 		"LOG fkdata example: data-final-fixes stage",
 	} {
@@ -279,6 +282,12 @@ function log(s) print("LOG " .. s) end
 
 mods = { base = "2.0.77", ["fkd-example"] = "0.1.0" }
 feature_flags = { space_travel = false, quality = true }
+
+-- defines.prototypes in the engine's own shape: base -> { derived -> 0 }.
+defines = { prototypes = {
+  item = { item = 0, ammo = 0, tool = 0 },
+  entity = { ["transport-belt"] = 0, furnace = 0, container = 0 },
+} }
 
 -- The canonical serialiser. Sorted keys, %%.17g numbers: the transcript has to
 -- be a function of the values, never of a table's iteration order.

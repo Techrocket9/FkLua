@@ -31,7 +31,8 @@
 --   fkdata.keys(pathp, retp)  -> status  the keys at a path, SORTED
 --   fkdata.env(which, retp)   -> status  1 mods, 2 feature_flags,
 --                                        3 settings.startup, 4 the mod's own
---                                        name (packager-supplied; see run)
+--                                        name (packager-supplied; see run),
+--                                        5 defines.prototypes
 --
 -- plus env.fk_log and env.fk_print, which every guest has.
 --
@@ -541,10 +542,31 @@ function M.run(stage, modname)
           -- map, and nil under a stage file written by an older fklua.
           write_sorted(retp, modname, 0, nil)
           return FKD_OK
+        elseif which == 5 then
+          -- defines.prototypes: every base prototype type and the concrete
+          -- type names that derive from it, which is the map "every kind of
+          -- item" needs and data.raw alone cannot answer. The engine keeps it
+          -- as base -> { derived -> 0 } with the zeros carrying nothing, so
+          -- what crosses is base -> SORTED ARRAY of names -- an array because
+          -- the dummy values would be noise, sorted HERE because write_sorted
+          -- orders dictionaries and deliberately not arrays. Absent defines
+          -- reads as an empty map, the same answer env(3) gives the settings
+          -- stage, rather than raising about an engine this shim cannot see.
+          if defines and defines.prototypes then
+            for base, derived in pairs(defines.prototypes) do
+              local names, n = {}, 0
+              for d in pairs(derived) do
+                n = n + 1
+                names[n] = d
+              end
+              table.sort(names, key_less)
+              out[base] = names
+            end
+          end
         else
           fail("env was asked for " .. tostring(which) ..
-               ", and there are four: 1 mods, 2 feature_flags, " ..
-               "3 settings.startup, 4 the mod's own name")
+               ", and there are five: 1 mods, 2 feature_flags, " ..
+               "3 settings.startup, 4 the mod's own name, 5 defines.prototypes")
         end
         write_sorted(retp, out, 0, nil)
         return FKD_OK

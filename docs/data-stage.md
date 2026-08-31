@@ -97,6 +97,7 @@ Seven operations. Everything that is a failure raises at the stage, naming the s
 | `FeatureFlag(name)` | `feature_flag(name)` | `space_travel`, `quality`, and the rest |
 | `StartupSetting(name) (V, bool)` | `startup_setting(name)` | one startup setting's value |
 | `ModName() string` | `mod_name()` | this mod's own name, from the packager |
+| `DerivedTypes(base)`, `BaseType(derived)` | `derived_types(base)`, `base_type(derived)` | the engine's `defines.prototypes` map, both directions |
 | `Log(s string)` | `log(s)` | a line in `factorio-current.log` |
 
 A **path** is strings and numbers rooted at `data.raw`, so a field two levels inside an array is reachable:

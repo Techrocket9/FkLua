@@ -47,6 +47,13 @@ function log(s) print("LOG " .. s) end
 mods = { base = "2.0.77", ["z-last"] = "1.0.0", ["a-first"] = "0.1.0" }
 feature_flags = { space_travel = false, quality = true }
 
+-- defines.prototypes in the engine's own shape: base -> { derived -> 0 }, the
+-- zeros carrying nothing. Present at both stages in a real Factorio.
+defines = { prototypes = {
+  item = { item = 0, ammo = 0, tool = 0 },
+  entity = { ["transport-belt"] = 0, furnace = 0, container = 0 },
+} }
+
 data = { raw = {} }
 function data:extend(list)
   if type(list) ~= "table" then error("data:extend takes a table", 0) end
@@ -531,6 +538,53 @@ func TestAnAbsentModNameReadsAsNil(t *testing.T) {
 	}
 	if !strings.Contains(out, "st 0 modname nil") {
 		t.Errorf("an absent mod name should read as nil:\n%s", out)
+	}
+}
+
+// defines.prototypes crosses through env(5) as base -> SORTED ARRAY of derived
+// names -- an array because the engine's dummy zeros carry nothing, sorted by
+// the shim because write_sorted orders dictionaries and deliberately not
+// arrays. This is the enumeration a prototype browser needs and data.raw alone
+// cannot answer.
+func TestDefinesPrototypesCrossSortedAsArrays(t *testing.T) {
+	out := mustRunDataStage(t, 2, "", `
+  local got = slot()
+  D.env(5, got)
+  local IO = FKD_MEMIO
+  local n, base = IO.ld32(got + 12), IO.ld32(got + 8)
+  for i = 0, n - 1 do
+    local k = H.read_dyn(base + i * H.DYNPW)
+    local names = H.read_dyn(base + i * H.DYNPW + H.DYNW)
+    print("base " .. tostring(k) .. ": " .. table.concat(names, " "))
+  end
+`)
+	// Both levels sorted: the bases (write_sorted's dictionary order) and the
+	// derived names (the shim's own sort).
+	for _, w := range []string{
+		"base entity: container furnace transport-belt",
+		"base item: ammo item tool",
+	} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in:\n%s", w, out)
+		}
+	}
+	if strings.Index(out, "base entity") > strings.Index(out, "base item") {
+		t.Errorf("the bases are not in sorted order:\n%s", out)
+	}
+}
+
+// An environment with no defines -- nothing this shim supports lacks one, but
+// the arm must not turn that assumption into a raise -- reads as an empty map,
+// the same answer env(3) gives the settings stage.
+func TestAbsentDefinesReadsAsAnEmptyMap(t *testing.T) {
+	out := mustRunDataStage(t, 2, "defines = nil", `
+  local got = slot()
+  D.env(5, got)
+  local v = H.read_dyn(got)
+  print("prototypes type " .. type(v) .. " next " .. tostring(next(v)))
+`)
+	if !strings.Contains(out, "prototypes type table next nil") {
+		t.Errorf("absent defines should read as an empty map:\n%s", out)
 	}
 }
 
