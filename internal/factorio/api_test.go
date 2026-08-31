@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -118,7 +119,7 @@ func committedVersions(t *testing.T) []string {
 // would wave through.
 func TestCensusMatchesTheCommittedBaseline(t *testing.T) {
 	a := loadTestAPI(t)
-	got, err := TakeCensus(a)
+	got, err := cachedCensus(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,4 +242,100 @@ func TestMethodReturnArity(t *testing.T) {
 		t.Errorf("max return arity = %d (%s), want 3 -- if this moved, re-check "+
 			"the slot count in fk_abi.lua's invoke", worst, where)
 	}
+}
+
+// stdGen is the STANDARD full generation for one committed description,
+// computed once per description for the life of the test binary.
+//
+// IT EXISTS BECAUSE THIS PACKAGE'S ENTIRE COST IS ONE PURE FUNCTION RUN OVER
+// AND OVER. Measured under -race, which is how CI runs it: LoadAPI is 0.30 s,
+// GenerateMembers 0.04 s, GenerateRust 0.39 s -- and GenerateGoWith is 4.35 s,
+// of which format.Source over the 5.1 MB it just emitted is 4.04 s. TakeCensus
+// is another 4.84 s because it calls both generators itself to count what they
+// bound. Fifty-odd call sites across this package each paid that from scratch,
+// so the package took 486 s under -race against 48 s without, and on
+// 2026-08-31 it crossed `go test`'s ten-minute default and took six pushes red.
+// With the memo it is 184 s for the same 331 tests.
+//
+// Nothing about that work is per-test: the generators are deterministic in the
+// description, so every one of those call sites was recomputing a value it
+// shares with all the others. THE CACHE KEY IS THEREFORE THE VERSION and
+// nothing else -- a test that builds a MODIFIED report (Report.Only, a
+// hand-built API, a mutated concept) is asking a different question and must
+// keep calling the generators directly, which is what every such test still
+// does.
+//
+// WHAT IT HANDS BACK IS SHARED, NOT COPIED. Source is a string and the counts
+// are ints, so those are values; GoBindings.DeferredBy, RustBindings.Names and
+// CensusData's maps are not, and a test that WROTE to one would corrupt every
+// later test in the package. Read them. Nothing here needs to write to one, and
+// a test that does needs its own generation rather than a defensive copy here,
+// because a copy would hide the fact that it wanted a different value.
+type stdGeneration struct {
+	API     *API
+	Members Report
+	Events  EventReport
+	Go      GoBindings
+	Rust    RustBindings
+	Census  CensusData
+}
+
+var (
+	stdGenMu    sync.Mutex
+	stdGenCache = map[string]*stdGeneration{}
+)
+
+// stdGen returns the memoized standard generation for one committed
+// description. See stdGeneration.
+func stdGen(t *testing.T, version string) *stdGeneration {
+	t.Helper()
+	stdGenMu.Lock()
+	defer stdGenMu.Unlock()
+	if g, ok := stdGenCache[version]; ok {
+		return g
+	}
+	a, err := LoadAPI(filepath.Join("..", "..", "api", version, "runtime-api.json"))
+	if err != nil {
+		t.Fatalf("LoadAPI(%s): %v", version, err)
+	}
+	g := &stdGeneration{API: a, Members: GenerateMembers(a), Events: GenerateEvents(a)}
+	if g.Go, err = GenerateGoWith(a, g.Members, g.Events, "fkapi"); err != nil {
+		t.Fatalf("GenerateGoWith(%s): %v", version, err)
+	}
+	if g.Rust, err = GenerateRust(a, g.Members, g.Events); err != nil {
+		t.Fatalf("GenerateRust(%s): %v", version, err)
+	}
+	if g.Census, err = TakeCensus(a); err != nil {
+		t.Fatalf("TakeCensus(%s): %v", version, err)
+	}
+	stdGenCache[version] = g
+	return g
+}
+
+// cachedGo, cachedRust and cachedCensus are the generators for a description
+// that came off disk UNMODIFIED, answered from stdGen's memo.
+//
+// They keep the generators' own (value, error) shape on purpose, so a call site
+// converts by swapping the expression and keeps its error handling exactly as
+// written -- the point is to stop recomputing a shared value, not to change what
+// any test asserts or how it reports.
+//
+// THE KEY IS a.ApplicationVersion, WHICH IS WHY `a` MUST BE UNMODIFIED. The memo
+// reloads that version from disk; if a test mutated its API, or built one by
+// hand, or pruned its Report, these would hand back the generation for the
+// description as committed and quietly answer a different question. Such a test
+// calls GenerateGo/GenerateRust/TakeCensus directly, and several still do.
+func cachedGo(t *testing.T, a *API) (GoBindings, error) {
+	t.Helper()
+	return stdGen(t, a.ApplicationVersion).Go, nil
+}
+
+func cachedRust(t *testing.T, a *API) (RustBindings, error) {
+	t.Helper()
+	return stdGen(t, a.ApplicationVersion).Rust, nil
+}
+
+func cachedCensus(t *testing.T, a *API) (CensusData, error) {
+	t.Helper()
+	return stdGen(t, a.ApplicationVersion).Census, nil
 }

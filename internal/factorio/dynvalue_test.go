@@ -1,7 +1,6 @@
 package factorio
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -29,20 +28,8 @@ func TestBothBackendsEmitTheSameDynValueReaders(t *testing.T) {
 	vers := committedVersions(t)
 	for _, v := range vers {
 		t.Run(v, func(t *testing.T) {
-			a, err := LoadAPI(filepath.Join("..", "..", "api", v, "runtime-api.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			r := GenerateMembers(a)
-			ev := GenerateEvents(a)
-			g, err := GenerateGoWith(a, r, ev, "fkapi")
-			if err != nil {
-				t.Fatal(err)
-			}
-			rb, err := GenerateRust(a, r, ev)
-			if err != nil {
-				t.Fatal(err)
-			}
+			gen := stdGen(t, v)
+			g, rb := gen.Go, gen.Rust
 			if g.DynValueStructs != rb.DynValueStructs {
 				t.Fatalf("go emitted readers for %d structs and rust for %d: "+
 					"one predicate, two renderings -- a disagreement is a defect",

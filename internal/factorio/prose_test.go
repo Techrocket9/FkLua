@@ -1,7 +1,6 @@
 package factorio
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,11 +18,8 @@ import (
 func TestTheDescriptionsProseReachesBothBindings(t *testing.T) {
 	for _, v := range committedVersions(t) {
 		t.Run(v, func(t *testing.T) {
-			a, err := LoadAPI(filepath.Join("..", "..", "api", v, "runtime-api.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			r := GenerateMembers(a)
+			gen := stdGen(t, v)
+			r := gen.Members
 			withDoc := 0
 			for _, m := range r.Members {
 				if m.Doc != "" {
@@ -41,15 +37,7 @@ func TestTheDescriptionsProseReachesBothBindings(t *testing.T) {
 					withDoc, len(r.Members), min)
 			}
 
-			ev := GenerateEvents(a)
-			g, err := GenerateGoWith(a, r, ev, "fkapi")
-			if err != nil {
-				t.Fatal(err)
-			}
-			rb, err := GenerateRust(a, r, ev)
-			if err != nil {
-				t.Fatal(err)
-			}
+			g, rb := gen.Go, gen.Rust
 			// BY NAME, because a fraction cannot say that what was attached is
 			// the member's own sentence rather than a neighbour's. `add`'s
 			// description is stable across every published description.
@@ -146,7 +134,7 @@ func TestDocsRenderParametersAndVariantGroups(t *testing.T) {
 	a := loadTestAPI(t)
 	r := GenerateMembers(a)
 	ev := GenerateEvents(a)
-	g, err := GenerateGoWith(a, r, ev, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}

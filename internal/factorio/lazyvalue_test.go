@@ -199,7 +199,7 @@ func TestLazyLoadedValueGetReturnsTierTwo(t *testing.T) {
 // generator reaches both without a special case.
 func TestGoBindsTheLazyEvent(t *testing.T) {
 	a := loadTestAPI(t)
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatalf("GenerateGo: %v", err)
 	}
@@ -237,8 +237,7 @@ func TestGoBindsTheLazyEvent(t *testing.T) {
 // lagged here would be the regression B1a closed.
 func TestRustBindsTheLazyEvent(t *testing.T) {
 	a := loadTestAPI(t)
-	r := GenerateMembers(a)
-	rb, err := GenerateRust(a, r, GenerateEvents(a))
+	rb, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatalf("GenerateRust: %v", err)
 	}
@@ -284,7 +283,7 @@ func TestBothBackendsAgreeOnTheEventID(t *testing.T) {
 		t.Fatal("no id for on_player_setup_blueprint")
 	}
 
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatalf("GenerateGo: %v", err)
 	}
@@ -332,7 +331,7 @@ func constValue(src, name string) string {
 // avoiding -- is not built either way.
 func TestMappingIsNotMaskableBecauseItIsMandatory(t *testing.T) {
 	a := loadTestAPI(t)
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatalf("GenerateGo: %v", err)
 	}

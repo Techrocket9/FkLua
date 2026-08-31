@@ -13,17 +13,8 @@ import (
 
 func genBoth(t *testing.T) (*API, Report, GoBindings, RustBindings) {
 	t.Helper()
-	a := loadTestAPI(t)
-	r := GenerateMembers(a)
-	ev := GenerateEvents(a)
-	g, err := GenerateGoWith(a, r, ev, "fkapi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rb, err := GenerateRust(a, r, ev)
-	if err != nil {
-		t.Fatal(err)
-	}
+	gen := stdGen(t, DefaultAPIVersion)
+	a, r, g, rb := gen.API, gen.Members, gen.Go, gen.Rust
 	return a, r, g, rb
 }
 

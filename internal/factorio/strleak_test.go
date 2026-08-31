@@ -30,10 +30,9 @@ func TestAStringReturnReleasesWhatTheHostAllocatedForIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := GenerateMembers(a)
 
 	t.Run("go", func(t *testing.T) {
-		g, err := GenerateGo(a, r, "fkapi")
+		g, err := cachedGo(t, a)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +67,7 @@ func TestAStringReturnReleasesWhatTheHostAllocatedForIt(t *testing.T) {
 	})
 
 	t.Run("rust", func(t *testing.T) {
-		rs, err := GenerateRust(a, r, GenerateEvents(a))
+		rs, err := cachedRust(t, a)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,13 +173,12 @@ func TestAStructArgumentIsBracketedInBothBackends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := GenerateMembers(a)
 
-	g, err := GenerateGo(a, r, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rs, err := GenerateRust(a, r, GenerateEvents(a))
+	rs, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}

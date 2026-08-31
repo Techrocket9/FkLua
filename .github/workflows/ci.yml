@@ -86,8 +86,27 @@ jobs:
       - name: Build lua52f (the host-side oracle)
         run: make lua52f
 
+      # THE TIMEOUT IS EXPLICIT BECAUSE GO'S DEFAULT IS TEN MINUTES PER TEST
+      # BINARY, AND THAT IS NOT A BUDGET THIS REPO CHOSE.
+      #
+      # `cmd/fklua` and `internal/factorio` both crossed it on 2026-08-31 and
+      # took six consecutive pushes red -- with no `--- FAIL` line anywhere,
+      # only `panic: test timed out after 10m0s` against a test that had been
+      # running two seconds. They had been at 314 s and 307 s on the last green
+      # run, i.e. already half the ceiling, and the rounds 1-4 batch grew the
+      # generated bindings by 37-41% (api.rs 4.21 -> 5.79 MB), which is what
+      # pushed them over. A timeout that trips on a suite doing exactly what it
+      # is supposed to do is a broken gate, not a slow one.
+      #
+      # AND IT IS THE SHAPE THIS REPO KEEPS GETTING BITTEN BY, one level out:
+      # spectest declares `needs: [go, lua52f]`, so each of those six pushes
+      # reported the conformance suite as a SKIP rather than a failure. A
+      # skipped gate reads exactly like a pass.
+      #
+      # 30m is roughly 3x the observed worst package, which leaves room for the
+      # next feature without leaving a hang unbounded.
       - name: go test
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -timeout 30m -coverprofile=coverage.out ./...
 
       # Enforced from M1, once these packages exist and carry the correctness-
       # critical logic. Raw coverage is a weak metric for a compiler — the real

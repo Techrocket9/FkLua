@@ -58,8 +58,12 @@ all: lua52f
 # output and discards it, which is why that middle ground was built and thrown
 # away, while make writes straight to the terminal. Last line of the recipe, so
 # it is the last thing on screen.
+# -timeout MATCHES ci.yml's, AND FOR ITS REASON: Go's default is ten minutes
+# per test binary, cmd/fklua and internal/factorio crossed it on 2026-08-31,
+# and a bare `go test` here would let this entry point disagree with the gate
+# it exists to reproduce. See the go test step in .github/workflows/ci.yml.
 test: $(LUA52F)
-	go test ./...
+	go test -timeout 30m ./...
 	cd sdk/go && go test ./...
 	cd guest/go && go test ./fkipc/...
 	@if command -v cargo >/dev/null 2>&1; then \

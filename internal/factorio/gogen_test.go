@@ -201,7 +201,7 @@ func TestNoBacktickReachesTheGeneratedSources(t *testing.T) {
 // registrations that can fail.
 func TestADeferredStructIsNotEmittedAsAnEmptyType(t *testing.T) {
 	a := loadTestAPI(t)
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestADeferredStructIsNotEmittedAsAnEmptyType(t *testing.T) {
 // fkapi.LuaControl{Object: fkapi.ObjectAt(h)}.Position().
 func TestASubclassReachesItsParentsMembers(t *testing.T) {
 	a := loadTestAPI(t)
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestASubclassReachesItsParentsMembers(t *testing.T) {
 // among the rest.
 func TestAForwarderNeverShadowsTheClassesOwnMember(t *testing.T) {
 	a := loadTestAPI(t)
-	g, err := GenerateGo(a, GenerateMembers(a), "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}

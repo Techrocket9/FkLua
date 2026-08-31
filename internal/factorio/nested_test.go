@@ -190,12 +190,11 @@ print(st .. " " .. v.before .. " " .. v.after .. " groups=" .. n ..
 // See shapeAPIVersion.
 func TestANestedArrayAndADictionaryOfArraysCross(t *testing.T) {
 	a := loadShapeAPI(t, shapeAPIVersion)
-	r := GenerateMembers(a)
-	g, err := GenerateGo(a, r, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb, err := GenerateRust(a, r, GenerateEvents(a))
+	rb, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,12 +238,11 @@ func TestANestedArrayAndADictionaryOfArraysCross(t *testing.T) {
 // See shapeAPIVersion.
 func TestUtilityConstantsBindsAndReachesItsNestedLeaf(t *testing.T) {
 	a := loadShapeAPI(t, shapeAPIVersion)
-	r := GenerateMembers(a)
-	g, err := GenerateGo(a, r, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb, err := GenerateRust(a, r, GenerateEvents(a))
+	rb, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}

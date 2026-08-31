@@ -49,16 +49,7 @@ func TestEveryCommittedDescriptionHasACurrentCensus(t *testing.T) {
 		}
 		n++
 
-		a, err := LoadAPI(desc)
-		if err != nil {
-			t.Errorf("%s: %v", desc, err)
-			continue
-		}
-		want, err := TakeCensus(a)
-		if err != nil {
-			t.Errorf("%s: taking the census: %v", v, err)
-			continue
-		}
+		want := stdGen(t, v).Census
 		got, err := LoadCensus(CensusPath(root, v))
 		if err != nil {
 			t.Errorf("%s: %v -- run `fklua gen-bindings`, which refreshes every "+

@@ -455,20 +455,8 @@ func TestTheShardBoundIsSpelledTheSameInBothRuntimes(t *testing.T) {
 // of different members.
 func TestBothBackendsBindTheSameBulkVariants(t *testing.T) {
 	for _, v := range committedVersions(t) {
-		a, err := LoadAPI(filepath.Join("..", "..", "api", v, "runtime-api.json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		r := GenerateMembers(a)
-		ev := GenerateEvents(a)
-		g, err := GenerateGoWith(a, r, ev, "fkapi")
-		if err != nil {
-			t.Fatal(err)
-		}
-		rb, err := GenerateRust(a, r, ev)
-		if err != nil {
-			t.Fatal(err)
-		}
+		gen := stdGen(t, v)
+		a, g, rb := gen.API, gen.Go, gen.Rust
 		if g.BulkVariants != rb.BulkVariants {
 			t.Errorf("%s: go emitted %d bulk variants and rust %d", v,
 				g.BulkVariants, rb.BulkVariants)
@@ -493,7 +481,7 @@ func TestBothBackendsBindTheSameBulkVariants(t *testing.T) {
 		}
 		// The census row is the Go count, and this is what says the Rust one is
 		// not written down a second time.
-		c, err := TakeCensus(a)
+		c, err := cachedCensus(t, a)
 		if err != nil {
 			t.Fatal(err)
 		}

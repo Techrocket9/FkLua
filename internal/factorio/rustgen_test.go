@@ -59,12 +59,11 @@ func TestCommittedRustBindingsAreUpToDate(t *testing.T) {
 // grown rather than something Rust could not express.
 func TestBothBackendsBindTheSameMembers(t *testing.T) {
 	a := loadTestAPI(t)
-	rep, evs := GenerateMembers(a), GenerateEvents(a)
-	g, err := GenerateGoWith(a, rep, evs, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := GenerateRust(a, rep, evs)
+	r, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,12 +498,11 @@ func TestDefinesGenerateRustAccessors(t *testing.T) {
 // not an export.
 func TestBothGeneratorsStampTheSameName(t *testing.T) {
 	a := loadTestAPI(t)
-	rep, evs := GenerateMembers(a), GenerateEvents(a)
-	g, err := GenerateGoWith(a, rep, evs, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := GenerateRust(a, rep, evs)
+	r, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}

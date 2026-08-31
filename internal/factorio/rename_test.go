@@ -33,17 +33,8 @@ func TestEveryNameCollisionHasARow(t *testing.T) {
 	}
 
 	for _, v := range committedVersions(t) {
-		a := loadShapeAPI(t, v)
-		r := GenerateMembers(a)
-		ev := GenerateEvents(a)
-		g, err := GenerateGoWith(a, r, ev, "fkapi")
-		if err != nil {
-			t.Fatalf("%s: %v", v, err)
-		}
-		rb, err := GenerateRust(a, r, ev)
-		if err != nil {
-			t.Fatalf("%s: %v", v, err)
-		}
+		gen := stdGen(t, v)
+		g, rb := gen.Go, gen.Rust
 		for _, b := range []struct {
 			lang    string
 			collide []string

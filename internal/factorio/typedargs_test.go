@@ -135,20 +135,8 @@ func TestASharedParameterCanShareANameWithAVariantOne(t *testing.T) {
 func TestBothBackendsEmitTheSameTypedVariants(t *testing.T) {
 	for _, v := range committedVersions(t) {
 		t.Run(v, func(t *testing.T) {
-			a, err := LoadAPI(filepath.Join("..", "..", "api", v, "runtime-api.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			r := GenerateMembers(a)
-			ev := GenerateEvents(a)
-			g, err := GenerateGoWith(a, r, ev, "fkapi")
-			if err != nil {
-				t.Fatal(err)
-			}
-			rb, err := GenerateRust(a, r, ev)
-			if err != nil {
-				t.Fatal(err)
-			}
+			gen := stdGen(t, v)
+			r, g, rb := gen.Members, gen.Go, gen.Rust
 			members := 0
 			for _, m := range r.Members {
 				if len(m.TypedArgs) > 0 {

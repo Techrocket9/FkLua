@@ -164,12 +164,11 @@ func TestEveryOperatorReachesTheMemberTable(t *testing.T) {
 func TestOperatorsBindOnEveryClassThatHasOne(t *testing.T) {
 	a := loadTestAPI(t)
 	r := GenerateMembers(a)
-	ev := GenerateEvents(a)
-	g, err := GenerateGoWith(a, r, ev, "fkapi")
+	g, err := cachedGo(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb, err := GenerateRust(a, r, ev)
+	rb, err := cachedRust(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
