@@ -215,6 +215,157 @@ func TestTheScaffoldIsWhereTheBindingsGo(t *testing.T) {
 	}
 }
 
+// `init` TELLS GIT ABOUT THE ARTIFACTS ITS OWN NEXT STEPS PRODUCE.
+//
+// Nothing did, and the omission is not theoretical: a `<name>.wasm` sits at the
+// project root because that is where init's printed `tinygo build -o ../../` line
+// puts it, the cargo target tree sits under the Rust guest, and `fklua mod`
+// writes `<name>_<version>/` beside them. A downstream publish flow was bitten by
+// exactly the first of those, an untracked wasm at the root.
+//
+// AND `fklua.lock` IS NOT IN IT, which is the assertion this test would be
+// pointless without: the lock is generated, so a reflexive "ignore what is
+// generated" sweep takes it -- and it is the one generated file that is meant to
+// be COMMITTED, because it records which API description the bindings came from
+// and `fklua lock --check` in CI has to be able to read it. Checked line by line
+// rather than as a substring, because the file NAMES fklua.lock in a comment
+// saying precisely this and a substring check would call that comment a bug.
+//
+// No toolchain: it runs init and looks at the tree.
+func TestInitWritesAGitignoreForItsOwnBuildOutput(t *testing.T) {
+	dir := t.TempDir()
+	back := chdir(t, dir)
+	defer back()
+
+	const modName = "ignore-mod"
+	// Both languages in one run, so both per-language arms are covered by the
+	// same file rather than by two runs that could disagree.
+	if err := runInit([]string{modName, "--lang", "go,rust"}); err != nil {
+		t.Fatalf("fklua init: %v", err)
+	}
+	body, err := os.ReadFile(gitignoreFile)
+	if err != nil {
+		t.Fatalf("init wrote no %s: %v", gitignoreFile, err)
+	}
+
+	patterns := map[string]bool{}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns[line] = true
+	}
+	for _, want := range []string{
+		// The Go artifact, at the root, spelled the way init's own next step
+		// spells it.
+		"/" + modName + ".wasm",
+		// Cargo's build tree, derived from the scaffold's own constant so the
+		// two cannot drift.
+		"/" + rustGuestDir + "/target/",
+		// The package directory and the zip. The glob is on the VERSION, which
+		// moves; the name does not.
+		"/" + modName + "_*/",
+		"/" + modName + "_*.zip",
+	} {
+		if !patterns[want] {
+			t.Errorf("%s has no pattern %q, so `git status` in a fresh project is "+
+				"noise the moment its own next steps are run:\n%s",
+				gitignoreFile, want, body)
+		}
+	}
+	for _, never := range []string{lockFile, "/" + lockFile} {
+		if patterns[never] {
+			t.Errorf("%s ignores %q. The lock is generated AND meant to be "+
+				"committed -- it records which API description the bindings came "+
+				"from, and `fklua lock --check` is a gate that reads it:\n%s",
+				gitignoreFile, never, body)
+		}
+	}
+}
+
+// AN EXISTING .gitignore IS LEFT ALONE, TO THE BYTE, AND SAID SO OUT LOUD.
+//
+// This is deliberately NOT the per-file refusal the guest scaffold makes. Guest
+// source is hand-edited and losing it to a re-run is unrecoverable; a .gitignore
+// in a repository that already exists is simply the author's, and it is the
+// normal state of any project someone has already started -- `git init && fklua
+// init` is the ordinary order. An init that errored here would refuse every real
+// project, so it is a NOTICE, and the notice has to name what the author now has
+// to add themselves.
+func TestInitLeavesAnExistingGitignoreAlone(t *testing.T) {
+	dir := t.TempDir()
+	back := chdir(t, dir)
+	defer back()
+
+	// Content nothing in this repo would ever write, including the one pattern
+	// an author might reasonably have already: if init merged or appended, this
+	// file would not come back identical.
+	const existing = "# mine\n/dist/\n*.log\n"
+	if err := os.WriteFile(gitignoreFile, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// captureStdout fails the test if runInit returns an error, which is half of
+	// what is being asserted: an existing .gitignore does not stop init.
+	out := captureStdout(t, func() error {
+		return runInit([]string{"keeps-mine", "--lang", "go", "--no-guest"})
+	})
+
+	body, err := os.ReadFile(gitignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != existing {
+		t.Fatalf("init rewrote an existing %s. It is the author's file:\nwant %q\ngot  %q",
+			gitignoreFile, existing, body)
+	}
+	if !strings.Contains(out, gitignoreFile) || !strings.Contains(out, "already exists") {
+		t.Errorf("init said nothing about the %s it declined to write, so the "+
+			"author is never told the build output is untracked:\n%s", gitignoreFile, out)
+	}
+	// The notice earns its line by naming a pattern, not by reporting a
+	// non-event.
+	if !strings.Contains(out, "/keeps-mine_*/") {
+		t.Errorf("the notice does not name what to add, which is the only thing "+
+			"an author can act on:\n%s", out)
+	}
+}
+
+// A MOD NAME MAY CONTAIN SPACES, AND A GITIGNORE PATTERN CARRIES THEM LITERALLY.
+//
+// The name syntax is `^[A-Za-z0-9][A-Za-z0-9 _-]*$`: interior spaces are legal
+// and every glob metacharacter (`*`, `?`, `[`, `!`, `#`) is excluded. So the
+// patterns are plain concatenation, an interior space needs no backslash and no
+// quoting, and the leading `/` keeps a line from ever starting with `#` or `!`.
+// This test is what stops somebody adding escaping that would break the file it
+// was meant to protect.
+func TestAGitignoreCarriesAModNamesSpacesLiterally(t *testing.T) {
+	dir := t.TempDir()
+	back := chdir(t, dir)
+	defer back()
+
+	const modName = "space mod"
+	if err := runInit([]string{modName, "--lang", "go", "--no-guest"}); err != nil {
+		t.Fatalf("fklua init: %v", err)
+	}
+	body, err := os.ReadFile(gitignoreFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"\n/space mod.wasm\n",
+		"\n/space mod_*/\n",
+		"\n/space mod_*.zip\n",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("%s has no line %q -- a name with a space must appear as it "+
+				"is, with nothing escaped and nothing quoted:\n%s",
+				gitignoreFile, strings.TrimSpace(want), body)
+		}
+	}
+}
+
 // This is the backward-compatibility half and it needs no toolchain, which is
 // why it is a separate test: every fklua.toml written before this change has no
 // `gc` line, and if an absent key resolved to anything but "leave the command's

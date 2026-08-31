@@ -69,7 +69,7 @@ cd .. && mkdir my-mod && cd my-mod
 fklua init my-mod --guest-module /path/to/fklua
 ```
 
-`init` writes into the **current directory** and creates no `my-mod/` of its own; the name argument is the mod's identity. `--guest-module` points the scaffolded guest at a local FkLua checkout; leave it off and run `go mod tidy` in `guest/go/` once the guest module is fetchable where you are. It writes `fklua.toml` (the mod's identity, dependencies, API pin, guest language and GC mode) and a guest that already builds under `guest/go/`: its own Go module, the collector import in `gc.go`, and `fk_on_init` and `fk_on_tick` wired in `main.go`. What every generated file is for, key by key, is [`docs/generated-files.md`](docs/generated-files.md). Then:
+`init` writes into the **current directory** and creates no `my-mod/` of its own; the name argument is the mod's identity. `--guest-module` points the scaffolded guest at a local FkLua checkout; leave it off and run `go mod tidy` in `guest/go/` once the guest module is fetchable where you are. It writes `fklua.toml` (the mod's identity, dependencies, API pin, guest language and GC mode) and a guest that already builds under `guest/go/`: its own Go module, the collector import in `gc.go`, and `fk_on_init` and `fk_on_tick` wired in `main.go`. It also writes a `.gitignore` covering the build output the steps below produce, when the directory does not already have one; `fklua.lock` is not in it, because the lock is meant to be committed. What every generated file is for, key by key, is [`docs/generated-files.md`](docs/generated-files.md). Then:
 
 ```sh
 fklua gen-bindings && fklua lock          # the Factorio API lands at guest/go/fkapi/

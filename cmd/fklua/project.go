@@ -138,6 +138,13 @@ func runInit(args []string) error {
 	fmt.Printf("  bindings from API %s, for %s\n", p.API, strings.Join(p.Langs, " and "))
 	fmt.Printf("  gc = %q\n", p.GC)
 
+	// WHATEVER --no-guest SAYS. The package output accumulates in the project
+	// root however the guest is built and wherever it lives, so the ignore list
+	// is about the project rather than about the scaffold.
+	if err := writeGitignore(p); err != nil {
+		return err
+	}
+
 	scaffolded, scaffoldedRust := false, false
 	if hasLang(p.Langs, "go") && !noGuest {
 		wrote, err := scaffoldGuest(p.Name, guestModule)
@@ -241,6 +248,82 @@ func runInit(args []string) error {
 		fmt.Printf("See agents/guests.md, \"the guest heap budget\".\n")
 	}
 	return nil
+}
+
+const gitignoreFile = ".gitignore"
+
+// writeGitignore writes the ignore list for a fresh project, and LEAVES AN
+// EXISTING ONE ALONE.
+//
+// Nothing else told git about the artifacts init's own next steps produce: a
+// `<name>.wasm` at the project root, a cargo target tree under the Rust guest,
+// and a `<name>_<version>/` package directory beside them. A project that
+// packages once and commits is carrying all three.
+//
+// AN EXISTING .gitignore IS A NOTICE AND NOT A REFUSAL, which is deliberately
+// different from the per-file refusal the guest scaffold makes. Those files are
+// hand-edited source whose loss is unrecoverable, so overwriting one is a
+// mistake nobody can undo; a .gitignore is simply the author's, and a repository
+// that already exists normally has one. An init that errored on it would refuse
+// every real project -- `git init && fklua init` is the ordinary order, and so
+// is running init inside a repo that has been there for years.
+func writeGitignore(p factorio.Project) error {
+	if _, err := os.Stat(gitignoreFile); err == nil {
+		fmt.Printf("NOTICE: %s already exists; left as it is -- worth ignoring "+
+			"/%s_*/ and the built wasm there\n", gitignoreFile, p.Name)
+		return nil
+	}
+	if err := os.WriteFile(gitignoreFile, []byte(gitignoreBody(p)), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s\n", gitignoreFile)
+	return nil
+}
+
+// gitignoreBody is the file's content, derived from the name and the languages.
+//
+// PLAIN CONCATENATION IS CORRECT HERE AND NOTHING NEEDS ESCAPING. A mod name is
+// matched by `^[A-Za-z0-9][A-Za-z0-9 _-]*$` (factorio.nameRE), so it may contain
+// interior SPACES -- which a gitignore pattern carries literally, with no quoting
+// and no backslash -- and it may NOT contain any of the glob metacharacters `*`,
+// `?`, `[`, `!` or `#` that would need one. The leading `/` on every line settles
+// the two position-sensitive characters as well: a pattern can never begin with
+// `#` (a comment) or `!` (a negation) however the name starts. Do not add
+// escaping to this function later; there is nothing for it to escape.
+//
+// That leading `/` is also what anchors each pattern at the project root, so a
+// nested directory that happens to share the mod's name is not swept up.
+func gitignoreBody(p factorio.Project) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Build output, written by the commands `fklua init` prints.\n")
+	fmt.Fprintf(&b, "#\n")
+	fmt.Fprintf(&b, "# Every pattern is anchored with a leading \"/\", so it matches at the\n")
+	fmt.Fprintf(&b, "# project root only and a nested directory named like the mod is left\n")
+	fmt.Fprintf(&b, "# alone.\n")
+	fmt.Fprintf(&b, "#\n")
+	// THE ONE GENERATED FILE THAT IS NOT HERE, said in the file itself because
+	// the sweep that gets it wrong is a reflexive one: "it is generated, so
+	// ignore it". The lock is what records which API description the bindings
+	// came from, which is a fact a source tree cannot answer on its own -- so it
+	// belongs in the commit, and `fklua lock --check` in CI is checking a file CI
+	// has to be able to read.
+	fmt.Fprintf(&b, "# fklua.lock is deliberately NOT ignored. It is generated and it is meant\n")
+	fmt.Fprintf(&b, "# to be COMMITTED: it records which API description the bindings were\n")
+	fmt.Fprintf(&b, "# generated from, and `fklua lock --check` is the CI gate that reads it.\n")
+	if hasLang(p.Langs, "go") {
+		fmt.Fprintf(&b, "\n# The Go guest's wasm, where init's own `tinygo build -o ../../%s.wasm`\n", p.Name)
+		fmt.Fprintf(&b, "# puts it and where `fklua mod` then reads it from.\n")
+		fmt.Fprintf(&b, "/%s.wasm\n", p.Name)
+	}
+	if hasLang(p.Langs, "rust") {
+		fmt.Fprintf(&b, "\n# Cargo's build tree for the Rust guest; the release wasm is inside it.\n")
+		fmt.Fprintf(&b, "/%s/target/\n", rustGuestDir)
+	}
+	fmt.Fprintf(&b, "\n# What `fklua mod` writes: the package directory and the zip, both named\n")
+	fmt.Fprintf(&b, "# <name>_<version>. The version moves, so the glob is on it.\n")
+	fmt.Fprintf(&b, "/%s_*/\n", p.Name)
+	fmt.Fprintf(&b, "/%s_*.zip\n", p.Name)
+	return b.String()
 }
 
 func hasLang(langs []string, want string) bool {

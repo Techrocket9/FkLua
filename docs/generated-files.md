@@ -7,12 +7,13 @@ FkLua writes files at three points in a project's life: `fklua init` scaffolds t
 | `fklua.toml` | `fklua init`, once | yes; it is the manifest |
 | `guest/go/go.mod`, `gc.go`, `main.go` | `fklua init` | yes (keep `gc.go`'s import; see below) |
 | `guest/rust/Cargo.toml`, `guest/rust/<name>/` | `fklua init` | yes |
+| `.gitignore` | `fklua init`, only when none exists | yes |
 | `guest/go/fkapi/` | `fklua gen-bindings` | no; regenerate |
 | `guest/rust/fkapi/` | `fklua gen-bindings` | no; regenerate |
 | `fklua.lock` | `fklua lock` | no; rerun `fklua lock` |
 | `<name>_<version>/` or `.zip` | `fklua mod` | no; disposable output, repackage |
 
-`init` refuses to overwrite anything it once wrote, per file, so a re-run after deleting one file restores that file and nothing else.
+`init` refuses to overwrite anything it once wrote, per file, so a re-run after deleting one file restores that file and nothing else. `.gitignore` is the exception: an existing one is left exactly as it is and reported as a notice rather than refused, because it is normally the author's own file rather than something `init` wrote.
 
 ## fklua.toml: the manifest
 
@@ -59,6 +60,14 @@ Derived, never hand-edited. `fklua lock` records the API version, a hash of the 
 - The collector is a cargo feature on the `fk` crate, passed on the command line (`cargo build --features fk/fkgc`) rather than declared in the guest's `Cargo.toml`. Cargo's v2 resolver unifies declared features across every crate built in one invocation, so a declared feature would silently turn the collector on for other crates in the same build. There is no import to add and no second flag; `fk` owns the single `#[global_allocator]` site and the feature chooses what backs it. [Why a Rust guest has a garbage collector at all](memory.md) is its own section.
 - `src/lib.rs` is yours, on the same terms as the Go `main.go`.
 - The release profile ships with `panic = "abort"` (nothing can unwind across the wasm boundary), `opt-level = "s"` and `lto = true` (module size is game load time, and LTO is what lets event-id constants reach `fk.subscribe` so the packaged event table can be pruned). They are requirements, not preferences.
+
+## .gitignore
+
+`fklua init` writes a `.gitignore` when the directory has none, covering the build output the commands `init` itself prints produce: `<name>.wasm` at the project root for a Go guest, `guest/rust/target/` for a Rust guest, and the `<name>_<version>/` package directory and `<name>_<version>.zip` that `fklua mod` writes. The per-language lines follow the manifest's `lang`; the package patterns are always there, because that output accumulates however the guest is built. Every pattern is anchored with a leading `/` so it matches at the project root only, and a nested directory named like the mod is left alone. The version is a glob because the version moves.
+
+`fklua.lock` is deliberately not ignored, and the generated file says so in a comment. The lock is generated, and it is meant to be committed: it records which API description the bindings came from, and `fklua lock --check` is the CI gate that reads it. It is the one generated file in a project that a reflexive "ignore what is generated" rule gets wrong.
+
+If a `.gitignore` is already there, `init` leaves it byte for byte and prints a notice naming what is worth adding. This is the one place `init` neither overwrites nor refuses: guest source is hand-edited and losing it is unrecoverable, while an ignore file in a repository that already exists is the author's own, and an `init` that errored on one would refuse every project that was started with `git init`.
 
 ## The bindings: fkapi
 
