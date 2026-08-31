@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,4 +395,95 @@ api = "`+other+`"
 			}
 		})
 	}
+}
+
+// BOTH WAYS IN, BECAUSE THERE ARE EXACTLY TWO AND NEITHER USED TO LOOK.
+//
+// `[mod] factorio_version` and `--factorio-version` are the only things that
+// move info.json's engine series off its default, and both flowed into
+// Info.FactorioVersion as typed. A build id in either one packaged cleanly, and
+// the mod was then refused by the loader at game start -- the failure the whole
+// two-axes apparatus in runMod exists to keep an author away from, arriving
+// through the one field nothing checked.
+//
+// The manifest arm and the flag arm are separate cases rather than one: they
+// are separate assignments in separate files, and a guard on one of them is the
+// shape this defect would come back as.
+func TestModRefusesAnEngineBuildWhereTheSeriesGoes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string   // the [mod] factorio_version line, or nothing
+		args []string // what the command line adds
+	}{
+		{name: "the manifest key", key: "factorio_version = \"2.0.77\"\n"},
+		{name: "the flag", args: []string{"--factorio-version", "2.0.77"}},
+		// The flag over a series that would have been fine, which is the arm
+		// that fails if the guard is put on the manifest reader.
+		{
+			name: "the flag over a good key",
+			key:  "factorio_version = \"2.0\"\n",
+			args: []string{"--factorio-version", "2.0.77"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, projectFile), []byte(`[mod]
+name = "series-mod"
+version = "0.1.0"
+author = "someone"
+`+tc.key+`
+[fklua]
+api = "`+factorio.DefaultAPIVersion+`"
+`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			guest := tinyGuest(t)
+			t.Chdir(dir)
+
+			out := filepath.Join(dir, "out")
+			err := modError(t, append([]string{guest, "-o", out}, tc.args...))
+			if err == nil {
+				t.Fatal("a factorio_version naming a patch release makes the mod " +
+					"unloadable and must not package")
+			}
+			msg := err.Error()
+			for _, want := range []string{`"2.0.77"`, `"2.0"`} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("refusal %q should name %s -- the value refused and "+
+						"the series to write instead", msg, want)
+				}
+			}
+			// NOTHING ON DISK. A refusal that had already written the mod would
+			// leave the unloadable directory sitting there to be copied.
+			if _, statErr := os.Stat(filepath.Join(out, "series-mod_0.1.0")); statErr == nil {
+				t.Error("the mod was written despite the refusal")
+			}
+		})
+	}
+}
+
+// modError runs `fklua mod` expecting it to FAIL and returns the error, with
+// whatever it managed to print kept out of the test log. captureStdout cannot
+// be used for this: it fatals on a non-nil error, which is the whole subject
+// here. Drained in a goroutine because a refusal that arrived after several
+// lines of output would otherwise deadlock on the pipe buffer rather than fail.
+func modError(t *testing.T, args []string) error {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		io.Copy(io.Discard, r)
+		close(done)
+	}()
+	old := os.Stdout
+	os.Stdout = w
+	runErr := runMod(args)
+	os.Stdout = old
+	w.Close()
+	<-done
+	r.Close()
+	return runErr
 }

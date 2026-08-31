@@ -141,6 +141,12 @@ func TestValidateRejectsWhatFactorioWould(t *testing.T) {
 		{"non-numeric version", func(i *Info) { i.Version = "v0.1.0" }, "mod version"},
 		{"no title", func(i *Info) { i.Title = "" }, "title"},
 		{"no author", func(i *Info) { i.Author = "" }, "author"},
+		{"a build where the engine series goes",
+			func(i *Info) { i.FactorioVersion = "2.0.77" }, "factorio_version"},
+		{"a series with no minor",
+			func(i *Info) { i.FactorioVersion = "2" }, "factorio_version"},
+		{"a non-numeric series",
+			func(i *Info) { i.FactorioVersion = "v2.0" }, "factorio_version"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := testPackage()
@@ -153,6 +159,55 @@ func TestValidateRejectsWhatFactorioWould(t *testing.T) {
 				t.Errorf("message %q should mention %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+// THE TWO VERSION KEYS ARE ONE CHARACTER APART AND ONE OF THEM IS A REFUSAL AT
+// GAME START.
+//
+// `version` takes three dot-separated numbers and `factorio_version` takes two,
+// they sit beside each other in the same manifest and the same info.json, and
+// the value that reads most obviously right for the second one -- the installed
+// build, "2.0.77" -- is exactly the value the loader will not take. It used to
+// be written out verbatim; the mod then failed with "Incompatible Factorio
+// version" at game start, after the compile, after the package, after the copy
+// into the mods directory.
+//
+// So the message is asserted rather than the failure: naming the offending
+// value is what tells the author WHICH of the two keys they are looking at, and
+// naming the series is the whole fix. A refusal that said only "invalid" would
+// have left them one character away from the answer with no way to know it.
+func TestValidateNamesTheSeriesToWriteInstead(t *testing.T) {
+	p := testPackage()
+	p.Info.FactorioVersion = "2.0.77"
+	err := p.Validate()
+	if err == nil {
+		t.Fatal("a factorio_version naming a patch release is unloadable and " +
+			"must not package")
+	}
+	msg := err.Error()
+	for _, want := range []string{`"2.0.77"`, `"2.0"`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal %q should name %s -- the value refused and the "+
+				"series to write instead", msg, want)
+		}
+	}
+	// NOT THE OTHER KEY'S REFUSAL. Both are about a dotted number on the same
+	// struct and an author reading the wrong one edits the wrong line.
+	if strings.Contains(msg, "mod version") {
+		t.Errorf("refusal %q reads as the mod-version refusal; the two keys "+
+			"take different shapes and the message has to say which one", msg)
+	}
+
+	// ...AND IT DOES NOT FIRE FOR THE VALUES THAT PACKAGE MODS TODAY. The
+	// default is the one that matters most: it is what every project without
+	// the key ships, so a guard that refused it would refuse everything.
+	for _, ok := range []string{DefaultFactorioVersion, "2.1", "1.1", "0.18"} {
+		p := testPackage()
+		p.Info.FactorioVersion = ok
+		if err := p.Validate(); err != nil {
+			t.Errorf("factorio_version %q is a series Factorio loads: %v", ok, err)
+		}
 	}
 }
 

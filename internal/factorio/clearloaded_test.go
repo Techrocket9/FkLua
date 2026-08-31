@@ -81,7 +81,11 @@ func expandClearLoaded(script string) string {
 // hand-copy, one level up. This is the direction that catches it.
 func TestTheClearListIsEveryLuaModuleAMoDShips(t *testing.T) {
 	pkg := &Package{
-		Info:  Info{Name: "clearlist", Version: "0.0.1", Title: "t", Author: "a"},
+		// The series like every sibling harness, now that Validate holds
+		// factorio_version to a shape: this test is about which Lua files a mod
+		// ships and an empty manifest key is not the thing it is measuring.
+		Info: Info{Name: "clearlist", Version: "0.0.1", Title: "t", Author: "a",
+			FactorioVersion: DefaultFactorioVersion},
 		Chunk: "return function() end",
 	}
 	files, err := pkg.Files()

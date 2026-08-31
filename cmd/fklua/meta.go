@@ -204,6 +204,17 @@ func runMeta(args []string) error {
 			return fmt.Errorf("%s: no generator for lang %q", projectFile, lang)
 		}
 	}
+	// AND factorio_version IS DELIBERATELY NOT A THIRD REFUSAL HERE, even though
+	// Package.Validate now rejects one that names a build rather than a series.
+	// The line above is drawn where this command's own reading is: `gc` and
+	// `lang` are values it must INTERPRET to answer at all -- effective.gc is
+	// ParseGCMode's canonical spelling and the guest block exists per language
+	// -- so it cannot describe a project whose values it cannot parse. The [mod]
+	// block is different: name, version and factorio_version are reported AS
+	// WRITTEN, and all three are refused by Package.Validate at package time.
+	// Refusing one of the three and not the other two would make this command's
+	// rule about the manifest unstateable, and `fklua mod` is the command that
+	// says no. A driver that wants the verdict runs it.
 
 	doc := metaDoc{
 		Fklua:     fkluaVersion,

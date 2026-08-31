@@ -350,7 +350,7 @@ The payload arrives at `fk_on_call` as the single element of `argp`'s array, exa
 
 ## The two version axes
 
-The **API pin** is the `runtime-api.json` version the bindings and the packaged member table come from; the **engine** is the Factorio actually running, which a guest can ask about with `helpers.game_version`. They meet in exactly one place: the packaged `info.json`'s `factorio_version`, which defaults to the pin's `major.minor` (a 2.0 engine does not load a mod declaring 2.1, and a 2.1 engine does not load one declaring 2.0) and can be overridden with `[mod] factorio_version` in `fklua.toml` or `--factorio-version`.
+The **API pin** is the `runtime-api.json` version the bindings and the packaged member table come from; the **engine** is the Factorio actually running, which a guest can ask about with `helpers.game_version`. They meet in exactly one place: the packaged `info.json`'s `factorio_version`, which defaults to the pin's `major.minor` (a 2.0 engine does not load a mod declaring 2.1, and a 2.1 engine does not load one declaring 2.0) and can be overridden with `[mod] factorio_version` in `fklua.toml` or `--factorio-version`. Either override takes a series and not a build: `2.0.77` there is refused at package time, naming `2.0` as the value to write, because the game refuses a mod declaring a patch release at game start.
 
 The default pin is the general-availability release, **2.0.77**, because a default is what a mod author who has pinned nothing ships to players, and players are on stable. Everything in the FkLua repository builds and runs against a stock 2.0.x install; the in-game test scripts read the installed engine's version and package for it. Two capabilities need more:
 

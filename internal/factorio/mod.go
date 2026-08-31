@@ -39,6 +39,11 @@ type Info struct {
 // declares. It is deliberately not the exact installed build: info.json takes a
 // series, and naming a patch release there makes the mod unloadable.
 //
+// THAT SENTENCE IS NOW A REFUSAL AND NOT ONLY A WARNING. Validate holds the
+// value to seriesRE, so a `factorio_version` naming a build is refused at
+// package time with the series to write instead; it used to be written into
+// info.json verbatim and discovered by the loader.
+//
 // It is DERIVED from DefaultAPIVersion rather than written out beside it, and
 // that is this repo's own named failure shape being avoided rather than a
 // tidy-up: two constants that must agree about one manifest key is exactly what
@@ -69,8 +74,13 @@ var DefaultFactorioVersion = majorMinor(DefaultAPIVersion)
 
 // majorMinor takes the "2.1" series out of a "2.1.17" build id. A string with
 // fewer than two dotted components is returned unchanged: there is no series to
-// recover, and inventing one would be worse than passing the odd value through
-// to the loader, which says so plainly.
+// recover, and inventing one would be a guess.
+//
+// The odd value it passes through does NOT reach the loader any more. Validate
+// holds every factorio_version to seriesRE, so an unrecoverable string is
+// refused at package time -- which is also why this function is what Validate
+// asks for the remedy to suggest: one rule about where a series stops, used by
+// the thing that derives one and by the thing that refuses one.
 func majorMinor(version string) string {
 	first := strings.IndexByte(version, '.')
 	if first < 0 {
@@ -107,6 +117,16 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _-]*$`)
 
 // Factorio requires exactly three dot-separated numbers, each at most 5 digits.
 var versionRE = regexp.MustCompile(`^\d{1,5}\.\d{1,5}\.\d{1,5}$`)
+
+// info.json's factorio_version is an ENGINE SERIES and not a build: two
+// dot-separated numbers, and the loader refuses a mod naming a third.
+//
+// Deliberately versionRE one component shorter, because that IS the whole trap.
+// The two keys sit next to each other in the same file and in the same
+// manifest, one takes a triple and the other refuses one, and until this
+// existed the only thing that noticed the difference was Factorio at game
+// start. See Validate.
+var seriesRE = regexp.MustCompile(`^\d{1,5}\.\d{1,5}$`)
 
 // Package is one mod to write.
 type Package struct {
@@ -242,6 +262,32 @@ func (p *Package) Validate() error {
 	}
 	if p.Info.Author == "" {
 		return fmt.Errorf("mod author is empty; Factorio requires one")
+	}
+	// LAST BECAUSE THAT IS WHERE info.json PUTS IT -- this function walks Info's
+	// fields in Info's own order, which is Factorio's documentation order, so a
+	// field added to one is added to the other in the same place.
+	//
+	// AND IT IS CHECKED HERE, at package time, rather than at either entry
+	// point, because there are two of them: `[mod] factorio_version` and
+	// --factorio-version both flow into Info.FactorioVersion verbatim, and a
+	// check on each is two chances to drift apart. This is the chokepoint they
+	// already share, and it is where mod.name and mod.version are checked for
+	// the same reason.
+	//
+	// The remedy is spelled by majorMinor rather than by a second rule about
+	// dots here, and it is offered only when there is one to offer: "v2.0.77"
+	// has no series to recover and gets the example instead.
+	if !seriesRE.MatchString(p.Info.FactorioVersion) {
+		remedy := fmt.Sprintf("such as %q", DefaultFactorioVersion)
+		if s := majorMinor(p.Info.FactorioVersion); seriesRE.MatchString(s) {
+			remedy = fmt.Sprintf("naming a patch release there makes the mod "+
+				"unloadable, so drop everything after the minor and write %q", s)
+		}
+		return fmt.Errorf("factorio_version %q: must be two dot-separated "+
+			"numbers, the engine SERIES rather than a build -- %s. Factorio "+
+			"refuses a mod whose series it cannot match at game start, which "+
+			"is the worst place to learn about a two-character string",
+			p.Info.FactorioVersion, remedy)
 	}
 	return nil
 }

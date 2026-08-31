@@ -24,7 +24,7 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 | Key | What it is |
 |---|---|
 | `name`, `version`, `title`, `author`, `description` | the mod's identity, in Factorio's terms |
-| `factorio_version` | the engine series the mod declares. Defaults to the API pin's `major.minor`; override it when the pin and the engine you target differ |
+| `factorio_version` | the engine series the mod declares: two dot-separated numbers, such as `2.0`. Defaults to the API pin's `major.minor`; override it when the pin and the engine you target differ. A value naming a build rather than a series, `2.0.77` where `2.0` belongs, is refused at package time with the series to write instead, because Factorio refuses the mod itself at game start |
 | `data` | a directory copied into the packaged mod: `data.lua`, `prototypes/`, `graphics/`, `locale/`. The default for `fklua mod --include` |
 | `dependencies` | passed to `info.json` verbatim, in Factorio's own syntax: `"base >= 2.0.0"` required, `"? other"` optional, `"! other"` conflicts. `fklua mod --dependency DEP` overrides it |
 
