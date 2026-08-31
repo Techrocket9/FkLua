@@ -244,6 +244,69 @@ func onTick(tick uint32) {
 			}
 		}
 
+		// A BULK ATTRIBUTE READ: one attribute off several handles in ONE
+		// crossing, where the loop a guest writes today pays a whole host call
+		// per entity.
+		//
+		// The corroboration is the point rather than the timing. The same
+		// attribute is read BOTH ways in the same run, off the same entities,
+		// and the log line carries both answers -- so a bulk read that returned
+		// plausible-looking numbers from the wrong offsets could not pass. The
+		// entities are chests this makes for the purpose: a headless map's own
+		// entities are trees and rocks, and health is optional on those.
+		var bulkObjs []fkapi.Object
+		for i := 0; i < 3; i++ {
+			c, err := surface.CreateEntity(fkapi.OfMap(
+				fkapi.KeyValue{Key: fkapi.OfString("name"),
+					Val: fkapi.OfString("iron-chest")},
+				fkapi.KeyValue{Key: fkapi.OfString("position"), Val: fkapi.OfArray(
+					fkapi.OfNumber(float64(20+i*2)), fkapi.OfNumber(20))},
+				fkapi.KeyValue{Key: fkapi.OfString("force"),
+					Val: fkapi.OfString("player")},
+			))
+			if err == nil && c != nil {
+				bulkObjs = append(bulkObjs, *c)
+			}
+		}
+		if len(bulkObjs) == 0 {
+			fk.Log("bulk: no entities to read, so this leg proved nothing")
+		} else {
+			// A MANDATORY BOOL and an OPTIONAL FLOAT, because the two element
+			// shapes differ: one is the plain Go value and one carries the
+			// presence byte the getter's own return block has.
+			live := make([]bool, len(bulkObjs))
+			nLive, lerr := fkapi.LuaEntityValidBulk(bulkObjs, live)
+			hp := make([]fkapi.BulkOptFloat32, len(bulkObjs))
+			nHP, herr := fkapi.LuaEntityHealthBulk(bulkObjs, hp)
+			if lerr != nil || herr != nil {
+				fk.Log("bulk read failed: " + fk.LastError())
+			} else {
+				// ...and the same attribute one handle at a time, which is what
+				// the bulk answer has to agree with.
+				agree := nLive == len(bulkObjs) && nHP == len(bulkObjs)
+				for i, o := range bulkObjs {
+					v, err1 := (fkapi.LuaEntity{Object: o}).Valid()
+					h, err2 := (fkapi.LuaEntity{Object: o}).Health()
+					if err1 != nil || err2 != nil || v != live[i] {
+						agree = false
+						break
+					}
+					if (h == nil) != !hp[i].Has || (h != nil && *h != hp[i].V) {
+						agree = false
+						break
+					}
+				}
+				first := "absent"
+				if hp[0].Has {
+					first = strconv.FormatFloat(float64(hp[0].V), 'f', 0, 32)
+				}
+				fk.Log("bulk: " + strconv.Itoa(nHP) + " of " +
+					strconv.Itoa(len(bulkObjs)) + " in one call, valid[0] " +
+					strconv.FormatBool(live[0]) + ", health[0] " + first +
+					", per-call agrees " + strconv.FormatBool(agree))
+			}
+		}
+
 		// THE INDEX OPERATOR'S WRITE HALF, `t[k] = v`, which is the only way a
 		// mod changes its own runtime-global setting:
 		//

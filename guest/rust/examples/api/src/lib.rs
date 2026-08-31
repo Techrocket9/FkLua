@@ -16,7 +16,8 @@ use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use fkapi::{
-    defines_direction_east, defines_inventory_chest, read_on_player_created, read_on_tick,
+    defines_direction_east, defines_inventory_chest, lua_entity_health_bulk,
+    lua_entity_valid_bulk, read_on_player_created, read_on_tick, BulkOptF32,
     LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaProfiler, LuaStr, LuaSurface,
     Object, Value, EVENT_CUSTOMINPUTEVENT, EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED,
     EVENT_ON_PLAYER_MINED_ENTITY,
@@ -292,6 +293,93 @@ pub extern "C" fn fk_on_tick(tick: u32) {
                 _ => fk::log("the chest had no chest inventory"),
             },
             _ => fk::log("create_entity(iron-chest) did not produce one"),
+        }
+
+        // A BULK ATTRIBUTE READ: one attribute off several handles in ONE
+        // crossing, where the loop a guest writes today pays a whole host call
+        // per entity.
+        //
+        // The corroboration is the point rather than the timing. The same
+        // attribute is read BOTH ways in the same run, off the same entities,
+        // and the log line carries both answers -- so a bulk read that returned
+        // plausible-looking numbers from the wrong offsets could not pass. The
+        // entities are chests this makes for the purpose: a headless map's own
+        // entities are trees and rocks, and health is optional on those.
+        let mut bulk_objs: alloc::vec::Vec<Object> = alloc::vec::Vec::new();
+        for i in 0..3 {
+            let c = surface.create_entity(&Value::Map(alloc::vec![
+                (
+                    Value::Str(LuaStr::from("name")),
+                    Value::Str(LuaStr::from("iron-chest"))
+                ),
+                (
+                    Value::Str(LuaStr::from("position")),
+                    Value::Array(alloc::vec![
+                        Value::Number(20.0 + (i as f64) * 2.0),
+                        Value::Number(20.0)
+                    ])
+                ),
+                (
+                    Value::Str(LuaStr::from("force")),
+                    Value::Str(LuaStr::from("player"))
+                ),
+            ]));
+            if let Ok(Some(o)) = c {
+                bulk_objs.push(o);
+            }
+        }
+        if bulk_objs.is_empty() {
+            fk::log("bulk: no entities to read, so this leg proved nothing");
+        } else {
+            // A MANDATORY BOOL and an OPTIONAL FLOAT, because the two element
+            // shapes differ: one is the plain value and one carries the
+            // presence byte the getter's own return block has.
+            let mut live = alloc::vec![false; bulk_objs.len()];
+            let n_live = lua_entity_valid_bulk(&bulk_objs, &mut live);
+            let mut hp = alloc::vec![BulkOptF32::default(); bulk_objs.len()];
+            let n_hp = lua_entity_health_bulk(&bulk_objs, &mut hp);
+            match (n_live, n_hp) {
+                (Ok(nl), Ok(nh)) => {
+                    // ...and the same attribute one handle at a time, which is
+                    // what the bulk answer has to agree with.
+                    let mut agree = nl == bulk_objs.len() && nh == bulk_objs.len();
+                    for (i, o) in bulk_objs.iter().enumerate() {
+                        let e = LuaEntity(*o);
+                        match (e.valid(), e.health()) {
+                            (Ok(v), Ok(h)) => {
+                                if v != live[i] || h.is_some() != hp[i].has {
+                                    agree = false;
+                                    break;
+                                }
+                                if let Some(hv) = h {
+                                    if hv != hp[i].v {
+                                        agree = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            _ => {
+                                agree = false;
+                                break;
+                            }
+                        }
+                    }
+                    let first = if hp[0].has {
+                        format!("{}", hp[0].v as i64)
+                    } else {
+                        alloc::string::String::from("absent")
+                    };
+                    fk::log(&format!(
+                        "bulk: {} of {} in one call, valid[0] {}, health[0] {}, per-call agrees {}",
+                        nh,
+                        bulk_objs.len(),
+                        live[0],
+                        first,
+                        agree
+                    ));
+                }
+                _ => fk::log("bulk read failed"),
+            }
         }
 
         // THE INDEX OPERATOR'S WRITE HALF, `t[k] = v`, which is the only way a
