@@ -1270,7 +1270,7 @@ gcsave-rs --persist=packed: save at  30 -> seen=301, 32/32 intact across 2 colle
 gcsave-rs --persist=packed: save at 239 -> seen=301, 32/32 intact across 2 collections, resumed MID-SWEEP
 ```
 
-A Rust guest's heap **and its collector's own bookkeeping** -- span table, mark bitmap, free runs, class cursors, sweep cursor -- survive a real Factorio save and reload, and a save taken in EITHER phase is resumed rather than restarted. `GC_SAVE_TICKS_RS` is `30 239` and `CHECK_TICK_RS` is `300`.
+A Rust guest's heap **and its collector's own bookkeeping** -- span table, mark bitmap, free runs, class cursors, sweep cursor -- survive a real Factorio save and reload, and a save taken in EITHER phase is resumed rather than restarted. `GC_SAVE_TICKS_RS` started as `30 239` here and is `60 180` after the two re-derivations below; `CHECK_TICK_RS` is `300`.
 
 **Both reasons this stayed open were wrong, and the second is the useful mistake.** The note said the phase cadence differs between `scripts/run-guest.sh` and this harness -- the standalone run putting the sweep window at 63-64 while "a run here shows phase changes at 237 and 242". One instrumented `--start-server` run to tick 460 logs every phase line, and they are one trace:
 

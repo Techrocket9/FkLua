@@ -162,7 +162,28 @@ SAVE_TICK="${SAVE_TICK:-60}"
 # over its budget, so its mark cannot converge at all; what ends it now is the
 # forward-progress escape, which by construction has to watch for a bounded
 # number of steps before it can conclude anything. A collection is ~47 ticks.
-GC_SAVE_TICKS="${GC_SAVE_TICKS:-60 42}"
+#
+# THE CADENCE MOVED A THIRD TIME AND THE PHASES REDISTRIBUTED rather than the
+# pace changing. Measured 2026-08-30 on 2.0.77, one --benchmark run to tick 400:
+#
+#     phase 0   -> 1 cycles=0     cycle 0: mark 0-62,    sweep 63-73
+#     phase 63  -> 2 cycles=0
+#     phase 74  -> 1 cycles=1     cycle 1: mark 74-114,  sweep 115-121
+#     phase 115 -> 2 cycles=1
+#     phase 122 -> 1 cycles=2     cycle 2: mark 122-162, sweep 163-173
+#
+# Two collections still complete by ~121 (was ~123), so the PACE barely moved;
+# what moved is the SPLIT -- the cold-start mark went 41 -> 63 ticks and the
+# next mark 71 -> 41, which is the shape a bigger root set produces (the guest's
+# statics grew with the fk library across the temptations rounds, and the first
+# mark is where the whole root range is walked). So the old 42 landed mid-MARK
+# and the second collection completed one tick past the old CHECK_TICK of 120,
+# which failed as "only 1 collection ran". cycles= kept RISING throughout, which
+# is the measurement that separates a schedule shift from a regression -- see
+# the Rust block below, which learned that distinction first. 90 is cycle 1's
+# mark with 16 and 24 ticks of margin; 68 is the middle of cycle 0's eleven-tick
+# sweep window; CHECK_TICK 160 clears the second collection's end by 38 ticks.
+GC_SAVE_TICKS="${GC_SAVE_TICKS:-90 68}"
 # THE RUST LEG HAS ITS OWN CADENCE AND ITS OWN CONSTANTS, because the cadence is
 # a property of the GUEST'S HEAP and the two languages do not build the same one.
 #
@@ -217,7 +238,9 @@ GC_SAVE_TICKS="${GC_SAVE_TICKS:-60 42}"
 #   grep -oE 'tick [0-9]+ .*cycles=[0-9]+.*phase=[0-9]+' testdata/tmp/rt-server.log
 # -- and pick one tick reporting phase=1 and one reporting phase=2.
 GC_SAVE_TICKS_RS="${GC_SAVE_TICKS_RS:-60 180}"
-CHECK_TICK="${CHECK_TICK:-120}"
+# 160 rather than the old 120: the second collection now completes at ~121, and
+# a check tick one tick past a boundary is a constant chosen at an edge.
+CHECK_TICK="${CHECK_TICK:-160}"
 # AND THE RUST LEG NEEDS LONGER, and this is the constant that kept the leg
 # opt-in for a milestone. It was 200, and cycles=2 is not reached until tick
 # 242 -- so BOTH arms tripped the "only 1 collection ran" gate before the phase
