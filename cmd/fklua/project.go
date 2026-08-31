@@ -40,8 +40,14 @@ func runInit(args []string) error {
 	// anyway, so this exists for the case where the guest lives somewhere else
 	// entirely and a `guest/` directory would be a lie about the layout.
 	noGuest := false
+	// --library scaffolds a guest LIBRARY rather than a mod -- see library.go.
+	// It shares init's name, --lang and --guest-module and nothing else.
+	library := false
+	apiTyped := false
 	for i := 0; i < len(args); i++ {
 		switch {
+		case args[i] == "--library":
+			library = true
 		case isLangArg(args[i]):
 			// Both spellings, for the reason in langArg (main.go).
 			v, next, err := langArg(args, i)
@@ -55,6 +61,7 @@ func runInit(args []string) error {
 			}
 			i++
 			p.API = args[i]
+			apiTyped = true
 		case args[i] == "--guest-module":
 			if i+1 >= len(args) {
 				return fmt.Errorf("--guest-module needs a path")
@@ -89,7 +96,23 @@ func runInit(args []string) error {
 	}
 	if p.Name == "" {
 		return fmt.Errorf("usage: fklua init <mod-name> [--lang go,rust] [--api VERSION] " +
-			"[--guest-module PATH] [--no-guest]")
+			"[--guest-module PATH] [--no-guest], or fklua init --library <name> " +
+			"[--lang go|rust] [--guest-module PATH]")
+	}
+	if library {
+		// A library has no manifest, no pin and no gc key, so the mod-only
+		// flags are refused rather than ignored -- the same rule runMod applies
+		// to --persist on a data-only packaging.
+		if apiTyped {
+			return fmt.Errorf("--library takes no --api: a library has no pin of " +
+				"its own -- it compiles against its CONSUMER's bindings, which is " +
+				"the contract the scaffold's own comments carry")
+		}
+		if noGuest {
+			return fmt.Errorf("--library and --no-guest contradict: the library " +
+				"IS the guest source")
+		}
+		return initLibrary(p.Name, p.Langs, guestModule)
 	}
 	if p.Title == "" {
 		p.Title = p.Name
