@@ -505,7 +505,7 @@ Still true and still a trap: adding a hook means editing `runtime/lua/fk_mod.lua
 
 ### The event-delivery round (2026-08-30) — round 1 of the temptations survey
 
-[`agents/lua-temptations.md`](agents/lua-temptations.md) closed with four queued rounds. This is the first: the gaps that BLOCK a genre rather than tempt an author. Each item is one subsection below and each shipped with its own red proof.
+[`agents/lua-temptations.md`](agents/lua-temptations.md) closed with four queued rounds. This is the first: the gaps that BLOCK a genre rather than tempt an author. Each item is one subsection below and each shipped with its own red proof. **All four rounds are closed as of the long-levers round below**, and that file is the index of what each one found, shipped or refused.
 
 #### Five members bound green and could never fire — `Member.Unfillable`
 

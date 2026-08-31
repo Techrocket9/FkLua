@@ -1,3 +1,9 @@
+THE DESIGN ROUND'S OWN OUTPUT, kept as it was taken. bench.py has grown legs
+since -- it drives the REAL M.bulk_get now that fk.bulk_get is shipped -- so a
+fresh run prints more than this file holds, and RESULTS-shipped.txt beside it is
+that half. Nothing here is regenerated: this is the record the design was
+decided on.
+
 === anti-vacuity: every leg really did its work ===
 percall_status=0 v=103
 bulk_status=0 n=200 first=100 last=299
