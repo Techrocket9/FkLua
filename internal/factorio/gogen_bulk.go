@@ -16,12 +16,17 @@ import (
 // here. There is no receiver: the receivers are the array. A method with an
 // unused `o` would read as a member of one object, and the `<Name>Into`
 // precedent -- a second binding over one member id, entered in bound[] so
-// inheritance forwards it -- cannot be followed, because inheritance forwards by
-// FORWARDING and a forwarder cannot retype its own parameter: a []LuaEntity
-// handed to a method declaring []LuaControl does not compile. So an inherited
-// attribute gets its own bulk function on the inheriting class, rendered by this
-// same code with the child's type name, which is what makes
-// LuaEntitySurfaceIndexBulk exist at all.
+// inheritance forwards it -- cannot be followed either, because a forwarder
+// passes its parameters verbatim and cannot retype one.
+//
+// AND IT TAKES A []Object, WHICH IS WHAT A SEARCH RETURNS. Every array-of-handles
+// return in the whole API is a []Object -- goScalar renders KindHandle that way
+// and there is no per-class element type anywhere -- so a bulk read taking
+// []LuaEntity would not typecheck against the one thing a guest ever has. It was
+// written that way first and the docs snippet, compiled rather than reviewed,
+// is what said so. Taking []Object also settles inheritance by removing the
+// question: one function per eligible member, named after the class that
+// DECLARES the attribute, which is where `fklua docs` lists it.
 
 // goBulkElem describes one destination element: the Go type a guest indexes and
 // the size that type must occupy for the array to line up with the wire.
@@ -131,10 +136,12 @@ func goMemberBulk(g *goStructs, typeName string, m Member) (src, name string, ok
 	// stated once, at hostBulkGet, and pointed at from here. Repeating the
 	// member's own prose would repeat what the ordinary getter above already
 	// says, at two thousand times the cost.
-	w("// %s reads %s off every handle in objs in ONE host call,\n", name, member)
-	w("// writing element i to dst[i] and returning how many it READ. dst must be\n")
-	w("// at least len(objs) long; see hostBulkGet for when an element is skipped.\n")
-	w("func %s(objs []%s, dst []%s) (int, error) {\n", name, typeName, el.typ)
+	w("// %s reads %s.%s off every handle in objs in ONE host\n",
+		name, typeName, member)
+	w("// call, writing element i to dst[i] and returning how many it READ. dst\n")
+	w("// must be at least len(objs) long, and objs is a []Object because that is\n")
+	w("// what a search returns; see hostBulkGet for when an element is skipped.\n")
+	w("func %s(objs []Object, dst []%s) (int, error) {\n", name, el.typ)
 	w("\tif len(objs) == 0 {\n\t\treturn 0, nil\n\t}\n")
 	w("\tif len(dst) < len(objs) {\n\t\treturn 0, StatusBadArgs\n\t}\n")
 	w("\tif st := hostBulkGet(%d, ptr((*byte)(unsafe.Pointer(&objs[0]))), "+

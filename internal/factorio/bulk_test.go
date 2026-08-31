@@ -501,10 +501,14 @@ func TestBothBackendsBindTheSameBulkVariants(t *testing.T) {
 			t.Errorf("%s: census says %d bulk variants and the generator emitted %d",
 				v, c.BulkVariantBindings, g.BulkVariants)
 		}
-		if c.BulkReadMembers >= c.BulkVariantBindings {
-			t.Errorf("%s: %d eligible members and %d bindings -- the bindings must "+
-				"outnumber the members by the INHERITED re-renderings", v,
-				c.BulkReadMembers, c.BulkVariantBindings)
+		// EVERY ELIGIBLE MEMBER GOT ITS BINDING. The two rows answer different
+		// questions -- eligibility is the description's and emission is the
+		// generator's -- so an inequality means a name collided or a shape was
+		// refused between the two, which is a member an author cannot reach and
+		// nothing else would report.
+		if c.BulkReadMembers != c.BulkVariantBindings {
+			t.Errorf("%s: %d members are bulk-eligible and %d bindings were "+
+				"emitted", v, c.BulkReadMembers, c.BulkVariantBindings)
 		}
 	}
 }

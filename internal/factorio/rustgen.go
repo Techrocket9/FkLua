@@ -348,12 +348,10 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 	// each class declared itself.
 	bound := map[string]map[string]rustSig{}
 	// bulkSeen guards the MODULE-LEVEL bulk function names, which live in the
-	// same namespace as every generated type rather than inside a class's impl.
-	// bulkable records which of a class's members earned one, so the inheritance
-	// loop can re-render them for the children; bulkSrc holds a class's own
-	// until its impl block has been closed, because these are free functions.
+	// same namespace as every generated type rather than inside a class's impl;
+	// bulkSrc holds a class's own until its impl block has been closed, because
+	// these are free functions.
 	bulkSeen := map[string]bool{}
-	bulkable := map[string][]Member{}
 	var bulkSrc []string
 	declared := map[string]map[string]bool{}
 
@@ -372,15 +370,7 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 			typeName = exportName(cls)
 			w("\n/// A handle to a `%s`.\n", cls)
 			w("#[derive(Copy, Clone, PartialEq, Eq, Debug)]\n")
-			// ...AND IT IS ONE HANDLE WIDE, which a bulk read depends on: it
-			// hands the host objs.as_ptr() as an array of u32 handles, so a
-			// newtype whose layout the compiler was free to choose would have
-			// the host reading every other word. repr(transparent) is what makes
-			// that a fact rather than an observation, and the assertion is per
-			// class because the property is about THIS declaration.
-			w("#[repr(transparent)]\n")
-			w("pub struct %s(pub Object);\n", typeName)
-			w("const _: () = assert!(core::mem::size_of::<%s>() == 4);\n\n", typeName)
+			w("pub struct %s(pub Object);\n\n", typeName)
 			w("impl %s {\n", typeName)
 		}
 
@@ -465,19 +455,15 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 			// shape: one crossing for N handles over the same member id.
 			//
 			// HELD BACK RATHER THAN WRITTEN HERE, because it is a FREE FUNCTION
-			// and the impl block is still open. Not entered in bound[] either,
-			// so the inheritance loop does not forward it -- a forwarder passes
-			// its parameters verbatim, and a &[Child] handed to a function
-			// declaring &[Parent] does not compile. The inherited case is
-			// re-rendered with the child's type name further down instead.
+			// and the impl block is still open. Not entered in bound[] either:
+			// it is not a method, it takes a &[Object], and a &[Object] is a
+			// &[Object] whichever class declared the attribute -- so there is
+			// nothing for the inheritance loop to forward.
 			bsrc, bname, bok := rustMemberBulk(structs, typeName, m)
 			if bok && !bulkSeen[bname] && !structs.taken(bname) {
 				bulkSeen[bname] = true
 				bulkSrc = append(bulkSrc, bsrc)
 				out.BulkVariants++
-			}
-			if bok {
-				bulkable[cls] = append(bulkable[cls], m)
 			}
 		}
 		if !global {
@@ -532,22 +518,6 @@ func GenerateRust(a *API, r Report, evs EventReport) (RustBindings, error) {
 		}
 		taken := declared[cls]
 		var fwd []string
-		// THE INHERITED BULK READS, re-rendered rather than forwarded. See the
-		// note beside rustMemberBulk's call site: LuaControl declares
-		// surface_index and a polling guest holds a &[LuaEntity], so the binding
-		// it needs is lua_entity_surface_index_bulk and no forwarder can produce
-		// one. Free functions, so they go outside every impl block.
-		for p := parentOf[cls]; p != ""; p = parentOf[p] {
-			for _, m := range bulkable[p] {
-				bsrc, bname, bok := rustMemberBulk(structs, exportName(cls), m)
-				if !bok || bulkSeen[bname] || structs.taken(bname) {
-					continue
-				}
-				bulkSeen[bname] = true
-				w("\n%s", bsrc)
-				out.BulkVariants++
-			}
-		}
 		for p := parentOf[cls]; p != ""; p = parentOf[p] {
 			names := make([]string, 0, len(bound[p]))
 			for n := range bound[p] {

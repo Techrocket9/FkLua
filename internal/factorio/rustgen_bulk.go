@@ -98,6 +98,11 @@ func rustSnake(s string) string {
 // A FREE FUNCTION AND NOT AN INHERENT METHOD, for gogen_bulk.go's reason: there
 // is no receiver, because the receivers are the slice. It is emitted OUTSIDE the
 // class's impl block, which is why the caller has to close that block first.
+//
+// AND IT TAKES A &[Object], which is what every array-of-handles return in the
+// API is -- rust_scalar renders KindHandle as Object and there is no per-class
+// element type anywhere, so a &[LuaEntity] would not typecheck against the one
+// thing a guest ever holds.
 func rustMemberBulk(g *rustStructs, typeName string, m Member) (src, name string, ok bool) {
 	f, size, elig := BulkEligible(m)
 	if !elig || typeName == "" {
@@ -123,12 +128,13 @@ func rustMemberBulk(g *rustStructs, typeName string, m Member) (src, name string
 
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
-	w("/// Reads %s off every handle in objs in ONE host call, writing element i\n",
-		member)
-	w("/// to dst[i] and returning how many it READ. dst must be at least\n")
-	w("/// objs.len() long; see fk_bulk_get for when an element is skipped.\n")
-	w("pub fn %s(objs: &[%s], dst: &mut [%s]) -> Result<usize, Status> {\n",
-		name, typeName, el)
+	w("/// Reads %s::%s off every handle in objs in ONE host call, writing\n",
+		typeName, member)
+	w("/// element i to dst[i] and returning how many it READ. dst must be at\n")
+	w("/// least objs.len() long, and objs is a &[Object] because that is what a\n")
+	w("/// search returns; see fk_bulk_get for when an element is skipped.\n")
+	w("pub fn %s(objs: &[Object], dst: &mut [%s]) -> Result<usize, Status> {\n",
+		name, el)
 	w("    if objs.is_empty() {\n        return Ok(0);\n    }\n")
 	w("    if dst.len() < objs.len() {\n        return Err(Status(Status::BAD_ARGS));\n    }\n")
 	w("    let st = unsafe {\n")

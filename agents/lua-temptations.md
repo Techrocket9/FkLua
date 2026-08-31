@@ -265,8 +265,29 @@ into their rounds:
   becoming a guest, one by the `mod-data` prototype -- and the doctrine SHIPPED
   in round 3, in `docs/data-stage.md`. The open probe that draft named is run:
   a data guest's `mod-data` prototype is accepted, lands in the dump, and is
-  read back at runtime by a control guest in the same session. What is left of
-  round 4 is 4a's bulk attribute read and 4b's batched GUI add.
+  read back at runtime by a control guest in the same session.
+- **Round 4's bulk attribute read is SHIPPED** as `fk.bulk_get`, both languages,
+  1,533 bindings at the GA pin and one per eligible member. It is a NEW IMPORT
+  rather than a member kind, which is the third answer in this file's own
+  three-way frame -- widen when the information belongs to the same call, a
+  second import when the two forms decode different blocks, a kind when the host
+  must synthesise a closure -- and here the deciding term is the PRUNING SCAN:
+  as a kind it would add 1,533 member ids to a table that ships in every save,
+  and with the target id inside the argument block it would defeat `UsedMembers`
+  outright. Measured with that third scan removed, a bulk-only guest packages an
+  EMPTY member table and answers ERR_NO_MEMBER on every read, which is worse
+  than shipping everything. **Three deviations from the draft, each measured**:
+  the fast arm hoists the READ and not the WRITE (a direct shard store bypasses
+  the dirty-page set that is packed's save set and the collector's write
+  barrier), a skipped element is written as ZERO rather than left alone (a
+  reused destination would hand back the previous crossing's value), and the
+  object list is a `[]Object` rather than a `[]<Class>` -- which is what every
+  array-of-handles return in the API is, found by COMPILING the documentation
+  snippet rather than reading it. Shipped ratios against the per-call form:
+  **0.598x at N = 1 and 0.220x at N = 256** host-side, **0.239x end to end under
+  `--persist=table`** and **0.0083x under `packed`**, where a per-call return
+  block scatters pages and a bulk destination is one page. No member id moves,
+  none is added, and the ABI signature is unchanged.
 
 Execution notes for whoever picks a round up: each round is a worktree off
 master with the house gates (build the lua52f oracle first or thirty tests

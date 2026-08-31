@@ -165,7 +165,16 @@ func TestWhatAHostCallCostsThroughARealGuest(t *testing.T) {
 		{"NameIs (no match)", 7},
 		{"array return (4)", 8},
 		{"array into (4)", 9},
+		// THE BULK READ, at two sizes. Both are ONE host call, so the number to
+		// compare against "scalar in, scalar out" is this divided by the count --
+		// which is what the log line below spells out rather than leaving to a
+		// reader with a calculator.
+		{"bulk read of 4 (one call)", 10},
+		{"bulk read of 256 (one call)", 11},
 	}
+	// The element counts, so the per-element line is derived from the same table
+	// the probes are rather than from a second list that can drift.
+	perElement := map[int]int{10: 4, 11: 256}
 
 	for _, persist := range []luagen.PersistMode{luagen.PersistTable, luagen.PersistPacked} {
 		dir := packCallCost(t, root, tmp, wasmPath, persist)
@@ -197,6 +206,17 @@ func TestWhatAHostCallCostsThroughARealGuest(t *testing.T) {
 			if i == 0 {
 				t.Logf("  %-24s %8.0f ns   %5.2fx the floor; the baseline every "+
 					"other line is above", p.name, ns[i], ns[i]/floor)
+				continue
+			}
+			if n := perElement[p.tick]; n > 0 {
+				// PER ELEMENT, which is the only number comparable with the
+				// per-call probes above. A bulk read is one crossing however
+				// many handles it carries, so its raw nanoseconds say nothing
+				// about whether an author should use it.
+				t.Logf("  %-24s %8.0f ns   (+%.0f over the dispatch; %.0f ns per "+
+					"element of %d, against %.0f for one scalar read)",
+					p.name, ns[i], ns[i]-base, (ns[i]-base)/float64(n), n,
+					ns[2]-base)
 				continue
 			}
 			t.Logf("  %-24s %8.0f ns   (+%.0f over the dispatch, %.2fx it)",

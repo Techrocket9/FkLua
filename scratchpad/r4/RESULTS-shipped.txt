@@ -1,0 +1,74 @@
+THE SHIPPED fk.bulk_get, measured after it landed.
+=================================================
+
+Everything in RESULTS.txt is a PROTOTYPE measured beside the real dispatcher,
+which is what a design round produces. These are the legs that call
+H.bulk_get -- the function runtime/lua/fk_abi.lua ships and a packaged mod
+runs -- plus the end-to-end figures through a real compiled guest.
+
+  python3 scratchpad/r4/bench.py            (host side, bin/lua52f)
+  go test ./internal/guest/ -run TestWhatAHostCallCostsThroughARealGuest -count=1
+
+=== HOST SIDE, N = 200 per crossing ===
+  floor (a plain Lua call)        19.1 ns   (A/A 20 and 18 ns, spread 8.3%)
+  leg                         ns/iter   ns/element  vs percall  vs hand Lua
+  percall                      199665        998.3      1.000x        46.9x
+  bulk_ship_u32                 43351        216.8      0.217x        10.2x
+  bulk_ship_f64                 67283        336.4      0.336x        15.8x
+  bulk_ship_opt                 84636        423.2      0.423x        19.9x
+  bulk_ship_general            109049        545.2      0.545x        25.6x
+
+=== THE SHIPPED FAST ARM, AMORTIZED (u32 attribute) ===
+      N   percall ns/el   ship u32 ns/el   ratio
+      1           984.8            588.8   0.598x
+      2           990.9            398.7   0.402x
+      8          1002.0            254.9   0.254x
+    256           981.1            216.0   0.220x
+
+  ...and the f64 attribute, beside the general arm:
+      N   percall ns/el   ship fast ns/el   ship general ns/el   fast vs percall
+      1          1001.4             683.5                903.9           0.683x
+      2          1005.7             515.5                741.5           0.513x
+      8           991.1             378.4                588.9           0.382x
+    256           975.8             333.1                544.3           0.341x
+   1024           974.4             335.6                540.7           0.344x
+
+  NO SIZE AT WHICH A GUEST IS WORSE OFF, in either arm, so there is no
+  threshold to document. N = 1 is 0.598x for the shape a poll actually has.
+
+=== END TO END, THROUGH A REAL COMPILED GUEST ===
+  Every figure is ns above a dispatch that makes no host call at all.
+
+  --persist=table (the default)
+    scalar in, scalar out (per call)   1,943 ns
+    bulk read of 4                       593 ns/element   0.305x
+    bulk read of 256                     465 ns/element   0.239x
+
+  --persist=packed
+    scalar in, scalar out (per call) 125,073 ns
+    bulk read of 4                    21,715 ns/element   0.174x
+    bulk read of 256                   1,035 ns/element   0.0083x  (121x)
+
+  The packed column is the direction the design predicted and did not measure:
+  packed costs ~40 us per page actually written, a per-call return block
+  scatters, and a bulk destination of 256 u32 results is one page.
+
+=== WHY THE SHIPPED FAST ARM IS 0.22x AND THE PROTOTYPE REACHED 0.044x ===
+  The prototype dropped two things the shipped one keeps, and both are
+  contracts rather than overhead.
+
+    the per-element pcall     ~87 ns/element (RESULTS.txt, bulk_batchpcall
+                              against bulk_full). It is what makes "an element
+                              that raises costs its own element and the walk
+                              continues" true; one pcall for the batch abandons
+                              elements i+1..n.
+    the store funnel          ~64 ns/element (bulk_store_u32 at 73.6 against a
+                              hoisted array write). st32 marks the dirty page,
+                              which is --persist=packed's save set AND
+                              --gc=collected's write barrier. MEMPACK.mark is
+                              inside the generated chunk and fk_abi.lua cannot
+                              reach it, so a hoisted store would be the defect
+                              class CLAUDE.md gates the inlined 8-byte store on.
+
+  216.8 - 87 - 64 = 66 ns, against the prototype's 41-45 ns hoisted arm plus
+  the valid check. The staircase closes.

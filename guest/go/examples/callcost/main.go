@@ -29,6 +29,20 @@ var (
 	sinkObjs []fkapi.Object
 	dst      []fkapi.Object
 	filter   fkapi.EntitySearchFilters
+	// The bulk read's two sides, both allocated once in init for the reason
+	// `args` and `dst` are: a probe that grew a slice would be measuring make().
+	bulkObjs []fkapi.Object
+	bulkDst  []fkapi.BulkOptUint64
+	bulkN    int
+)
+
+// How many handles the bulk probes read in one crossing. Two sizes, because the
+// whole claim about a bulk form is that its ONE fixed cost amortizes -- a single
+// size would say nothing about the shape of that curve, and N=4 is where a
+// caller most doubts it.
+const (
+	bulkSmall = 4
+	bulkLarge = 256
 )
 
 // The name the stub's object carries. One constant for both name probes, so
@@ -48,6 +62,14 @@ func init() {
 	// so that the steady state is a reuse rather than a grow. Allocated HERE,
 	// outside every probe, for the same reason `args` is.
 	dst = make([]fkapi.Object, 0, 16)
+	// The handle array a search would have written, and the destination the
+	// bulk read fills. Both are the guest's own memory and neither is touched
+	// inside a probe.
+	bulkObjs = make([]fkapi.Object, bulkLarge)
+	for i := range bulkObjs {
+		bulkObjs[i] = thing
+	}
+	bulkDst = make([]fkapi.BulkOptUint64, bulkLarge)
 }
 
 //go:wasmexport fk_on_tick
@@ -96,7 +118,19 @@ func onTick(which uint32) {
 		// ...and into a destination whose capacity is already there. Same host
 		// call, same member id, same blocks: only the guest's slice differs.
 		dst, _ = fkapi.LuaSurface{Object: thing}.FindEntitiesFilteredInto(dst, filter)
+	case 10:
+		// A BULK ATTRIBUTE READ of four handles in ONE crossing. Divide by four
+		// to compare against probe 2, which is the same attribute read one
+		// handle at a time: this is where a caller finds out whether one
+		// crossing has paid for itself yet.
+		bulkN, _ = fkapi.LuaEntityUnitNumberBulk(bulkObjs[:bulkSmall],
+			bulkDst[:bulkSmall])
+	case 11:
+		// ...and of 256, which is the size a poll actually is. Divide by 256.
+		bulkN, _ = fkapi.LuaEntityUnitNumberBulk(bulkObjs[:bulkLarge],
+			bulkDst[:bulkLarge])
 	}
+	_ = bulkN
 }
 
 func main() {}

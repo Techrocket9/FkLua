@@ -366,10 +366,8 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 	bound := map[string]map[string]goSig{}
 	// bulkSeen guards the PACKAGE-LEVEL bulk function names, which live in the
 	// same namespace as every generated type rather than inside a class's method
-	// set. bulkable records which of a class's members earned one, so the
-	// inheritance loop can re-render them for the children.
+	// set.
 	bulkSeen := map[string]bool{}
-	bulkable := map[string][]Member{}
 	declared := map[string]map[string]bool{}
 	byClass := map[string][]Member{}
 	var classes []string
@@ -400,12 +398,6 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 			typeName = exportName(cls)
 			w("\n// %s wraps a handle to a %s.\ntype %s struct{ Object }\n\n",
 				typeName, cls, typeName)
-			// ...AND IT IS ONE HANDLE WIDE, which a bulk read depends on: it
-			// hands the host &objs[0] as an array of u32 handles, so a class
-			// type that grew a second field would have the host reading every
-			// other word. Asserted per class rather than argued once, because
-			// the property is about THIS declaration.
-			w("var _ [4]byte = [unsafe.Sizeof(%s{})]byte{}\n\n", typeName)
 		}
 
 		// A class can declare a method and an attribute with names that collide
@@ -497,20 +489,17 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 			// AND THE BULK VARIANT, for a readable attribute of a fixed-width
 			// shape: one crossing for N handles over the same member id.
 			//
-			// NOT entered in bound[], deliberately, so the inheritance loop does
-			// not forward it. A forwarder passes its parameters verbatim and
-			// this one's first parameter is a []<Class> -- a child's slice handed
-			// to the parent's declaration does not compile -- so the inherited
-			// case is RE-RENDERED with the child's type name further down
-			// instead. Recorded here for that loop to find.
+			// NOT entered in bound[], because it is not a method: it is a
+			// package-level function over a []Object, so there is nothing for
+			// the inheritance loop to forward and nothing an inheriting class
+			// needs -- a []Object is a []Object whichever class declared the
+			// attribute. One function per eligible member, named after the class
+			// that DECLARES it, which is where `fklua docs` lists it too.
 			bsrc, bname, bok := goMemberBulk(structs, typeName, m)
 			if bok && !bulkSeen[bname] && !structs.taken(bname) {
 				bulkSeen[bname] = true
 				w("%s", bsrc)
 				out.BulkVariants++
-			}
-			if bok {
-				bulkable[cls] = append(bulkable[cls], m)
 			}
 		}
 		out.StaleRenames = append(out.StaleRenames,
@@ -554,23 +543,6 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 		}
 		taken := declared[cls]
 		var fwd []string
-		// THE INHERITED BULK READS, re-rendered rather than forwarded. See the
-		// note beside goMemberBulk's call site: LuaControl declares
-		// surface_index and a polling guest holds []LuaEntity, so the binding it
-		// needs is LuaEntitySurfaceIndexBulk and no forwarder can produce one.
-		// Nearest ancestor first, and a name the class declares itself has
-		// already been emitted, so the seen set is what stops a second copy.
-		for p := parentOf[cls]; p != ""; p = parentOf[p] {
-			for _, m := range bulkable[p] {
-				bsrc, bname, bok := goMemberBulk(structs, exportName(cls), m)
-				if !bok || bulkSeen[bname] || structs.taken(bname) {
-					continue
-				}
-				bulkSeen[bname] = true
-				w("%s", bsrc)
-				out.BulkVariants++
-			}
-		}
 		for p := parentOf[cls]; p != ""; p = parentOf[p] {
 			names := make([]string, 0, len(bound[p]))
 			for n := range bound[p] {

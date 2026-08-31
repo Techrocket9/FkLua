@@ -180,12 +180,13 @@ type CensusData struct {
 	// BulkVariantBindings is how many <Class><Name>Bulk / <class>_<name>_bulk
 	// bindings each backend emitted.
 	//
-	// IT IS LARGER THAN BulkReadMembers, deliberately and by the inherited set:
-	// a bulk read takes a slice of the class the guest is HOLDING, and a
-	// forwarder cannot retype its own parameter, so an attribute LuaControl
-	// declares is re-rendered on every class that inherits it rather than
-	// forwarded. The gap between the two rows is exactly that re-rendering, which
-	// is the one thing a single number could not have said.
+	// EQUAL TO BulkReadMembers TODAY AND A ROW OF ITS OWN ANYWAY, which is the
+	// same discipline typed_variant_bindings keeps: they answer different
+	// questions and a single number could not say which one moved. Eligibility
+	// is a property of the DESCRIPTION and emission is a property of the
+	// GENERATORS, so a name collision or a refusal on one side would separate
+	// them -- and a reader comparing two equal numbers learns that nothing was
+	// lost between the two, which is the thing worth knowing.
 	//
 	// ONE ROW FOR BOTH LANGUAGES, like typed_variant_bindings: both walk one
 	// Report and ask one BulkEligible, so a disagreement is a defect rather than
