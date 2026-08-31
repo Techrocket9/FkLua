@@ -130,7 +130,10 @@ func libraryGoMod(name, guestModule string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "// A guest library is its own Go module. The module path below is a\n")
 	fmt.Fprintf(&b, "// PLACEHOLDER: rename it to the path you will publish under, or your\n")
-	fmt.Fprintf(&b, "// consumers cannot `go get` it.\n")
+	fmt.Fprintf(&b, "// consumers cannot `go get` it. If this directory is a SUBDIRECTORY of\n")
+	fmt.Fprintf(&b, "// your repository (the sibling go/ and rust/ arrangement this scaffold\n")
+	fmt.Fprintf(&b, "// itself suggests for a two-language library), the module path must end\n")
+	fmt.Fprintf(&b, "// with that directory -- <repo-path>/go -- or Go cannot resolve it.\n")
 	fmt.Fprintf(&b, "module %s\n\ngo 1.24\n", libraryPackageName(name))
 	if guestModule == "" {
 		fmt.Fprintf(&b, "\n// Run `go mod tidy` once to pin the FkLua guest substrate\n")
@@ -263,9 +266,11 @@ crate-type = ["rlib"]
 
 ` + note + `
 #
-# WASM-GATED, the fkipc arrangement: on the host this crate has no
-# dependencies at all, which is what lets ` + "`cargo test`" + ` run the pure half
-# with no wasm target installed.
+# WASM-GATED, the fkipc arrangement: on the host nothing below COMPILES,
+# which is what lets ` + "`cargo test`" + ` run the pure half with no wasm toolchain
+# installed. Cargo still RESOLVES the graph, so a git source is cloned once
+# even for a host test run: the first run needs the network, later ones do
+# not.
 [target.'cfg(target_family = "wasm")'.dependencies]
 ` + dep + `
 

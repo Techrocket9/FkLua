@@ -75,7 +75,8 @@ type reportCount struct {
 	Complete bool `json:"complete"`
 	// Shipped is the row count actually packaged: the proved set when
 	// Complete, the whole table when not. Total is the description's count.
-	// Both are 0 when no table was attached at all (api.table_attached).
+	// Both are 0, and Complete is vacuously true, when no table was attached
+	// at all (api.table_attached).
 	Shipped int `json:"shipped"`
 	Total   int `json:"total"`
 }
@@ -156,8 +157,20 @@ type modReport struct {
 // newModReport starts a report whose every list is non-nil, because a list is
 // [] and never null -- a property of the bytes, so it is established at
 // construction rather than trusted to every population site.
+//
+// THE PRUNING FLAGS START TRUE, and the first consumer is why. `complete:
+// false` is the "ships the full table" warning a driving tool surfaces, and a
+// packaging that never runs a scan at all -- a data-only mod, or a refusal
+// before attachAPI -- is not that: there is no table for the verdict to be
+// about, which `api.table_attached: false` already says. The zero value read
+// as a real warning there (FkRecipes' dogfood report called it "correct but
+// alarming", and it was not even correct), so the default is the vacuous
+// truth and only an actual scan writes a false.
 func newModReport() *modReport {
 	r := &modReport{}
+	r.Pruning.Members.Complete = true
+	r.Pruning.Events.Complete = true
+	r.Pruning.Defines.Complete = true
 	r.Pin.Status = "not_checked"
 	r.Pin.Guest = []string{}
 	r.Signature.Status = "not_checked"

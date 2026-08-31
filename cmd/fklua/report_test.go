@@ -221,6 +221,26 @@ func TestTheReportFieldSetIsPinned(t *testing.T) {
 	}
 }
 
+// A packaging that never runs a scan must not wear the scan's warning.
+// FkRecipes' dogfood report: a data-only mod's report said `complete: false`,
+// which reads as "ships the full table" for a mod that has no table --
+// table_attached is the disambiguator and the flags are vacuously true.
+func TestADataOnlyReportIsVacuouslyComplete(t *testing.T) {
+	doc, _, err := runModReport(t, "--data-module", dataGuest(t, "fk_data"))
+	if err != nil {
+		t.Fatalf("packaging: %v", err)
+	}
+	if at(t, doc, "api", "table_attached") != false {
+		t.Errorf("a data-only mod attached a table")
+	}
+	for _, table := range []string{"members", "events", "defines"} {
+		if got := at(t, doc, "pruning", table, "complete"); got != true {
+			t.Errorf("pruning.%s.complete = %v with no scan run; the zero value "+
+				"is the full-table warning and this mod has no table", table, got)
+		}
+	}
+}
+
 // The incomplete-pruning verdict is the one warning a driving tool exists to
 // surface, and it is structured now: an id the scan cannot prove reads as
 // complete=false with the full table shipped.
