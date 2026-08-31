@@ -44,8 +44,13 @@ Usage:
             [--gc=leaking|collected] [--api=VERSION] [--factorio-version X.Y]
             [--data-module DATA.wasm] [--stage KEY=a,@guest,b]...
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
-            [--description D] [--dependency DEP]...
+            [--description D] [--dependency DEP]... [--report FILE]
                                      (identity defaults to fklua.toml's [mod])
+      --report FILE     write one JSON document a tool can drive on: the
+                        pruning verdicts, the pin and signature outcomes, the
+                        wired hooks and the outputs. Written on success AND on
+                        refusal (ok/refusal.kind say which); stdout is
+                        unchanged to the byte
       IN.wasm           the CONTROL guest, and it is optional when this mod has
                         a data module ([fklua] data_module or --data-module).
                         A data-stage-only mod ships no control.lua,
@@ -894,10 +899,16 @@ func runCompile(args []string) error {
 // exports and refused when it fails, on the same principle as every other
 // refusal in this CLI -- a stub that raises in game is worse than a build that
 // stops here.
-func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSource) error {
+func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSource, rep *modReport) error {
 	used, complete := factorio.UsedMembers(im)
 	usedEv, evComplete := factorio.UsedEvents(im)
 	usedDef, defComplete := factorio.UsedDefines(im)
+	// The report gets the raw verdicts whatever happens below: the complete
+	// flags ARE the "ships the full table" warnings a driving tool exists to
+	// surface, and they are known before any early return.
+	rep.Pruning.Members.Complete = complete
+	rep.Pruning.Events.Complete = evComplete
+	rep.Pruning.Defines.Complete = defComplete
 	// THE HOOK PAYLOAD IS PRUNED BY AN EXPORT, not by a constant scan, and it is
 	// the only thing in this table that is. There is no id to find: Factorio
 	// raises on_configuration_changed and the guest never asks for it, so what
@@ -938,17 +949,28 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 	// files a description under the version the FILE claims, so the two agree;
 	// comparing the thing the ids were actually assigned over is one fewer
 	// assumption, and it is free here.
+	rep.Pin.Guest = append(rep.Pin.Guest, factorio.GuestPins(im)...)
+	rep.Pin.Packaged = factorio.PinExport(a.ApplicationVersion)
 	if err := checkAPIPin(im, a.ApplicationVersion, pin); err != nil {
-		return err
+		rep.Pin.Status = "mismatch"
+		return refuse("api_pin", err)
+	}
+	if len(rep.Pin.Guest) == 0 {
+		rep.Pin.Status = "absent"
+	} else {
+		rep.Pin.Status = "ok"
 	}
 	// ...AND THE OTHER HALF, which the pin cannot reach: whether the guest was
 	// built against THESE bindings or against an older generation of the same
 	// description. A warning rather than a refusal -- see warnAPISignature.
-	warnAPISignature(im, a, pin)
+	warnAPISignature(im, a, pin, rep)
 	report := factorio.GenerateMembers(a)
 	events := factorio.GenerateEvents(a)
 	defs := factorio.GenerateDefines(a)
 	full, fullEv, fullDef := len(report.Members), len(events.Events), len(defs.Defines)
+	rep.Pruning.Members.Total = full
+	rep.Pruning.Events.Total = fullEv
+	rep.Pruning.Defines.Total = fullDef
 
 	if !wantsConfChanged {
 		events = events.WithoutConfChanged()
@@ -989,11 +1011,17 @@ func attachAPI(pkg *factorio.Package, im *ir.Module, version string, pin pinSour
 			"constant, so the table cannot be pruned\n", version, full)
 	}
 
+	rep.Pruning.Members.Shipped = len(report.Members)
+	rep.Pruning.Events.Shipped = len(events.Events)
+	rep.Pruning.Defines.Shipped = len(defs.Defines)
+
 	src, err := report.LuaSourceWith(a, events)
 	if err != nil {
 		return fmt.Errorf("generating the member table: %w", err)
 	}
 	pkg.APITable = src
+	rep.API.TableAttached = true
+	rep.API.TableBytes = len(src)
 	return nil
 }
 
@@ -1069,15 +1097,22 @@ type pinSource struct {
 //
 // AN ABSENT STAMP IS SILENCE, as an absent pin is: bindings older than the stamp
 // carry none, and a guest linking no generated bindings carries none either.
-func warnAPISignature(im *ir.Module, a *factorio.API, from pinSource) {
+func warnAPISignature(im *ir.Module, a *factorio.API, from pinSource, rep *modReport) {
 	sigs := factorio.GuestSigs(im)
-	if len(sigs) == 0 {
-		return
-	}
 	want := factorio.SigExport(factorio.APISignature(a))
-	if len(sigs) == 1 && sigs[0] == want {
+	rep.Signature.Guest = append(rep.Signature.Guest, sigs...)
+	rep.Signature.Packaged = want
+	if len(sigs) == 0 {
+		rep.Signature.Status = "absent"
 		return
 	}
+	if len(sigs) == 1 && sigs[0] == want {
+		rep.Signature.Status = "ok"
+		return
+	}
+	// The one verdict here that is a STATUS rather than a refusal, because an
+	// id that only moved by appending is still correct -- the argument above.
+	rep.Signature.Status = "mismatch"
 	repin := "fklua gen-bindings"
 	if from.file != "" {
 		repin = "fklua gen-bindings (this project pins " + a.ApplicationVersion +
@@ -1325,7 +1360,27 @@ func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, error) {
 }
 
 // runMod compiles a module and packages it as a mod Factorio will load.
+// runMod packages a mod, and when --report FILE was typed it writes the
+// machine-readable report for success and refusal alike -- see report.go for
+// the contract. The wrapper exists so every `return err` inside the body
+// reaches the report without a defer capturing named results.
 func runMod(args []string) error {
+	rep := newModReport()
+	err := runModWith(args, rep)
+	if rep.path == "" {
+		return err
+	}
+	if werr := rep.write(err); werr != nil {
+		if err == nil {
+			return werr
+		}
+		// A failed report write must not mask the refusal it was reporting.
+		fmt.Fprintf(os.Stderr, "fklua mod: %v\n", werr)
+	}
+	return err
+}
+
+func runModWith(args []string, rep *modReport) error {
 	var in, outDir string
 	var include []string
 	zip := false
@@ -1445,6 +1500,11 @@ func runMod(args []string) error {
 		case args[i] == "--data-module":
 			err = str(&i, "--data-module", &dataModule)
 			dataFromFlag = err == nil
+		case args[i] == "--report":
+			// A FILE rather than stdout, which is api diff --json and bench
+			// --json's arrangement: this command's stdout is prose that build
+			// logs grep, and a document interleaved with it would be neither.
+			err = str(&i, "--report", &rep.path)
 		case args[i] == "--stage":
 			// KEY=a,@guest,b. A flag form for a manifest key, and the reason is
 			// the multi-project one rather than symmetry: one checkout that
@@ -1704,6 +1764,17 @@ func runMod(args []string) error {
 		outDir = "."
 	}
 
+	// What the report can already say: the resolved pin and its source, and
+	// the shape of the packaging. The rest is filled in as each verdict is
+	// reached, so a refusal's report carries everything decided before it.
+	rep.API.Version = apiVersion
+	rep.API.Source = apiPin.what
+	rep.Build.ControlModule = in != ""
+	rep.Build.DataModule = dataModule != ""
+	rep.Build.NaN = nan.String()
+	rep.Build.Opt = opt.String()
+	rep.Build.Fuel = fuel
+
 	// THE CONTROL GUEST, and every step of it is gated on there being one. An
 	// empty `in` is a data-stage-only mod (see the refusal above), and what
 	// follows is the whole of what a control module costs: a build stamp, the
@@ -1740,18 +1811,20 @@ func runMod(args []string) error {
 		// this, diagnostics name TinyGo's exported libm -- fmaximumf and friends
 		// -- which the mod never calls and the author never wrote.
 		if err := checkGC(gc, im, gcFrom); err != nil {
-			return err
+			return refuse("gc", err)
 		}
+		rep.Build.GC = gc.String()
+		rep.Build.Persist = persist.String()
 		src, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
 			GC: gc, Fuel: fuel, Roots: hookNames()})
 		if err != nil {
-			return err
+			return refuse("emit", err)
 		}
 		pkg.Chunk = src
 		for _, e := range im.Exports {
 			pkg.Exports = append(pkg.Exports, e.Name)
 		}
-		if err := attachAPI(pkg, im, apiVersion, apiPin); err != nil {
+		if err := attachAPI(pkg, im, apiVersion, apiPin, rep); err != nil {
 			return err
 		}
 	}
@@ -1780,14 +1853,14 @@ func runMod(args []string) error {
 			exports = append(exports, e.Name)
 		}
 		if err := factorio.CheckDataModule(imports, exports); err != nil {
-			return fmt.Errorf("%s: %w", dataModule, err)
+			return refuse("data_module", fmt.Errorf("%s: %w", dataModule, err))
 		}
 		dsrc, err := emitWithDiagnostics(dim, luagen.Options{
 			NaN: nan, Opt: opt, Persist: luagen.PersistNone, GC: luagen.GCLeaking,
 			Roots: factorio.StageExportNames(),
 		})
 		if err != nil {
-			return err
+			return refuse("emit", err)
 		}
 		pkg.DataChunk = dsrc
 		pkg.DataExports = exports
@@ -1809,8 +1882,13 @@ func runMod(args []string) error {
 		path, err = pkg.WriteDir(outDir)
 	}
 	if err != nil {
-		return err
+		return refuse("package", err)
 	}
+	rep.Outputs.Path = path
+	rep.Outputs.Zip = zip
+	rep.Outputs.ControlLuaBytes = len(src)
+	rep.Outputs.DataLuaBytes = dataModuleSize
+	rep.LuaMigrations = append(rep.LuaMigrations, pkg.LuaMigrations()...)
 
 	// TWO LINES BECAUSE THERE ARE TWO SHAPES, and the control one is untouched
 	// to the byte -- it is what every build in and outside this repo greps. The
@@ -1850,6 +1928,8 @@ func runMod(args []string) error {
 	case hasProject && proj.FactorioVersion != "":
 		fvSrc = projectFile
 	}
+	rep.Build.FactorioVersion = info.FactorioVersion
+	rep.Build.FactorioVersionSource = fvSrc
 	fmt.Printf("  info.json declares Factorio %s (from %s)\n", info.FactorioVersion, fvSrc)
 	if n := len(pkg.Extra); n > 0 {
 		fmt.Printf("  included %d file(s) from %s\n", n, strings.Join(include, ", "))
@@ -1875,6 +1955,7 @@ func runMod(args []string) error {
 	// otherwise gets a mod that loads, does nothing, and explains nothing.
 	found, absent := pkg.Wiring()
 	for _, h := range found {
+		rep.Hooks.Control = append(rep.Hooks.Control, h.Export)
 		fmt.Printf("  wired %-12s -> %s\n", h.Export, h.What)
 	}
 	// The same for the data stage, and a mod with a data module that exports
@@ -1883,6 +1964,7 @@ func runMod(args []string) error {
 	if dataModule != "" {
 		dfound, dabsent := pkg.DataWiring()
 		for _, h := range dfound {
+			rep.Hooks.Data = append(rep.Hooks.Data, h.Export)
 			fmt.Printf("  wired %-20s -> %s\n", h.Export, h.File)
 		}
 		if len(dfound) == 0 {
@@ -1901,6 +1983,7 @@ func runMod(args []string) error {
 	// wiring block above: a data module exporting no stage hook IS the mod that
 	// loads and does nothing, and that is what it says.
 	if in != "" && pkg.Inert() {
+		rep.Inert = true
 		fmt.Println("\nThis guest exports no event hook, so the mod will load and then never")
 		fmt.Println("be called again. Export one of:")
 		for _, h := range absent {
