@@ -136,6 +136,7 @@ Documentation for mod authors lives under [`docs/`](docs/):
 | [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` |
 | [`docs/lua-limits.md`](docs/lua-limits.md) | the two Lua limits a generated guest can reach, what each packaging error means, and the `//go:noinline` / `#[inline(never)]` remedy |
 | [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod |
+| [`docs/library-parity.md`](docs/library-parity.md) | keeping a two-language guest library honest: the transcript-comparison recipe and the committed-golden pin |
 | [`docs/debugging.md`](docs/debugging.md) | making a guest say what it is doing: the log, `fk.LastError`, `Value.Dump`, the line builder, and driving a packaged mod under the Lua oracle |
 | [`docs/from-lua.md`](docs/from-lua.md) | where a Lua mod author's habits land: the standard library module by module, desync-safe randomness, keeping handles across saves, and what has no guest form |
 
