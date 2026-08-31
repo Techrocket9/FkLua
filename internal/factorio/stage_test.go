@@ -1,6 +1,7 @@
 package factorio
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -130,8 +131,11 @@ func TestEveryExportedStageHookGetsItsFile(t *testing.T) {
 			t.Errorf("no %s for %s", h.File, h.Export)
 			continue
 		}
-		if !strings.Contains(body, "run("+itoa(h.Stage)+")") {
-			t.Errorf("%s does not run stage %d:\n%s", h.File, h.Stage, body)
+		// The run() call carries the mod's own name, which is what env(4) hands
+		// back: the packager is the one authoritative source of it.
+		if !strings.Contains(body, fmt.Sprintf("run(%d, %q)", h.Stage, "p")) {
+			t.Errorf("%s does not run stage %d with the mod's name:\n%s",
+				h.File, h.Stage, body)
 		}
 	}
 }
@@ -149,7 +153,7 @@ func TestAStageChainRequiresInTheDeclaredOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := files["data.lua"]
-	want := []string{`require("prototypes.entity")`, `require("fk_data").run(2)`,
+	want := []string{`require("prototypes.entity")`, `require("fk_data").run(2, "p")`,
 		`require("prototypes.sprite")`}
 	at := -1
 	for _, w := range want {

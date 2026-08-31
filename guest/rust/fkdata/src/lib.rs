@@ -411,6 +411,25 @@ pub fn startup_setting(name: &str) -> Option<V> {
     env_value(3).at(name).cloned()
 }
 
+/// This mod's OWN name, exactly as `fklua mod` packaged it.
+///
+/// THE PACKAGER SUPPLIES IT, NOT THE ENGINE. The data-stage environment has no
+/// "current mod" anywhere -- [`mods`] is a flat all-mods dictionary with no
+/// self marker, and `script.mod_name` is runtime-only -- so `fklua mod` writes
+/// the manifest's name into the generated stage file's `run()` call, which is
+/// authoritative because the packager is what wrote info.json.
+///
+/// What it is FOR is namespacing. Settings and prototypes share GLOBAL
+/// namespaces, and a same-type name collision between two mods is silent
+/// last-writer-wins in the engine, so anything a mod (or a library inside one)
+/// generates should be prefixed -- and this is the prefix's one source that
+/// cannot drift from the packaged mod.
+///
+/// Empty under a stage file written by an fklua older than the argument.
+pub fn mod_name() -> String {
+    String::from(env_value(4).string())
+}
+
 // ---------------------------------------------------------------------------
 // The wire.
 // ---------------------------------------------------------------------------
@@ -426,7 +445,7 @@ const DYN_PW: usize = 32;
 /// `static mut` rather than a lock: wasm without the threads proposal has one
 /// thread, so there is no second accessor to race with -- the same shape every
 /// other guest in this workspace uses for its state.
-static mut ENV_CACHE: [Option<V>; 3] = [None, None, None];
+static mut ENV_CACHE: [Option<V>; 4] = [None, None, None, None];
 
 fn env_value(which: u32) -> V {
     let idx = (which - 1) as usize;

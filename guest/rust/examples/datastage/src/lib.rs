@@ -63,6 +63,11 @@ pub extern "C" fn fk_data() {
         base_version()
     ));
 
+    // The mod's own name, from the packager through env(4): the prefix a
+    // library would derive instead of hardcoding, logged so the in-game run
+    // and the mirror test both pin that it arrives.
+    fkdata::log(&format!("fkdata example: mod name is {}", fkdata::mod_name()));
+
     // A computed table. Eight sprites out of one loop, with the offset
     // arithmetic done in Rust rather than written out as sixteen magic numbers
     // -- which is the case the whole feature exists for.

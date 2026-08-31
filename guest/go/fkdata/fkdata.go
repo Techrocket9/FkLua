@@ -411,6 +411,25 @@ func StartupSetting(name string) (V, bool) {
 	return envValue(3, &startupCache).At(name)
 }
 
+// ModName is this mod's OWN name, exactly as `fklua mod` packaged it.
+//
+// THE PACKAGER SUPPLIES IT, NOT THE ENGINE. The data-stage environment has no
+// "current mod" anywhere -- [Mods] is a flat all-mods dictionary with no self
+// marker, and `script.mod_name` is runtime-only -- so `fklua mod` writes the
+// manifest's name into the generated stage file's run() call, which is
+// authoritative because the packager is what wrote info.json.
+//
+// What it is FOR is namespacing. Settings and prototypes share GLOBAL
+// namespaces, and a same-type name collision between two mods is silent
+// last-writer-wins in the engine, so anything a mod (or a library inside one)
+// generates should be prefixed -- and this is the prefix's one source that
+// cannot drift from the packaged mod.
+//
+// Empty under a stage file written by an fklua older than the argument.
+func ModName() string {
+	return envValue(4, &modNameCache).String()
+}
+
 // ---------------------------------------------------------------------------
 // The wire.
 // ---------------------------------------------------------------------------
@@ -423,6 +442,7 @@ var (
 	modsCache    envCache
 	flagsCache   envCache
 	startupCache envCache
+	modNameCache envCache
 )
 
 type envCache struct {

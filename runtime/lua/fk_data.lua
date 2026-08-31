@@ -29,7 +29,9 @@
 --   fkdata.extend(valp)       -> status  data:extend(an array of prototypes)
 --   fkdata.clone(pathp, dstp) -> status  deep-copy one data.raw entry to another name
 --   fkdata.keys(pathp, retp)  -> status  the keys at a path, SORTED
---   fkdata.env(which, retp)   -> status  1 mods, 2 feature_flags, 3 settings.startup
+--   fkdata.env(which, retp)   -> status  1 mods, 2 feature_flags,
+--                                        3 settings.startup, 4 the mod's own
+--                                        name (packager-supplied; see run)
 --
 -- plus env.fk_log and env.fk_print, which every guest has.
 --
@@ -162,13 +164,22 @@ local function key_less(a, b)
   return a < b
 end
 
-function M.run(stage)
+-- run(stage, modname). The second argument is the mod's OWN name, written into
+-- the generated stage file by `fklua mod` -- the data-stage environment has no
+-- "current mod" anywhere, so the packager is the one authoritative source (it
+-- is what wrote info.json). Handed back to the guest through env(4). A stage
+-- file written by an older fklua passes nothing, which reads as nil rather
+-- than raising: the stage files and this shim ship together, so the pair
+-- cannot actually skew, and a raise here would turn "cannot happen" into a
+-- load failure if it ever did.
+function M.run(stage, modname)
   local sname = STAGE_NAME[stage]
   if sname == nil then
     error("fklua: fk_data.run was given stage " .. tostring(stage) ..
           ", and there are four: 1 settings, 2 data, 3 data-updates, " ..
           "4 data-final-fixes", 0)
   end
+  if type(modname) ~= "string" then modname = nil end
 
   local function fail(what)
     error("fklua: at the " .. sname .. " stage, " .. what, 0)
@@ -523,9 +534,17 @@ function M.run(stage)
               end
             end
           end
+        elseif which == 4 then
+          -- The mod's OWN name -- the one arm whose answer comes from the
+          -- PACKAGER rather than the engine, because the engine has no
+          -- "current mod" at these stages. See run(). A string rather than a
+          -- map, and nil under a stage file written by an older fklua.
+          write_sorted(retp, modname, 0, nil)
+          return FKD_OK
         else
           fail("env was asked for " .. tostring(which) ..
-               ", and there are three: 1 mods, 2 feature_flags, 3 settings.startup")
+               ", and there are four: 1 mods, 2 feature_flags, " ..
+               "3 settings.startup, 4 the mod's own name")
         end
         write_sorted(retp, out, 0, nil)
         return FKD_OK

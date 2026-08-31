@@ -96,6 +96,7 @@ Seven operations. Everything that is a failure raises at the stage, naming the s
 | `Mods()`, `ModVersion(name)` | `mods()`, `mod_version(name)` | installed mods and versions |
 | `FeatureFlag(name)` | `feature_flag(name)` | `space_travel`, `quality`, and the rest |
 | `StartupSetting(name) (V, bool)` | `startup_setting(name)` | one startup setting's value |
+| `ModName() string` | `mod_name()` | this mod's own name, from the packager |
 | `Log(s string)` | `log(s)` | a line in `factorio-current.log` |
 
 A **path** is strings and numbers rooted at `data.raw`, so a field two levels inside an array is reachable:
@@ -155,6 +156,7 @@ Three rules follow from that:
 - **No runtime API.** `fkapi` is refused, and it would not work: the settings and data stages have no `game`, no `script` and no entities.
 - **No state across stages.** The module is instantiated fresh for each stage it hooks, because Factorio's settings stage is its own Lua state and `require` re-executes a file at every stage. A package-level variable set in `fk_data` is back at its initial value in `fk_data_updates`. Keep things in `data.raw`, which is what Factorio's own stages do.
 - **No `settings` at the settings stage.** A mod's startup settings are not readable while they are being declared, so `StartupSetting` answers `false` for everything there.
+- **No "current mod" in the engine's environment.** `mods` lists every installed mod with no marker for this one, so `ModName` is answered by the packager instead: `fklua mod` writes the manifest's name into the generated stage files. Use it as the prefix for anything you generate. Setting and prototype names are global namespaces, and when two mods declare the same setting name with the same type the engine keeps whichever loaded last, without a warning.
 - **No collector and no persistence.** A data module runs once and dies with the Lua state, so it is compiled `--persist=none` and `-gc=leaking` whatever the control guest uses.
 
 ## Sharing one config between the two stages

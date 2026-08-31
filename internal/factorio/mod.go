@@ -354,7 +354,7 @@ func (p *Package) Files() (map[string]string, error) {
 		if !ok {
 			continue
 		}
-		files[h.File] = stageFile(h, chain)
+		files[h.File] = stageFile(h, chain, p.Info.Name)
 	}
 	// THE SCENARIOS, gated on there being any, so a package without the key emits
 	// exactly the entries it always did.

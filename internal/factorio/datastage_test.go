@@ -84,6 +84,18 @@ end
 // can read it.
 func runDataStage(t *testing.T, stage int, setup, body string) (string, error) {
 	t.Helper()
+	// The name the packager would have written into the stage file; env(4)
+	// hands it back, and TestTheModNameReachesTheGuestThroughEnv reads it.
+	return runDataStageVia(t,
+		fmt.Sprintf("require(%q).run(%d, %q)\n", "fk_data", stage, "fkd-test"),
+		setup, body)
+}
+
+// runDataStageVia is runDataStage with the final run() call spelled by the
+// test, for the cases that exercise the call's own shape (an older stage file
+// passing no mod name).
+func runDataStageVia(t *testing.T, runLine, setup, body string) (string, error) {
+	t.Helper()
 	h, err := luahost.Find()
 	if err != nil {
 		t.Skipf("skipping: %v", err)
@@ -155,7 +167,7 @@ end
 		"  local st = H.write_dyn(p, v); if st ~= H.OK then error(\"write_dyn \" .. st, 0) end; return p end\n" +
 		setup + "\n" +
 		"FKD_BODY = function()\n  local D = FKD_IMPORTS.fkdata\n" + body + "\nend\n" +
-		fmt.Sprintf("require(%q).run(%d)\n", "fk_data", stage)
+		runLine
 
 	out, err := h.RunString(src)
 	if err != nil {
@@ -484,6 +496,41 @@ func TestStartupSettingsAreEmptyAtTheSettingsStage(t *testing.T) {
 	}
 	if !strings.Contains(out, "stage 1") {
 		t.Errorf("the stage id did not reach the guest:\n%s", out)
+	}
+}
+
+// The mod's OWN name reaches the guest through env(4), and it comes from the
+// PACKAGER rather than the engine: the data-stage environment has no "current
+// mod" anywhere -- `mods` is a flat all-mods dictionary with no self marker --
+// so the generated stage file's run() call carries it. What it is FOR is
+// namespacing: a same-type setting-name collision between two mods is silent
+// last-writer-wins in the engine, so a library that generates settings must
+// prefix them, and this is the one source of the prefix that cannot drift from
+// the packaged mod.
+func TestTheModNameReachesTheGuestThroughEnv(t *testing.T) {
+	out := mustRunDataStage(t, 2, "", `
+  local got = slot()
+  print("st " .. tostring(D.env(4, got)) .. " modname " .. tostring(H.read_dyn(got)))
+`)
+	if !strings.Contains(out, "st 0 modname fkd-test") {
+		t.Errorf("env(4) did not answer the packaged name:\n%s", out)
+	}
+}
+
+// A stage file that passes no name -- one written by an fklua older than the
+// argument -- reads as nil rather than raising. The stage files and the shim
+// ship together, so the pair cannot actually skew; a shim that raised on the
+// old spelling would turn "cannot happen" into a load failure if it ever did.
+func TestAnAbsentModNameReadsAsNil(t *testing.T) {
+	out, err := runDataStageVia(t, `require("fk_data").run(2)`+"\n", "", `
+  local got = slot()
+  print("st " .. tostring(D.env(4, got)) .. " modname " .. tostring(H.read_dyn(got)))
+`)
+	if err != nil {
+		t.Fatalf("an old-style run() call must not raise: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "st 0 modname nil") {
+		t.Errorf("an absent mod name should read as nil:\n%s", out)
 	}
 }
 

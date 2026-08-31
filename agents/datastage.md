@@ -143,8 +143,11 @@ fkdata.set(pathp, valp)   -> status   write; valp == 0 means nil, i.e. delete
 fkdata.extend(valp)       -> status   data:extend(array of prototypes)
 fkdata.clone(pathp, dstp) -> status   deep-copy one data.raw entry to another name
 fkdata.keys(pathp, retp)  -> status   the keys at a path, SORTED
-fkdata.env(which, retp)   -> status   1 mods, 2 feature_flags, 3 settings.startup
+fkdata.env(which, retp)   -> status   1 mods, 2 feature_flags, 3 settings.startup,
+                                      4 the mod's own name
 ```
+
+**env(4) is the one arm whose answer comes from the PACKAGER rather than the engine.** The data-stage environment has no "current mod" anywhere -- `mods` is a flat all-mods dictionary with no self marker, `script.mod_name` is runtime-only -- so `fklua mod` writes the manifest's name into the generated stage file's `run(stage, name)` call and the shim hands it back. What it is for is NAMESPACING: settings and prototypes are global namespaces, and a same-type setting-name collision between two mods is silent last-writer-wins (measured, 2.1.17: two probe mods declaring one `bool-setting` name loaded with exit 0 and the second mod's `default_value` and `order` won), so a library that generates either derives its prefix from `ModName()`/`mod_name()` instead of taking it as a parameter that can drift. A stage file written by an older fklua passes no name and the arm answers nil; the shim and the stage files ship together, so the skew cannot actually occur, and the leniency is there so "cannot happen" does not become a load failure if it ever does. *Enforced by `TestTheModNameReachesTheGuestThroughEnv` and `TestAnAbsentModNameReadsAsNil` on the shim, the `run(%d, %q)` pins in the stage-file tests, and the `mod name is fkd-example` log line the end-to-end and mirror tests both require.*
 
 A **path** is a tier-2 array of strings and numbers rooted at `data.raw`: `["technology","logistics","unit","count"]`, `["transport-belt","my-belt","collision_box",1,1]`. `clone`'s `dstp` is a path too, so cloning across types needs no second primitive.
 

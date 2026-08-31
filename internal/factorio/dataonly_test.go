@@ -120,7 +120,7 @@ func TestADataOnlyPackageStillCarriesStagesAndIncludes(t *testing.T) {
 		t.Errorf("the included tree did not reach a data-only mod")
 	}
 	body := files["data.lua"]
-	for _, want := range []string{`require("prototypes.entity")`, `require("fk_data").run(2)`} {
+	for _, want := range []string{`require("prototypes.entity")`, `require("fk_data").run(2, "p")`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("data.lua does not contain %s:\n%s", want, body)
 		}

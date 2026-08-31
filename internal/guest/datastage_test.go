@@ -39,6 +39,9 @@ func TestAGoProgramBecomesAModsDataStage(t *testing.T) {
 	for _, w := range []string{
 		"LOG fkdata example: settings stage",
 		"LOG fkdata example: data stage, base 2.0.77",
+		// env(4): the packager's own name, through the REAL generated stage
+		// file -- which is what proves `fklua mod` wrote it into run().
+		"LOG fkdata example: mod name is fkd-example",
 		"LOG fkdata example: fastest belt is fkd-belt",
 		"LOG fkdata example: data-final-fixes stage",
 	} {
