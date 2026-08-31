@@ -288,6 +288,29 @@ into their rounds:
   `--persist=table`** and **0.0083x under `packed`**, where a per-call return
   block scatters pages and a bulk destination is one page. No member id moves,
   none is added, and the ABI signature is unchanged.
+- **Round 4's batched GUI add is CLOSED BY MEASUREMENT and NOT BUILT**, which
+  closes round 4 and the survey's queue with it. 4b measured the survey's own
+  shape -- an array of tier-2 specs -- at 0.87x and pointed the item at the
+  ENCODING instead; round 2 then shipped that encoding and measured it at
+  0.735x on the same corpus rather than the predicted 3.3x, because two of
+  `add`'s five audited fields are `LocalisedString`s and a union stays a tier-2
+  slot inside the block. What was left was the residual: a batch of those blocks
+  plus a per-batch string pool. Prototyped against the SHIPPED typed call over a
+  whole fifty-element window and measured at **0.655x, six runs, range
+  0.639-0.680**, against a rule fixed BEFORE the measurement at 0.6. Not one run
+  reached it. **And 0.655 is an upper bound**: the prototype carries no parent
+  column, writes no handles back and skips everything `M.call_typed` pays, while
+  both available corrections move the ratio toward 1.0 -- crediting the batch
+  with the whole guest-side cost of a blockless host call gives 0.604, and
+  adding the engine's own ~2 us per element to both sides gives 0.668. **The
+  pool is worth 1.335x rather than 12x**, measured by ablation, because only
+  `type` and `style` repeat: a GUI element's `name` is what a handler finds it
+  by and is distinct per element by construction, and the two union fields
+  cannot pool at all. So the honest figure is ~1.5x on a whole-window rebuild,
+  for ~250 lines of new runtime, a new import, a string-table wire format, a
+  parent column and a partial-window failure rule an author has to reason about.
+  The design stands as written in the draft and the measurement is in
+  `scratchpad/r2/RESULTS.txt`.
 
 Execution notes for whoever picks a round up: each round is a worktree off
 master with the house gates (build the lua52f oracle first or thirty tests

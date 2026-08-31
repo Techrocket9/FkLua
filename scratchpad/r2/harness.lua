@@ -211,6 +211,178 @@ legs.lua_add = function(n)
 end
 
 -- ---------------------------------------------------------------------------
+-- ROUND 4b'S RE-JUDGMENT: does BATCHING typed specs still buy anything?
+--
+-- 4b measured an array of tier-2 maps at 0.87x and concluded the survey's shape
+-- was not a lever, and that the lever was NOT RE-MARSHALLING STRINGS -- 12x, on
+-- top of a flat encoding it predicted at 3.3x. Round 2 then shipped the flat
+-- encoding and measured it at 0.735x on this very corpus rather than 3.3x,
+-- because two of `add`'s five audited fields are LocalisedStrings and a union
+-- stays a tier-2 slot inside the block. So 4b's prediction is dead and its
+-- REMAINING claim -- the per-batch string pool -- has to be re-measured against
+-- what shipped rather than against what it assumed.
+--
+-- WHAT THE PROTOTYPE IS. `batch_typed` is `count` copies of THE SAME typed block
+-- the shipped path uses, plus one per-batch string table, with every plain-string
+-- field carrying a u32 INDEX into that table where the shipped block carries a
+-- (ptr, len). Its decode walks `tfields` exactly as read_struct does, so the
+-- field count, the presence bytes and the union slots are identical on both
+-- sides and the ONLY differences are the two the design claims: one dispatch for
+-- the batch instead of one per element, and each DISTINCT string decoded once.
+--
+-- THE UNION SLOTS CANNOT POOL, which is the whole reason this needed measuring.
+-- `caption` and `tooltip` are LocalisedStrings, so they are K_DYN slots and go
+-- through read_dyn per element in both forms. Of the audited row's five fields
+-- only three are poolable, and of those three only `type` and `style` repeat --
+-- `name` is distinct per element by construction, because a GUI element's name
+-- is what a handler finds it by.
+-- ---------------------------------------------------------------------------
+
+local G = 50                       -- elements in one window, 4b's own corpus size
+-- Addresses above the allocator's window (262144..500000) and the scratch
+-- region (400000..500000), inside the harness's own 16 pages. 50 blocks of 248
+-- is 12.4 KB apiece, so everything below fits with room to spare.
+local BATCH_SPECS = 520000         -- count copies of the typed block
+local BATCH_PERCALL = 560000       -- ...and the same specs for the per-call leg
+local STRTAB = 600000              -- count, then (ptr,len) pairs
+local STRBYTES = 610000            -- the bytes they point at
+local TSIZE = api.members[MID].targsize
+
+-- The corpus: G elements shaped like the rows of a table. `type` cycles over
+-- three values and `style` is one, which is what a real window looks like;
+-- `name` and `caption` are distinct per element, which is what stops the pool
+-- from flattering itself.
+local batchSpecs = {}
+local kinds = { "flow", "label", "button" }
+for i = 1, G do
+  batchSpecs[i] = {
+    type = kinds[(i - 1) % 3 + 1],
+    name = "row-" .. i .. "-cell",
+    caption = "Row " .. i,
+    style = "green_button",
+    tooltip = "Sends the rocket",
+  }
+end
+
+-- The per-call side, written once outside every timed leg exactly as the single
+-- specs above are: what is timed is the DECODE and the dispatch, not the encode.
+for i = 1, G do
+  local at = BATCH_PERCALL + (i - 1) * TSIZE
+  H.write_struct(sig.targs[1].fields, at + sig.targs[1].at, batchSpecs[i])
+  IO.st8(at + sig.targs[2].has, 0)
+end
+
+-- The BATCH side: the same blocks, with every plain-string field replaced by a
+-- u32 index into the table below. Built here, once, for the same reason.
+local pool, poolIndex = {}, {}
+local function intern(str)
+  local ix = poolIndex[str]
+  if ix == nil then
+    ix = #pool
+    pool[#pool + 1] = str
+    poolIndex[str] = ix
+  end
+  return ix
+end
+for i = 1, G do
+  local at = BATCH_SPECS + (i - 1) * TSIZE
+  H.write_struct(sig.targs[1].fields, at + sig.targs[1].at, batchSpecs[i])
+  IO.st8(at + sig.targs[2].has, 0)
+  for _, f in ipairs(tfields) do
+    if f.kind == H.K_STR and (f.has == nil or IO.ld8(at + sig.targs[1].at + f.has) ~= 0) then
+      local a = at + sig.targs[1].at + f.at
+      local n = IO.ld32(a + 4)
+      if n > 0 then
+        IO.st32(a, intern(H.read_string(IO.ld32(a), n)))
+        IO.st32(a + 4, 0)
+      end
+    end
+  end
+end
+-- ...and the table itself: a count, then (ptr, len) pairs, then the bytes.
+IO.st32(STRTAB, #pool)
+local bytesAt = STRBYTES
+for i = 1, #pool do
+  IO.wstr(bytesAt, pool[i])
+  IO.st32(STRTAB + 4 + (i - 1) * 8, bytesAt)
+  IO.st32(STRTAB + 8 + (i - 1) * 8, #pool[i])
+  bytesAt = bytesAt + #pool[i]
+end
+
+local read_string, read_value = H.read_string, H.read_value
+
+-- The prototype M.batch_add's decode, in the style fk_abi.lua would have written
+-- it: the string table once, then the spec walk per element.
+local function batchAdd(specp, count, tabp)
+  local n = IO.ld32(tabp)
+  local strs = {}
+  for i = 1, n do
+    local e = tabp + 4 + (i - 1) * 8
+    strs[i] = read_string(IO.ld32(e), IO.ld32(e + 4))
+  end
+  local made = 0
+  for e = 0, count - 1 do
+    local at = specp + e * TSIZE + sig.targs[1].at
+    local tbl = {}
+    for _, f in ipairs(tfields) do
+      if f.has == nil or IO.ld8(at + f.has) ~= 0 then
+        if f.kind == H.K_STR then
+          tbl[f.name] = strs[IO.ld32(at + f.at) + 1]
+        else
+          tbl[f.name] = read_value(f, at)
+        end
+      end
+    end
+    parent.add(tbl)
+    made = made + 1
+  end
+  return made
+end
+
+-- THE BASELINE FOR THIS COMPARISON IS THE SHIPPED TYPED CALL, not the tier-2
+-- one. 4b's own baseline was the dyn form, and round 2 moved that floor.
+legs.window_percall_typed = function(n)
+  for _ = 1, n do
+    for i = 1, G do
+      call_typed(parentH, MID, BATCH_PERCALL + (i - 1) * TSIZE, RETP)
+    end
+  end
+end
+
+legs.window_batch_pooled = function(n)
+  for _ = 1, n do batchAdd(BATCH_SPECS, G, STRTAB) end
+end
+
+-- ...and the same batch with every string decoded per ELEMENT rather than once
+-- per batch, which is the pool ablated and nothing else. The difference between
+-- this leg and the one above IS the pool.
+local function batchAddNoPool(specp, count, tabp)
+  local made = 0
+  for e = 0, count - 1 do
+    local at = specp + e * TSIZE + sig.targs[1].at
+    local tbl = {}
+    for _, f in ipairs(tfields) do
+      if f.has == nil or IO.ld8(at + f.has) ~= 0 then
+        if f.kind == H.K_STR then
+          local ix = IO.ld32(at + f.at)
+          local ent = tabp + 4 + ix * 8
+          tbl[f.name] = read_string(IO.ld32(ent), IO.ld32(ent + 4))
+        else
+          tbl[f.name] = read_value(f, at)
+        end
+      end
+    end
+    parent.add(tbl)
+    made = made + 1
+  end
+  return made
+end
+
+legs.window_batch_nopool = function(n)
+  for _ = 1, n do batchAddNoPool(BATCH_SPECS, G, STRTAB) end
+end
+
+-- ---------------------------------------------------------------------------
 -- ANTI-VACUITY: every leg really did its work, checked before anything is
 -- timed. A decode that silently produced nothing would be the fastest leg here.
 -- ---------------------------------------------------------------------------
@@ -238,6 +410,43 @@ if VERIFY then
   end
   out[#out + 1] = "targsize: " .. api.members[MID].targsize ..
     "  argsize: " .. api.members[MID].argsize
+  -- THE WINDOW CORPUS: both forms build G elements, and the tables they build
+  -- are compared key for key. A batch that decoded faster because it produced
+  -- less is the vacuity this block exists to catch, and the pool is exactly the
+  -- mechanism that could do it.
+  local b4 = addCount
+  local made = batchAdd(BATCH_SPECS, G, STRTAB)
+  local batchAdds = addCount - b4
+  b4 = addCount
+  for i = 1, G do call_typed(parentH, MID, BATCH_PERCALL + (i - 1) * TSIZE, RETP) end
+  out[#out + 1] = "window: batch made " .. made .. "/" .. batchAdds ..
+    ", per-call made " .. (addCount - b4) .. " of " .. G
+  out[#out + 1] = "pool: " .. #pool .. " distinct strings for " .. G ..
+    " elements"
+  local agree, first = true, nil
+  for i = 1, G do
+    local at = BATCH_SPECS + (i - 1) * TSIZE + sig.targs[1].at
+    local bt = {}
+    for _, f in ipairs(tfields) do
+      if f.has == nil or IO.ld8(at + f.has) ~= 0 then
+        if f.kind == H.K_STR then
+          local n2 = IO.ld32(at + f.at)
+          bt[f.name] = pool[n2 + 1]
+        else
+          bt[f.name] = read_value(f, at)
+        end
+      end
+    end
+    local pt = read_struct(tfields, BATCH_PERCALL + (i - 1) * TSIZE + sig.targs[1].at)
+    for k, v in pairs(pt) do
+      if bt[k] ~= v then agree = false first = first or (k .. "@" .. i) end
+    end
+    for k, v in pairs(bt) do
+      if pt[k] ~= v then agree = false first = first or (k .. "@" .. i) end
+    end
+  end
+  out[#out + 1] = "window encodings agree: " .. tostring(agree) ..
+    (first and (" first " .. first) or "")
   print(table.concat(out, "\n"))
   return
 end

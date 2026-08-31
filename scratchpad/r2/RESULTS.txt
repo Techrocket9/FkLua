@@ -3,20 +3,77 @@ add calls: 2
 mixed keys: dyn 5, typed 5
 flat keys: dyn 5, typed 5
 targsize: 248  argsize: 16
+window: batch made 50/50, per-call made 50 of 50
+pool: 54 distinct strings for 50 elements
+window encodings agree: true
 
 === ONE GUI ELEMENT SPEC, TWO WIRE FORMS, THROUGH THE SHIPPED PATH ===
-  floor (a plain Lua call)        17.9 ns   (A/A 18 and 18 ns, spread 2.7% -- this run's resolution)
+  floor (a plain Lua call)        16.9 ns   (A/A 18 and 16 ns, spread 10.3% -- this run's resolution)
   leg                ns/element  vs call_dyn  vs hand Lua
-  lua_add                 178.7       0.011x         1.0x
-  call_dyn              15883.5       1.000x        88.9x
-  call_typed            11679.6       0.735x        65.4x
-  decode_dyn            13328.9       0.839x        74.6x
-  decode_typed          10136.7       0.638x        56.7x
-  call_dyn_flat         20744.2       1.306x       116.1x
-  call_typed_flat        8272.9       0.521x        46.3x
-  decode_dyn_flat       18787.1       1.183x       105.1x
-  decode_typed_flat       6515.6       0.410x        36.5x
-  decode_dyn_strvals       9863.5       0.621x        55.2x
-  decode_dyn_numvals      12487.6       0.786x        69.9x
+  lua_add                 151.8       0.011x         1.0x
+  call_dyn              13285.8       1.000x        87.5x
+  call_typed             9738.0       0.733x        64.1x
+  decode_dyn            11358.2       0.855x        74.8x
+  decode_typed           8616.5       0.649x        56.7x
+  call_dyn_flat         17467.8       1.315x       115.0x
+  call_typed_flat        6917.4       0.521x        45.6x
+  decode_dyn_flat       16488.8       1.241x       108.6x
+  decode_typed_flat       5675.8       0.427x        37.4x
+  decode_dyn_strvals       8692.3       0.654x        57.2x
+  decode_dyn_numvals      10781.7       0.812x        71.0x
 
-NOISE: the A/A spread is 2.7%. A ratio inside it is not a measurement.
+NOISE: the A/A spread is 10.3%. A ratio inside it is not a measurement.
+
+=== A WHOLE WINDOW OF 50 ELEMENTS: PER CALL AGAINST A BATCH ===
+  floor (a plain Lua call)        15.6 ns   (A/A 16 and 15 ns, spread 4.1%)
+  leg                         ns/window   ns/element   vs per-call typed
+  window_percall_typed           475499       9510.0              1.000x
+  window_batch_pooled            313410       6268.2              0.659x
+  window_batch_nopool            418497       8369.9              0.880x
+
+  THE DECISION RULE was: implement fk.batch_add if the batch-and-pool form is <= 0.6x the per-call TYPED form on this corpus.
+  MEASURED: 0.659x (and 0.880x with the pool ablated, so the pool itself is worth 1.335x).
+
+SIX RUNS OF THE DECISION LEG, on the same machine and the same afternoon:
+  0.680  0.639  0.639  0.651  0.661  0.659      median 0.655, range 0.639-0.680
+
+NOT ONE OF THE SIX REACHED THE 0.6 THRESHOLD. The rule was pre-registered
+before the measurement, and it says: record the design, do not implement.
+
+AND 0.655 IS AN UPPER BOUND ON THE WIN, because the prototype is generous to
+the batch in three ways a real fk.batch_add could not be:
+
+  - it carries NO PARENT COLUMN and writes NO HANDLES BACK, which a batch that
+    builds a tree has to do;
+  - it does not clear lastError, look the member up, mark and release the
+    scratch region or encode a return block, all of which M.call_typed pays on
+    every one of the fifty per-call elements;
+  - its refusal semantics are absent entirely.
+
+Adding the two things this harness cannot have moves the ratio the WRONG way
+for the batch:
+
+  the guest half.   A batch removes G-1 import calls and G-1 block
+                    acquisitions. Credited generously with the whole measured
+                    cost of a host call carrying no blocks (711 ns end to end,
+                    internal/guest callcost probe 1, --persist=table) plus
+                    ~200 ns for a 248-byte block, that is ~900 ns per element
+                    for the per-call form and ~18 for the batch:
+                    (6268 + 18) / (9510 + 900) = 0.604.
+
+  the ENGINE.       add is a C++ GUI-element construction, which BOTH forms
+                    pay once per element. r4b's own estimate from the audited
+                    mods is 1.3-2.7 us. At 2 us:
+                    (6268 + 18 + 2000) / (9510 + 900 + 2000) = 0.668.
+
+  So the honest in-game figure is ~1.5x on a whole-window rebuild, against a
+  rule that wanted 1.67x, and every correction that can be applied moves it
+  toward 1.0 rather than away.
+
+WHERE 4b's 12x WENT. It assumed five plain strings and interning ACROSS
+refreshes. The audited row has five fields of which TWO are LocalisedStrings --
+unions, so they are tier-2 slots inside the block and read_dyn walks them per
+element in both forms -- and of the three poolable fields only `type` and
+`style` repeat, because a GUI element's `name` is what a handler finds it by
+and is distinct per element by construction. The pool over what is left is
+worth 1.335x here, measured by ablation in the leg above.

@@ -144,6 +144,10 @@ def main():
             "call_dyn", "call_typed", "decode_dyn", "decode_typed",
             "call_dyn_flat", "call_typed_flat", "decode_dyn_flat", "decode_typed_flat",
             "decode_dyn_strvals", "decode_dyn_numvals"]
+    # Round 4b's re-judgment: a whole WINDOW of 50 elements, per-call against a
+    # batch, both over the typed block round 2 shipped. Reported per element, so
+    # the column is comparable with everything above it.
+    wlegs = ["window_percall_typed", "window_batch_pooled", "window_batch_nopool"]
     fa = per_iter("floor")
     r = {leg: per_iter(leg) for leg in legs}
     fb = per_iter("floor")
@@ -160,6 +164,30 @@ def main():
         print(f"  {leg:<16} {r[leg]:12.1f} {r[leg]/base:11.3f}x {r[leg]/lua:11.1f}x")
     print()
     print(f"NOISE: the A/A spread is {aa*100:.1f}%. A ratio inside it is not a measurement.")
+
+    # --- round 4b's re-judgment -------------------------------------------
+    G = 50
+    fc = per_iter("floor")
+    w = {leg: per_iter(leg) for leg in wlegs}
+    fd = per_iter("floor")
+    floor2 = (fc + fd) / 2
+    aa2 = abs(fd - fc) / floor2 if floor2 else 0.0
+    print()
+    print(f"=== A WHOLE WINDOW OF {G} ELEMENTS: PER CALL AGAINST A BATCH ===")
+    print(f"  floor (a plain Lua call)   {floor2:9.1f} ns   "
+          f"(A/A {fc:.0f} and {fd:.0f} ns, spread {aa2*100:.1f}%)")
+    basew = w["window_percall_typed"]
+    print(f"  {'leg':<24} {'ns/window':>12} {'ns/element':>12} {'vs per-call typed':>19}")
+    for leg in wlegs:
+        print(f"  {leg:<24} {w[leg]:12.0f} {w[leg]/G:12.1f} "
+              f"{w[leg]/basew:18.3f}x")
+    print()
+    print("  THE DECISION RULE was: implement fk.batch_add if the batch-and-pool "
+          "form is <= 0.6x the per-call TYPED form on this corpus.")
+    print(f"  MEASURED: {w['window_batch_pooled']/basew:.3f}x "
+          f"(and {w['window_batch_nopool']/basew:.3f}x with the pool ablated, "
+          f"so the pool itself is worth "
+          f"{w['window_batch_nopool']/w['window_batch_pooled']:.3f}x).")
 
 
 if __name__ == "__main__":
