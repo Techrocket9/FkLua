@@ -186,6 +186,30 @@ def main():
     print(f"NOISE: the two A/A spreads are {aa*100:.1f}% and {aa2*100:.1f}%. "
           "A ratio inside them is not a measurement.")
 
+    # --- the SHIPPED path -------------------------------------------------
+    #
+    # Everything above is a PROTOTYPE measured beside the real dispatcher, which
+    # is what a design round produces. These legs call H.bulk_get -- the function
+    # runtime/lua/fk_abi.lua ships and a packaged mod runs -- so what they report
+    # is the ratio an author gets rather than the one the design could reach.
+    s_legs = ["bulk_ship_u32", "bulk_ship_f64", "bulk_ship_opt",
+              "bulk_ship_general"]
+    fe = per_iter("floor", N, G)
+    sh = {leg: per_iter(leg, N, G) for leg in s_legs}
+    ff = per_iter("floor", N, G)
+    floor3 = (fe + ff) / 2
+    aa3 = abs(ff - fe) / floor3 if floor3 else 0.0
+    print()
+    print(f"=== 4a  THE SHIPPED fk.bulk_get  (N = {N} per crossing) ===")
+    print(f"  floor (a plain Lua call)   {floor3:9.1f} ns   "
+          f"(A/A {fe:.0f} and {ff:.0f} ns, spread {aa3*100:.1f}%)")
+    print(f"  {'leg':<22} {'ns/iter':>12} {'ns/element':>12} {'vs percall':>11} "
+          f"{'vs hand Lua':>12}")
+    for leg in s_legs:
+        pe = sh[leg] / N
+        print(f"  {leg:<22} {sh[leg]:12.0f} {pe:12.1f} "
+              f"{pe/(base/N):10.3f}x {pe/lua:11.1f}x")
+
     # --- the amortization sweep ------------------------------------------
     #
     # A bulk crossing has a FIXED cost -- the dispatch a per-call form pays per
@@ -202,6 +226,18 @@ def main():
             bf = per_iter("bulk_full", n, G) / n
             bi = per_iter("bulk_direct_inline", n, G) / n
             print(f"  {n:6d} {pc:15.1f} {bf:17.1f} {bi:19.1f} {bi/pc:16.3f}x")
+
+        # ...and the same question of the SHIPPED path, which is the one an
+        # author's answer depends on.
+        print()
+        print("=== THE SHIPPED fk.bulk_get, AMORTIZED ===")
+        print(f"  {'N':>6} {'percall ns/el':>15} {'ship fast ns/el':>17} "
+              f"{'ship general ns/el':>20} {'fast vs percall':>17}")
+        for n in (1, 2, 4, 8, 16, 64, 256, 1024):
+            pc = per_iter("percall", n, G) / n
+            sf = per_iter("bulk_ship_f64", n, G) / n
+            sg = per_iter("bulk_ship_general", n, G) / n
+            print(f"  {n:6d} {pc:15.1f} {sf:17.1f} {sg:20.1f} {sf/pc:16.3f}x")
 
 
 if __name__ == "__main__":

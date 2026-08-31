@@ -97,6 +97,18 @@ type GoBindings struct {
 	// counted, and folding this in would raise coverage without covering
 	// anything.
 	TypedVariants int
+	// BulkVariants counts the <Class><Name>Bulk bindings: one attribute read off
+	// N handles in ONE crossing, over the ORDINARY getter's member id. Separate
+	// from Emitted for IntoVariants' reason, and a row of its own in the census
+	// rather than folded into TypedVariants -- two second-bindings summed
+	// together is a number that cannot say which one moved, which is the lesson
+	// custom_table_handle_methods was split out for.
+	//
+	// It counts the INHERITED re-renderings too, because those are real
+	// generated functions a guest calls: an inherited bulk read is emitted on
+	// the inheriting class rather than forwarded, since a forwarder cannot
+	// retype its own []Child parameter to the []Parent the parent declares.
+	BulkVariants int
 	// DynValueStructs counts the generated structs whose whole content is ONE
 	// tier-2 value and which therefore got typed Bool/Num/Str/Obj readers --
 	// ModSetting's shape. See IsDynValueStruct: it is a rule over the layout,
@@ -352,6 +364,12 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 	// signature of every member each class actually bound, and the set of names
 	// each class declared itself.
 	bound := map[string]map[string]goSig{}
+	// bulkSeen guards the PACKAGE-LEVEL bulk function names, which live in the
+	// same namespace as every generated type rather than inside a class's method
+	// set. bulkable records which of a class's members earned one, so the
+	// inheritance loop can re-render them for the children.
+	bulkSeen := map[string]bool{}
+	bulkable := map[string][]Member{}
 	declared := map[string]map[string]bool{}
 	byClass := map[string][]Member{}
 	var classes []string
@@ -382,6 +400,12 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 			typeName = exportName(cls)
 			w("\n// %s wraps a handle to a %s.\ntype %s struct{ Object }\n\n",
 				typeName, cls, typeName)
+			// ...AND IT IS ONE HANDLE WIDE, which a bulk read depends on: it
+			// hands the host &objs[0] as an array of u32 handles, so a class
+			// type that grew a second field would have the host reading every
+			// other word. Asserted per class rather than argued once, because
+			// the property is about THIS declaration.
+			w("var _ [4]byte = [unsafe.Sizeof(%s{})]byte{}\n\n", typeName)
 		}
 
 		// A class can declare a method and an attribute with names that collide
@@ -469,6 +493,25 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 				out.TypedVariants++
 				bound[cls][tname] = tsig
 			}
+
+			// AND THE BULK VARIANT, for a readable attribute of a fixed-width
+			// shape: one crossing for N handles over the same member id.
+			//
+			// NOT entered in bound[], deliberately, so the inheritance loop does
+			// not forward it. A forwarder passes its parameters verbatim and
+			// this one's first parameter is a []<Class> -- a child's slice handed
+			// to the parent's declaration does not compile -- so the inherited
+			// case is RE-RENDERED with the child's type name further down
+			// instead. Recorded here for that loop to find.
+			bsrc, bname, bok := goMemberBulk(structs, typeName, m)
+			if bok && !bulkSeen[bname] && !structs.taken(bname) {
+				bulkSeen[bname] = true
+				w("%s", bsrc)
+				out.BulkVariants++
+			}
+			if bok {
+				bulkable[cls] = append(bulkable[cls], m)
+			}
 		}
 		out.StaleRenames = append(out.StaleRenames,
 			staleRenames(cls, byClass[cls], seen, func(r memberRenameRow) (string, string) {
@@ -511,6 +554,23 @@ func GenerateGoWith(a *API, r Report, evs EventReport, pkg string) (GoBindings, 
 		}
 		taken := declared[cls]
 		var fwd []string
+		// THE INHERITED BULK READS, re-rendered rather than forwarded. See the
+		// note beside goMemberBulk's call site: LuaControl declares
+		// surface_index and a polling guest holds []LuaEntity, so the binding it
+		// needs is LuaEntitySurfaceIndexBulk and no forwarder can produce one.
+		// Nearest ancestor first, and a name the class declares itself has
+		// already been emitted, so the seen set is what stops a second copy.
+		for p := parentOf[cls]; p != ""; p = parentOf[p] {
+			for _, m := range bulkable[p] {
+				bsrc, bname, bok := goMemberBulk(structs, exportName(cls), m)
+				if !bok || bulkSeen[bname] || structs.taken(bname) {
+					continue
+				}
+				bulkSeen[bname] = true
+				w("%s", bsrc)
+				out.BulkVariants++
+			}
+		}
 		for p := parentOf[cls]; p != ""; p = parentOf[p] {
 			names := make([]string, 0, len(bound[p]))
 			for n := range bound[p] {
@@ -1764,6 +1824,51 @@ func hostCall(handle, member, argp, retp uint32) uint32
 //
 //go:wasmimport fk call_typed
 func hostCallTyped(handle, member, argp, retp uint32) uint32
+
+// hostBulkGet reads ONE attribute off count handles in ONE crossing, which is
+// what every <Class><Name>Bulk binding in this file is.
+//
+// member is the ORDINARY getter's id -- there is no bulk member and no new id
+// anywhere, which is why a mod that reads only in bulk still prunes to the one
+// member it named. handlep points at count u32 handles, which is exactly what a
+// []LuaEntity already is; dstp at count copies of that getter's own return
+// block; and retp at four bytes the host writes the number of elements it
+// actually read into.
+//
+// AN ELEMENT THAT CANNOT BE READ IS SKIPPED, NOT FATAL. A dead handle, an object
+// whose valid went false, or a read the engine raised on writes that element as
+// the ZERO value -- never leaving the previous crossing's value there, which
+// would be the plausible wrong answer -- and does not count toward the return.
+// So a count below len(objs) says something was missed, and for an attribute the
+// description marks OPTIONAL the presence byte on each element says which. For a
+// mandatory one, a zero that was skipped and a zero that was read are the same
+// bytes; that is the honest limit of a flat destination.
+//
+// The status is about the CALL: StatusNoMember for a member that is not a
+// readable attribute of a fixed-width shape, StatusBadArgs for a span that does
+// not fit in this guest's memory.
+//
+//go:wasmimport fk bulk_get
+func hostBulkGet(member, handlep, count, dstp, retp uint32) uint32
+
+// bulkRead is where hostBulkGet writes the number of elements it read.
+//
+// PACKAGE-LEVEL RATHER THAN A BLOCK, which is fk.LastError's own reasoning: a
+// local whose address is taken does not stay on TinyGo's stack -- ptrtoint
+// defeats the promotion -- so it would be a permanent heap allocation per call,
+// and an arena block would be a bracket per call for four bytes. It is read on
+// the line after the call returns and a host call cannot re-enter the guest
+// between the two, so A BULK READ ALLOCATES NOTHING AT ALL.
+var bulkRead uint32
+
+// A HANDLE IS FOUR BYTES, AND EVERY GENERATED CLASS TYPE IS ONE HANDLE WIDE.
+//
+// That is what lets a bulk read take a []LuaEntity and hand the host &objs[0]
+// as an array of u32 handles, with no copy and no conversion: the slice the
+// search already wrote IS the handle array. It is held by the toolchain rather
+// than by a comment, because being wrong about it is a wrong answer rather than
+// a build failure -- the host would read every other word.
+var _ [4]byte = [unsafe.Sizeof(Object{})]byte{}
 
 //go:wasmimport fk retain
 func hostRetain(handle uint32) uint32
@@ -3034,6 +3139,13 @@ type goStructs struct {
 	// Object, so without a line saying what the handle IS and what Get() yields,
 	// a reader has a uint32 and no way to find out. See FieldSpec.LazyPayload.
 	note map[string]string
+	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
+	// attribute needs, keyed by type name and rendered once. At most eleven can
+	// exist -- one per fixed-width wire kind -- and they are registered on
+	// demand, so a description with no optional f32 attribute emits no
+	// BulkOptFloat32. See gogen_bulk.go.
+	bulkOpts     map[string]string
+	bulkOptNames []string
 }
 
 // structArray is one array-typed struct field: what its elements are and how
@@ -3116,6 +3228,7 @@ func newGoStructs() *goStructs {
 		entry:     map[string]bool{},
 		ctn:       map[string]goContainer{},
 		note:      map[string]string{},
+		bulkOpts:  map[string]string{},
 	}
 }
 
@@ -3242,6 +3355,13 @@ func (g *goStructs) goTypeOf(f FieldSpec, fallback string) (string, string, bool
 // emit writes the type declarations and their codecs, in registration order so
 // the output is stable.
 func (g *goStructs) emit(w func(string, ...any)) {
+	// The bulk destination-element structs first: they name no concept and
+	// contain nothing, so nothing below can depend on where they sit, and a
+	// reader looking for BulkOptUint32 finds every one of them together.
+	sort.Strings(g.bulkOptNames)
+	for _, n := range g.bulkOptNames {
+		w("\n%s", g.bulkOpts[n])
+	}
 	for _, e := range g.entryOrder {
 		w("\n// %s is one entry of a dictionary. A SLICE of pairs rather than a\n", e.name)
 		w("// Go map, for either of two reasons depending on where it appears.\n")

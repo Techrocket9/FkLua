@@ -104,6 +104,17 @@ local imports = {
     call_typed = function(handle, member, argp, retp)
       return H.call_typed(handle, member, argp, retp)
     end,
+    -- ONE ATTRIBUTE OFF N HANDLES IN ONE CROSSING. `member` is the ORDINARY
+    -- getter's id -- no new member, no new id, and the constant scan that prunes
+    -- the shipped table reads operand 0 here exactly as it reads operand 1 of
+    -- `call`. handlep points at count u32 handles, dstp at count copies of that
+    -- getter's own return block, and retp at four bytes the host writes the
+    -- number of elements successfully read into. A dead handle, an invalid
+    -- object or a raise clears that element and the walk continues; see
+    -- fk_abi.lua's M.bulk_get for the whole contract.
+    bulk_get = function(member, handlep, count, dstp, retp)
+      return H.bulk_get(member, handlep, count, dstp, retp)
+    end,
     -- Promote a handle past the end of this dispatch, and give it back.
     retain = function(handle)
       local p = H.retain(handle)
@@ -289,6 +300,18 @@ local E = instance.exports
 if instance.memio then
   H.bind_memory(instance.memio)
   H.bind_read_string(instance.read_string)
+end
+
+-- The live shard vector, for the BULK READ's hoisted arm.
+--
+-- THE FUNCTION AND NOT THE TABLE. `persist.memory()` returns MEM afresh on
+-- every call, so a bulk read that asks once per crossing can never hold a shard
+-- across a memory.grow, an adopt or a restore -- which is the hazard CLAUDE.md
+-- names as "nothing but S1 may hold a shard at chunk scope". Absent -- a module
+-- with no linear memory at all -- the bulk read takes its general arm and
+-- answers exactly the same thing more slowly.
+if instance.persist and instance.persist.memory then
+  H.bind_shards(instance.persist.memory)
 end
 
 -- A string crossing OUT needs guest memory to live in, and only the guest owns

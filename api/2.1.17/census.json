@@ -26,6 +26,8 @@
   "index_setter_members": 1,
   "typed_arg_members": 5,
   "typed_variant_bindings": 5,
+  "bulk_read_members": 1797,
+  "bulk_variant_bindings": 2268,
   "table_shaped_concepts": 346,
   "pure_string_enum_concepts": 46,
   "host_members_bound": 4870,

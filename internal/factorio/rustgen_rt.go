@@ -21,6 +21,27 @@ extern "C" {
     // <name>_typed bindings.
     #[link_name = "call_typed"]
     fn fk_call_typed(handle: u32, member: u32, argp: u32, retp: u32) -> u32;
+    // ONE ATTRIBUTE OFF N HANDLES IN ONE CROSSING, which is what every
+    // <class>_<name>_bulk free function in this module is.
+    //
+    // The member is the ORDINARY getter's id -- there is no bulk member and no
+    // new id anywhere, which is why a mod that reads only in bulk still prunes
+    // to the one member it named. handlep points at count u32 handles, which is
+    // exactly what a &[LuaEntity] already is; dstp at count copies of that
+    // getter's own return block; and retp at four bytes the host writes the
+    // number of elements it actually read into.
+    //
+    // AN ELEMENT THAT CANNOT BE READ IS SKIPPED, NOT FATAL. A dead handle, an
+    // object whose valid went false, or a read the engine raised on writes that
+    // element as the ZERO value -- never leaving the previous crossing's value
+    // there, which would be the plausible wrong answer -- and does not count
+    // toward the return. So a count below the slice length says something was
+    // missed, and for an attribute the description marks OPTIONAL the presence
+    // byte on each element says which. For a mandatory one, a zero that was
+    // skipped and a zero that was read are the same bytes; that is the honest
+    // limit of a flat destination.
+    #[link_name = "bulk_get"]
+    fn fk_bulk_get(member: u32, handlep: u32, count: u32, dstp: u32, retp: u32) -> u32;
     #[link_name = "subscribe"]
     fn fk_subscribe(event: u32, filterp: u32, skip: u32, namep: u32, namelen: u32) -> u32;
     #[link_name = "define"]
@@ -47,6 +68,29 @@ extern "C" {
     fn fk_alloc(n: u32) -> u32;
 }
 
+/// Where fk_bulk_get writes the number of elements it read.
+///
+/// A STATIC RATHER THAN A STACK SLOT, which is the Go side's own reasoning one
+/// language over: a four-byte block through the arena would be a bracket per
+/// call for one number, and a stack address handed to the host is one more thing
+/// to reason about. It is read on the line after the call returns and a host
+/// call cannot re-enter this guest between the two, so A BULK READ ALLOCATES
+/// NOTHING AT ALL.
+///
+/// A wasm module is single-threaded by construction here -- Factorio runs the
+/// mod on one Lua state -- so the static mut is sound for the same reason the
+/// arena's own cursor is.
+static mut BULK_READ: u32 = 0;
+
+/// A HANDLE IS FOUR BYTES, AND EVERY GENERATED CLASS TYPE IS ONE HANDLE WIDE.
+///
+/// That is what lets a bulk read take a &[LuaEntity] and hand the host
+/// objs.as_ptr() as an array of u32 handles, with no copy and no conversion: the
+/// slice the search already wrote IS the handle array. #[repr(transparent)] on
+/// every handle newtype is what makes it true rather than merely observed, and
+/// this asserts the bottom of the chain.
+const _: () = assert!(core::mem::size_of::<Object>() == 4);
+
 /// Safe wrapper over the guest's allocator export.
 ///
 /// Allocating is not itself unsafe -- it returns an address or zero. Only the
@@ -63,7 +107,11 @@ fn galloc(n: u32) -> u32 {
 /// Ord so a handle can key a BTreeMap -- 5 members return a dictionary keyed by
 /// one. The order is the handle number's, which is arbitrary but total, and a
 /// map only needs it to be consistent.
+/// #[repr(transparent)] is load-bearing rather than tidy: a &[Object] is handed
+/// to the host as an array of u32 handles by a bulk read, and repr(Rust) leaves
+/// a newtype's layout unspecified. See BULK_READ above.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[repr(transparent)]
 pub struct Object(pub u32);
 
 impl Object {

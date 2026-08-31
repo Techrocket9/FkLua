@@ -1487,6 +1487,233 @@ function M.call_typed(h, mid, argp, retp)
   return call_typed(m, h, mid, argp, retp)
 end
 
+-- ---------------------------------------------------------------------------
+-- THE BULK ATTRIBUTE READ: one attribute off N handles in ONE crossing.
+--
+-- A guest that polls -- "read unit_number off these 400 entities" -- pays a
+-- whole host call per entity, and a host call is the unit this ABI's cost model
+-- is denominated in. Measured on this machine through the real dispatcher, a
+-- scalar attribute read is 2,682 ns end to end and 979 ns of that is the host
+-- half; a bulk form pays the crossing ONCE and the per-element cost is what is
+-- left. See agents/abi.md, "Reading one attribute off many handles".
+--
+-- A NEW IMPORT RATHER THAN A MEMBER KIND, and the pruning scan is why. Every
+-- other extension here has come out "kind" on one argument -- the id stays an
+-- ordinary i32 constant at the call site, so UsedMembers keeps working -- and
+-- the first half of that argument holds here while the second decides the shape:
+-- as a kind this would need its own member id per eligible attribute, +1,533 at
+-- the GA pin, a third of the member table again. As an import the member id is
+-- the ORDINARY getter's, it is operand 0 of a call to an import, and
+-- internal/factorio/used.go's scan is the same scan with one more name in it.
+-- Passing the id inside the ARGUMENT BLOCK was the third option and it silently
+-- defeats that scan: a guest reading only in bulk would ship all 4,268 members
+-- and nothing would say so.
+--
+-- THE DESTINATION IS AN ARRAY OF THE GETTER'S OWN RETURN BLOCK, at retsize
+-- stride, and that is the decision that makes the feature small. Element i is
+-- byte for byte what a single fk.call would have written at retp, so
+-- optionality is the presence byte Layout already places, the guest's decoder
+-- is the one its single getter already carries, and NOTHING NEW IS LAID OUT
+-- ANYWHERE.
+--
+-- WHAT IS ELIGIBLE is decided from the member's own signature and nothing else:
+-- exactly one return field, of a FIXED-WIDTH kind -- the scalars and a handle.
+-- A string element would be a (ptr, len) into the 4 KiB scratch region, and a
+-- thousand of them exhaust it and fall through to fk_alloc per element, which
+-- is the allocation the region exists to remove. A container element would be a
+-- nested (ptr, count) into the arena, so the destination would stop being a
+-- flat array -- the one property everything above rests on. Both are refusals
+-- with a reason rather than shapes nobody thought about.
+-- ---------------------------------------------------------------------------
+
+-- The store for one destination element, chosen ONCE per crossing rather than
+-- re-decided per element.
+--
+-- write_field would do, and it is a branch chain over thirteen kinds plus a
+-- hash lookup on `io_` for the accessor. Both are per-element costs paid to
+-- re-derive an answer the member's signature fixed before the loop started,
+-- which is the same observation the loop guard makes about a bounds check.
+-- The module-local accessors are the ones bind_memory caches.
+--
+-- A KIND ABSENT FROM THIS TABLE IS NOT BULK-ELIGIBLE, which is the whole
+-- eligibility rule: it is a property of the wire kind and there is no list of
+-- member names anywhere. internal/factorio's BulkEligible is the generator's
+-- half of the same sentence and TestTheBulkKindsAgreeInBothSpellings compares
+-- them, because two things spelling one fact is this repo's most-repeated
+-- failure shape.
+local BULKST = {
+  [5]  = function(at, v) st32_(at, (v or 0) % 4294967296.0) end,   -- i32
+  [6]  = function(at, v) st32_(at, (v or 0) % 4294967296.0) end,   -- u32
+  [7]  = function(at, v) io_.stf32(at, v or 0.0) end,              -- f32
+  [8]  = function(at, v) stf64_(at, v or 0.0) end,                 -- f64
+  [9]  = function(at, v) st8_(at, v and 1 or 0) end,               -- bool
+  [1]  = function(at, v) st8_(at, (v or 0) % 256.0) end,           -- i8
+  [2]  = function(at, v) st8_(at, (v or 0) % 256.0) end,           -- u8
+  [3]  = function(at, v) io_.st16(at, (v or 0) % 65536.0) end,     -- i16
+  [4]  = function(at, v) io_.st16(at, (v or 0) % 65536.0) end,     -- u16
+  [11] = function(at, v)                                           -- handle
+    st32_(at, v ~= nil and M.transient(v) or 0)
+  end,
+  [12] = function(at, v)                                           -- u64
+    local x = v or 0
+    local lo = x % 4294967296.0
+    st32_(at, lo)
+    st32_(at + 4, (x - lo) / 4294967296.0)
+  end,
+}
+
+-- Exposed so the generator's eligibility rule can be compared against this one
+-- rather than transcribed beside it.
+function M.bulk_kinds()
+  local out = {}
+  for k in pairs(BULKST) do out[#out + 1] = k end
+  table.sort(out)
+  return out
+end
+
+-- A shard is 524,288 WHOLE words, so a 4-aligned address below this has its
+-- whole word inside shard 0 -- which is the emitted `ld32`'s own merge, stated
+-- here because fk_abi.lua cannot reach the generated chunk's constants.
+-- TestTheShardBoundIsSpelledTheSameInBothRuntimes compares the two.
+local SHARD0 = 2097152
+
+-- The live shard vector, for the fast arm's hoisted read. Bound from
+-- fk_mod.lua out of the module's own persist.memory, which returns MEM afresh
+-- on every call -- so nothing here holds a shard across a grow, an adopt or a
+-- restore, which is the one hazard a hoisted memory reference has.
+local memfn = nil
+function M.bind_shards(f) memfn = f end
+
+-- Read one attribute off n handles, writing n copies of the getter's return
+-- block at dstp.
+--
+-- ERRORS ARE PER ELEMENT AND THE WALK CONTINUES. A dead handle, an invalid
+-- object or a raise clears that element's presence byte if it has one, writes
+-- the field's ZERO, and does not count -- and the count comes back in the
+-- return block. Skipping rather than aborting is chosen on ergonomics and is
+-- deterministic either way: the walk is index order over an array the guest
+-- supplied, every branch is a function of the handle table and the engine's own
+-- answer, and nothing iterates a hash table. A poll over a thousand entities of
+-- which one died between the search and the read is the ORDINARY case, not an
+-- error.
+--
+-- WRITING THE ZERO IS NOT DECORATION. The destination is a buffer the guest
+-- reuses, so an element left untouched reads back as the PREVIOUS crossing's
+-- value -- silently plausible, and the worst answer available. For a mandatory
+-- attribute zero and "the element failed" are still the same bytes, which is a
+-- real loss of resolution and is stated rather than papered over: the count is
+-- what says something failed, and the presence byte is what says WHICH for the
+-- 415 eligible attributes the description marks optional.
+--
+-- THE STATUS IS ABOUT THE CALL. ERR_NO_MEMBER for a member that is absent or is
+-- not a readable attribute of an eligible shape; ERR_BAD_ARGS for a span that
+-- does not fit in the guest's memory -- checked ONCE, up front, rather than
+-- trapping halfway through a destination it has already half written.
+function M.bulk_get(mid, hptr, n, dstp, retp)
+  lastError = ""
+  local m = members[mid]
+  if m == nil or m.sig == nil then return M.ERR_NO_MEMBER end
+  -- GET and GETH only. A method could be bulk-called in principle and is not:
+  -- its arguments would have to be an array of argument blocks, which is a
+  -- second design with a second layout question. An attribute read has no
+  -- arguments at all, which is what makes this one small.
+  if m.kind ~= M.GET and m.kind ~= M.GETH then return M.ERR_NO_MEMBER end
+  local rets = m.sig.rets
+  if rets == nil or #rets ~= 1 then return M.ERR_NO_MEMBER end
+  local f = rets[1]
+  local put = BULKST[f.kind]
+  if put == nil then return M.ERR_NO_MEMBER end
+
+  if n == nil or n < 0 then return M.ERR_BAD_ARGS end
+  local stride, size = m.retsize, io_.size()
+  if n > 0 then
+    if hptr < 0 or hptr + n * 4 > size then return M.ERR_BAD_ARGS end
+    if dstp < 0 or dstp + n * stride > size then return M.ERR_BAD_ARGS end
+  end
+  local wantCount = retp ~= nil and retp ~= 0
+  if wantCount and (retp < 0 or retp + 4 > size) then return M.ERR_BAD_ARGS end
+
+  local name, hasValid, at, has = m.name, m.valid, f.at, f.has
+  local opt = m.opt
+  local nok = 0
+
+  -- THE FAST ARM. Its whole content is the loop guard's own argument one level
+  -- up: the handle array is a contiguous, 4-aligned run whose bounds are known
+  -- before the loop starts, so `ld32`'s bounds check, alignment test and shard
+  -- select all hoist. Measured at roughly half the general arm's per-element
+  -- cost; see agents/abi.md.
+  --
+  -- IT HOISTS THE READ AND NOT THE WRITE, which is a deviation from the design
+  -- that recorded this and is a correctness matter rather than a preference.
+  -- Nothing records a READ, so hoisting one is invisible to everything. A WRITE
+  -- straight into the shard table would bypass st32's dirty-page mark -- which
+  -- is `--persist=packed`'s save set AND `--gc=collected`'s write barrier -- and
+  -- CLAUDE.md already names that as the class of defect the inlined 8-byte
+  -- store is gated on the persistence mode for. `MEMPACK.mark` is inside the
+  -- generated chunk and nothing out here can reach it, so the store goes
+  -- through the funnel and the last factor of two is not taken.
+  --
+  -- Being wrong about a precondition costs the general arm and never a wrong
+  -- answer, which is the same failure direction the guard has.
+  local mem = memfn ~= nil and memfn() or nil
+  if n > 0 and mem ~= nil and hptr % 4 == 0 and hptr + n * 4 <= SHARD0 then
+    local s = mem[1]
+    local w = hptr / 4 + 1
+    local tr, pers = transient, persistent
+    for i = 0, n - 1 do
+      local base = dstp + i * stride
+      local h = s[w + i]
+      local obj
+      if h ~= nil and h ~= 0 then
+        if h >= TRANSIENT then
+          obj = tr[h]
+        elseif h < FIRST_DYNAMIC then
+          local gn = M.GLOBAL_NAMES[h]
+          obj = gn ~= nil and genv ~= nil and genv[gn] or nil
+        else
+          obj = pers[h]
+        end
+      end
+      local v, live = nil, false
+      if obj ~= nil and not (hasValid and obj.valid == false) then
+        local ok, r = pcall(rawget_member, obj, name)
+        if ok then
+          v, live = r, (r ~= nil or opt)
+        else
+          lastError = tostring(r)
+        end
+      end
+      if has ~= nil then st8_(base + has, live and v ~= nil and 1 or 0) end
+      put(base + at, v)
+      if live then nok = nok + 1 end
+    end
+  else
+    -- THE GENERAL ARM: every element through the accessors, which is what a
+    -- handle array that straddles a shard boundary, is unaligned, or arrives on
+    -- a guest whose module exposes no shard vector gets. Same answers, and the
+    -- test that says so byte-compares the two.
+    for i = 0, n - 1 do
+      local base = dstp + i * stride
+      local obj = M.get(ld32_(hptr + i * 4))
+      local v, live = nil, false
+      if obj ~= nil and M.check_valid(obj, hasValid) == M.OK then
+        local ok, r = pcall(rawget_member, obj, name)
+        if ok then
+          v, live = r, (r ~= nil or opt)
+        else
+          lastError = tostring(r)
+        end
+      end
+      if has ~= nil then st8_(base + has, live and v ~= nil and 1 or 0) end
+      put(base + at, v)
+      if live then nok = nok + 1 end
+    end
+  end
+
+  if wantCount then st32_(retp, nok) end
+  return M.OK
+end
+
 -- The import the guest calls. Everything above exists to make this one line
 -- long, and to make each half testable without the other.
 function M.call(h, mid, argp, retp)

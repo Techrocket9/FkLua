@@ -45,9 +45,35 @@ const (
 // UsedMembers unions two scans and usedIDs itself does not change.
 const TypedDispatchName = "call_typed"
 
+// BulkGetName is the THIRD import that names a member id: ONE ATTRIBUTE READ
+// OFF N HANDLES IN ONE CROSSING.
+//
+// fk.bulk_get(member, handlep, count, dstp, retp), so the id is operand 0 --
+// there is no receiver, because a bulk read's receivers are the array it was
+// handed. Three shapes were available and this is why it is the third:
+//
+//   - a member KIND, one bulk id per eligible attribute. Pruning works
+//     unchanged and the member table grows by +1,533 at the GA pin -- a third
+//     again, in every save, every download and every load.
+//   - ONE bulk member with the TARGET id inside the ARGUMENT BLOCK. No new
+//     members, and usedIDs below cannot see an i32.const that is STORED to
+//     memory rather than passed to an import: a guest reading only in bulk
+//     would ship all 4,268 members and nothing would say so. That is the R6
+//     failure shape -- a pruning scan defeated by a call-site detail -- with the
+//     detail moved one level in.
+//   - a NEW IMPORT, which is this. No new member ids anywhere, and pruning
+//     works BY CONSTRUCTION: the id is an ordinary i32 operand of a call to an
+//     import, which is exactly the shape usedIDs was built for.
+//
+// A third scan is four lines and usedIDs itself does not change.
+const BulkGetName = "bulk_get"
+
 // memberOperand is the argument position holding the member id:
 // fk.call(handle, member, argp, retp), and fk.call_typed with the same shape.
 const memberOperand = 1
+
+// bulkMemberOperand is the same fact for fk.bulk_get, one operand over.
+const bulkMemberOperand = 0
 
 // SubscribeName is the import a guest asks for an event with. Its only
 // argument is the event id, so the same constant scan prunes the event table.
@@ -63,18 +89,23 @@ const DefineName = "define"
 // constant. A caller that gets false must ship the whole table: some member is
 // reached by an id this cannot see, and guessing would produce a mod that fails
 // on whichever path computes one.
-// THE UNION OF BOTH DISPATCH IMPORTS, and it has to be a union rather than a
-// choice: a guest may call one member the tier-2 way and another the typed way
-// in the same program, and a member reached only through fk.call_typed that was
-// pruned out would answer ERR_NO_MEMBER at runtime. `complete` is the AND, for
-// the same reason -- either scan giving up means some id is unseen.
+// THE UNION OF ALL THREE DISPATCH IMPORTS, and it has to be a union rather than
+// a choice: a guest may call one member the tier-2 way, another the typed way
+// and a third in bulk in the same program, and a member reached only through
+// fk.call_typed or fk.bulk_get that was pruned out would answer ERR_NO_MEMBER at
+// runtime. `complete` is the AND, for the same reason -- any scan giving up
+// means some id is unseen.
 func UsedMembers(m *ir.Module) (ids map[int]bool, complete bool) {
 	ids, complete = usedIDs(m, DispatchName, memberOperand)
 	tids, tcomplete := usedIDs(m, TypedDispatchName, memberOperand)
 	for id := range tids {
 		ids[id] = true
 	}
-	return ids, complete && tcomplete
+	bids, bcomplete := usedIDs(m, BulkGetName, bulkMemberOperand)
+	for id := range bids {
+		ids[id] = true
+	}
+	return ids, complete && tcomplete && bcomplete
 }
 
 // UsedEvents is the same scan over fk.subscribe, whose single argument is the

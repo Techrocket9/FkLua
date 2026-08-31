@@ -2,6 +2,7 @@ package factorio
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -218,6 +219,11 @@ type rustStructs struct {
 	// Object, so without a line saying what the handle IS and what get() yields,
 	// a reader has a u32 and no way to find out. See FieldSpec::LazyPayload.
 	note map[string]string
+	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
+	// attribute needs, keyed by type name and rendered once. gogen_bulk.go's
+	// twin -- see rustgen_bulk.go.
+	bulkOpts     map[string]string
+	bulkOptNames []string
 }
 
 // structRustDict is one dictionary-typed struct field. A dictionary is an array
@@ -244,6 +250,7 @@ func newRustStructs() *rustStructs {
 		dict:      map[string]structRustDict{},
 		ctn:       map[string]rustContainer{},
 		note:      map[string]string{},
+		bulkOpts:  map[string]string{},
 	}
 }
 
@@ -384,7 +391,14 @@ func (g *rustStructs) fieldTypeOf(owner string, p Placed) string {
 }
 
 func (g *rustStructs) emit(w func(string, ...any)) {
-	// The nested-container codecs first: they are free functions the struct
+	// The bulk destination-element structs first: they name no concept and
+	// contain nothing, so a reader looking for BulkOptU32 finds every one of
+	// them together.
+	sort.Strings(g.bulkOptNames)
+	for _, n := range g.bulkOptNames {
+		w("\n%s", g.bulkOpts[n])
+	}
+	// The nested-container codecs next: they are free functions the struct
 	// impls below call, and a reader meeting `dec_ctn_map_luastr_bool` inside
 	// `UtilityConstants::decode_at` should have just read it.
 	g.emitContainers(w)

@@ -115,6 +115,15 @@ H.bind_members({
   [4] = { kind = K_BULKGET, name = "health", sig = { args = ARG_3U32, rets = RET_U32 } },
   [5] = { kind = K_BATCHADD, name = "add", sig = { args = ARG_3U32, rets = RET_U32 } },
   [6] = { kind = H.CALL, name = "reload_script", sig = { args = NONE, rets = NONE } },
+  -- THE SHIPPED BULK READ'S OWN MEMBERS, added when fk.bulk_get landed. Real
+  -- GET entries with a real retsize, because M.bulk_get reads both -- these are
+  -- the rows LuaSource would emit for an ordinary getter and nothing else.
+  [7] = { kind = H.GET, name = "unit_number", valid = true, retsize = 4,
+          sig = { args = NONE, rets = RET_U32 } },
+  [8] = { kind = H.GET, name = "health", valid = true, retsize = 8,
+          sig = { args = NONE, rets = RET_F64 } },
+  [9] = { kind = H.GET, name = "health", valid = true, opt = true, retsize = 16,
+          sig = { args = NONE, rets = { { kind = H.K_F64, at = 8, has = 0 } } } },
 })
 
 -- ---------------------------------------------------------------------------
@@ -609,6 +618,54 @@ end
 -- The shard indexing is the emitted `ld32`'s own, read out of mem.lua: a
 -- 4-aligned address below 2097152 has its whole word in shard 1.
 local MEMT, MEMSZ = Mod.persist.memory()
+
+-- ---------------------------------------------------------------------------
+-- THE SHIPPED PATH, added after fk.bulk_get landed in runtime/lua/fk_abi.lua.
+--
+-- Everything above this line is a PROTOTYPE measured beside the real one, which
+-- is what a design round produces. These legs call H.bulk_get -- the function a
+-- packaged mod actually runs -- so what they report is the shipped ratio rather
+-- than the achievable one.
+--
+-- BINDING THE SHARDS IS WHAT ARMS THE FAST ARM, and it is the same call
+-- fk_mod.lua makes out of the module's own persist.memory.
+-- ---------------------------------------------------------------------------
+H.bind_shards(Mod.persist.memory)
+
+-- A second copy of the handle array at an ODD address: the fast arm needs a
+-- 4-aligned run, so this is the general arm reached the way it is reached in the
+-- field rather than by a flag. Written once, outside every timed leg.
+local HPTR_ODD = 20481
+for i = 0, N - 1 do
+  local v = ld32(HPTR + i * 4)
+  for b = 0, 3 do
+    st8(HPTR_ODD + i * 4 + b, math.floor(v / (256 ^ b)) % 256)
+  end
+end
+
+-- The shipped fast arm over a 4-byte scalar: the shape a poll of unit_number is.
+legs.bulk_ship_u32 = function(reps)
+  for _ = 1, reps do H.bulk_get(7, HPTR, N, DSTPTR, RETP) end
+end
+
+-- ...and over an f64, which is the same walk with a dearer store. Which of the
+-- two a bulk read pays is a property of the ATTRIBUTE and not of the design.
+legs.bulk_ship_f64 = function(reps)
+  for _ = 1, reps do H.bulk_get(8, HPTR, N, DSTPTR, RETP) end
+end
+
+-- The shipped fast arm over an OPTIONAL f64: one presence byte per element on
+-- top of the f64 store, and a 16-byte stride.
+legs.bulk_ship_opt = function(reps)
+  for _ = 1, reps do H.bulk_get(9, HPTR, N, DSTPTR, RETP) end
+end
+
+-- The shipped GENERAL arm, reached by an unaligned handle array. Same answers,
+-- and the difference between this row and bulk_ship_u32 is exactly what the
+-- hoist buys on the shipped path.
+legs.bulk_ship_general = function(reps)
+  for _ = 1, reps do H.bulk_get(7, HPTR_ODD, N, DSTPTR, RETP) end
+end
 legs.bulk_direct = function(reps)
   local mem = MEMT
   for _ = 1, reps do
@@ -914,6 +971,22 @@ if VERIFY then
                   " first=" .. ld32(DSTPTR) ..
                   " last=" .. ld32(DSTPTR + (N - 1) * 4)
   protoBulkName = "health"
+  -- ...and the SHIPPED bulk read, both arms, over both attribute shapes.
+  st = H.bulk_get(7, HPTR, N, DSTPTR, RETP)
+  out[#out + 1] = "ship_u32_status=" .. st .. " n=" .. ld32(RETP) ..
+                  " first=" .. ld32(DSTPTR) ..
+                  " last=" .. ld32(DSTPTR + (N - 1) * 4)
+  st = H.bulk_get(8, HPTR, N, DSTPTR, RETP)
+  out[#out + 1] = "ship_f64_status=" .. st .. " n=" .. ld32(RETP) ..
+                  " first=" .. ldf64(DSTPTR) ..
+                  " last=" .. ldf64(DSTPTR + (N - 1) * 8)
+  st = H.bulk_get(9, HPTR, N, DSTPTR, RETP)
+  out[#out + 1] = "ship_opt_status=" .. st .. " n=" .. ld32(RETP) ..
+                  " has=" .. ld8(DSTPTR) .. " first=" .. ldf64(DSTPTR + 8)
+  st = H.bulk_get(7, HPTR_ODD, N, DSTPTR, RETP)
+  out[#out + 1] = "ship_general_status=" .. st .. " n=" .. ld32(RETP) ..
+                  " first=" .. ld32(DSTPTR) ..
+                  " last=" .. ld32(DSTPTR + (N - 1) * 4)
   -- both GUI batches really call add, GUIN times, with a usable spec
   addCount = 0
   protoBatch = batchadd_dyn

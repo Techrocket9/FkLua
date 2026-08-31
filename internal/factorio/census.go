@@ -167,6 +167,31 @@ type CensusData struct {
 	// rather than a language difference, and the Rust count is compared against
 	// this by a test instead of being written down twice.
 	TypedVariantBindings int `json:"typed_variant_bindings"`
+	// BulkReadMembers is how many members are BULK-ELIGIBLE: a readable
+	// attribute returning exactly one fixed-width value, which is what
+	// BulkEligible decides for both backends at once.
+	//
+	// A ROW FOR THE SAME REASON typed_arg_members is one, and for one more: the
+	// eligible set is derived from HostAllocatesFor, which FAILS CLOSED, so a
+	// wire kind added at a later pin is silently INELIGIBLE until somebody says
+	// otherwise. A number that moves is how anybody finds out; a 0 nobody writes
+	// down is how eleven class operators stayed invisible for five milestones.
+	BulkReadMembers int `json:"bulk_read_members"`
+	// BulkVariantBindings is how many <Class><Name>Bulk / <class>_<name>_bulk
+	// bindings each backend emitted.
+	//
+	// IT IS LARGER THAN BulkReadMembers, deliberately and by the inherited set:
+	// a bulk read takes a slice of the class the guest is HOLDING, and a
+	// forwarder cannot retype its own parameter, so an attribute LuaControl
+	// declares is re-rendered on every class that inherits it rather than
+	// forwarded. The gap between the two rows is exactly that re-rendering, which
+	// is the one thing a single number could not have said.
+	//
+	// ONE ROW FOR BOTH LANGUAGES, like typed_variant_bindings: both walk one
+	// Report and ask one BulkEligible, so a disagreement is a defect rather than
+	// a language difference, and the Rust count is compared against this by a
+	// test instead of being written down twice.
+	BulkVariantBindings int `json:"bulk_variant_bindings"`
 
 	TableConcepts int `json:"table_shaped_concepts"`
 	StringEnums   int `json:"pure_string_enum_concepts"`
@@ -431,6 +456,12 @@ func TakeCensus(a *API) (CensusData, error) {
 	// this repo's most-repeated failure shape.
 	c.DynValueStructs = g.DynValueStructs
 	c.TypedVariantBindings = g.TypedVariants
+	c.BulkVariantBindings = g.BulkVariants
+	for _, m := range r.Members {
+		if _, _, ok := BulkEligible(m); ok {
+			c.BulkReadMembers++
+		}
+	}
 	c.RustLiteralsDeferred, c.RustLiteralDeferBy = rb.LiteralsDeferred, rb.LiteralDeferBy
 	if c.RustLiteralDeferBy == nil {
 		c.RustLiteralDeferBy = map[string]int{}
