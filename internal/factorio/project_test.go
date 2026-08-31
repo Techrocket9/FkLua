@@ -38,6 +38,82 @@ func TestProjectRoundTripsAndRejectsTypos(t *testing.T) {
 	}
 }
 
+// The reserved namespace: a `[tool]` or `[tool.<name>]` section is somebody
+// else's and fklua does not read a byte of it.
+//
+// The hard-error rule above is what makes this necessary. An external driver
+// has no way to keep its settings in the manifest that already describes the
+// project -- the first one to try kept a second sidecar file beside it -- so
+// this reserves a name for them. What must survive is that the ignoring is
+// WHOLESALE (a tool may write TOML the flat subset here cannot parse) and that
+// it stops at the next header (a real section after one must still parse).
+func TestAToolSectionIsIgnoredWholesale(t *testing.T) {
+	const base = "[mod]\nname = \"my-mod\"\nversion = \"0.1.0\"\n" +
+		"[fklua]\napi = \"2.0.77\"\nlang = [\"go\"]\n"
+
+	// Every line here is something ParseProject would otherwise reject: an
+	// unknown scalar, an unknown list, a bare word that is not `key = value` at
+	// all, and an inline table. A tool's own config is not fklua's subset.
+	const withTool = "[mod]\nname = \"my-mod\"\nversion = \"0.1.0\"\n" +
+		"[tool.fmtk]\n" +
+		"debug_port = 34197\n" +
+		"mods = [\"a\", \"b\"]\n" +
+		"bare-word\n" +
+		"profile = { name = \"dev\", verbose = true }\n" +
+		"[fklua]\napi = \"2.0.77\"\nlang = [\"go\"]\n"
+
+	want, err := ParseProject(base)
+	if err != nil {
+		t.Fatalf("the control manifest must parse: %v", err)
+	}
+	got, err := ParseProject(withTool)
+	if err != nil {
+		t.Fatalf("a [tool.fmtk] section must be ignored, and was an error: %v", err)
+	}
+	// The [fklua] section comes AFTER the tool section in withTool, so this
+	// equality is also the assertion that the skipping ends at the next header.
+	if got.Name != want.Name || got.Version != want.Version ||
+		got.API != want.API || len(got.Langs) != len(want.Langs) {
+		t.Errorf("a tool section changed the parse: got %+v, want %+v", got, want)
+	}
+	if got.API != "2.0.77" {
+		t.Errorf("the section after [tool.fmtk] did not parse: api = %q", got.API)
+	}
+
+	// A bare [tool], and a second vendor beside the first: the rule is the
+	// exact name or the `tool.` prefix, not one blessed tool.
+	bare, err := ParseProject("[tool]\nanything = \"at all\"\n" +
+		"[tool.other]\nx = 1\n" + base)
+	if err != nil {
+		t.Fatalf("a bare [tool] section must be ignored, and was an error: %v", err)
+	}
+	if bare.Name != want.Name || bare.API != want.API {
+		t.Errorf("a bare [tool] section changed the parse: %+v", bare)
+	}
+}
+
+// And the hole has a name on it: everything else unknown is still an error.
+//
+// `[tools]` and `[toolbox]` are the near misses that decide whether the prefix
+// test is a `strings.HasPrefix(section, "tool")` bug. They must be rejected --
+// the prefix is `tool.` with the dot, plus the exact name `tool`.
+func TestOnlyToolSectionsAreIgnored(t *testing.T) {
+	const ok = "[mod]\nname = \"my-mod\"\n[fklua]\napi = \"2.0.77\"\n"
+	for _, bad := range []struct{ name, src string }{
+		{"unknown key in [mod]", ok + "[mod]\nnmae = \"x\"\n"},
+		{"unknown key in [fklua]", ok + "[fklua]\napy = \"2.0.77\"\n"},
+		{"unknown key in [stages]", ok + "[stages]\nnot_a_stage = [\"x\"]\n"},
+		{"unknown top-level section", ok + "[whatever]\nx = \"y\"\n"},
+		{"[tools], the near miss", ok + "[tools]\nfmtk = \"x\"\n"},
+		{"[toolbox], the other near miss", ok + "[toolbox]\nfmtk = \"x\"\n"},
+		{"[tooling], a prefix without the dot", ok + "[tooling]\nx = \"y\"\n"},
+	} {
+		if _, err := ParseProject(bad.src); err == nil {
+			t.Errorf("%s should be rejected, and was accepted", bad.name)
+		}
+	}
+}
+
 func TestLockRoundTrips(t *testing.T) {
 	l := Lock{API: "2.0.77", APISHA256: "aa", BindingsSHA256: "bb", Fklua: "0.1.0"}
 	got, err := ParseLock(l.Text())

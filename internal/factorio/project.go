@@ -125,7 +125,9 @@ type Lock struct {
 // six keys does not justify breaking that. The subset is flat sections and
 // `key = "value"` or `key = ["a", "b"]`, which is all the format above uses.
 // Anything outside it is an ERROR rather than ignored -- a typo'd key silently
-// doing nothing is how a pin stops pinning.
+// doing nothing is how a pin stops pinning. The single exception is the
+// reserved `[tool]` / `[tool.<name>]` namespace, which belongs to external
+// tools and is skipped entirely; see the comment at the skip.
 func ParseProject(src string) (Project, error) {
 	var p Project
 	section := ""
@@ -136,6 +138,24 @@ func ParseProject(src string) (Project, error) {
 		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.Trim(line, "[]")
+			continue
+		}
+		// `[tool]` AND `[tool.<name>]` BELONG TO SOMEBODY ELSE. The hard-error
+		// rule above is what keeps a typo from silently doing nothing, and it
+		// also means an external driver has nowhere to put its own settings --
+		// which is why one such tool carried a second sidecar file next to a
+		// manifest that already described the project. This is the one hole in
+		// the rule, and it is a hole with a name on it: everything between such
+		// a header and the next section header is skipped wholesale, so a tool
+		// may keep richer TOML in there than the flat subset fklua reads, and
+		// `Project.TOML()` never writes one. The prefix is `tool.` WITH the dot
+		// plus the exact name `tool`, so `[tools]` and `[toolbox]` are still
+		// errors.
+		//
+		// The one caveat is that this reader is LINE-BASED: a line inside a tool
+		// section that itself looks like `[section]` ends the tool section, the
+		// same way it would anywhere else. The subset's grammar is unchanged.
+		if section == "tool" || strings.HasPrefix(section, "tool.") {
 			continue
 		}
 		key, val, ok := strings.Cut(line, "=")

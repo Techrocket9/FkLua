@@ -37,6 +37,8 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 
 `[scenarios]` names the scenarios the mod ships, one key per scenario directory. It is optional, and a project without it packages exactly what it packaged before.
 
+`[tool]` and every `[tool.<name>]` section are reserved for external tools, so an editor extension or a build wrapper can keep its own configuration in the manifest instead of a second file beside it. fklua ignores those sections entirely: every line between such a header and the next section header is skipped, including keys and values it could not parse itself, and `fklua init` never writes one. Everything else in the file is still checked, and an unknown key or an unknown section is an error rather than a line that silently does nothing. The reserved name is `tool` exactly, or a name beginning with `tool.`; `[tools]` and `[toolbox]` are ordinary unknown sections and are rejected. One limit follows from the reader being line-based: a line inside a tool section that looks like `[a-section-header]` ends the tool section, so keep nested TOML tables under the tool's own `tool.<name>.` prefix.
+
 ## fklua.lock
 
 Derived, never hand-edited. `fklua lock` records the API version, a hash of the pinned `runtime-api.json`, and a hash of the generated bindings. `fklua lock --check` is the CI form, and each mismatch gets its own message: the pin moved without regeneration, the description changed underneath a pinned version, or generated code was edited by hand.
