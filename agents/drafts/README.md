@@ -1,6 +1,12 @@
-# Round 4 design drafts — the long levers
+# Design drafts
 
-Working notes, exempt from `agents/docs-style.md`. One document per item of
+Working notes, exempt from `agents/docs-style.md`. Most of this directory is
+the round 4 set below; the standalone drafts at the end are the exceptions,
+indexed by their own section rather than by round 4's table.
+
+## Round 4 — the long levers
+
+One document per item of
 [`agents/lua-temptations.md`](../lua-temptations.md)'s round 4, each carrying
 its design, its measurements with the exact commands, the alternatives it
 rejected and why, an implementation plan with a file surface and a test plan,
@@ -20,7 +26,7 @@ not of what the tree now holds.
 | [`r4c`](r4c-data-stage-function-splitter.md) | the data-stage function splitter | **THE RECORDED DESIGN CANNOT WORK**, measured: a function that reaches the jump limit has four zero-depth split points and all four are outside the jump's span, for a structural reason. A trampoline relay does work, needs no IR pass and no size estimate, and is ~180 lines. Correct the recorded row either way. **SHIPPED**: the relay, the chained-goto fix and the corrected row are on master; the guarded placement is what ships and the unreachable-placement refinement is measured-working and deliberately not built. |
 | [`r4d`](r4d-q5-build-time-configuration.md) | Q5, the build-time configuration channel | **LARGELY CLOSED ALREADY.** Two of its three forms are fixed — one by the data stage becoming a guest, demonstrated end to end here, one by an engine prototype both halves of which bind. What is left is doctrine at S. The queue amendment's phrasing does not match the finding. **SHIPPED**: the doctrine is `docs/data-stage.md`'s "Sharing one config between the two stages", the queue amendment is withdrawn, and the ONE open question — the `--dump-data` probe of the `mod-data` half — was run and answers MORE than it was asked: the prototype is accepted and lands in the dump, AND a control guest reads the blob back at runtime through `ModDataRaw` in the same run, so that half is proven end to end rather than inferred. The Rust shared-crate residual stands as written. |
 
-## The measurements
+### The measurements
 
 Harnesses and their recorded output live in [`scratchpad/r4/`](../../scratchpad/r4/):
 
@@ -38,3 +44,14 @@ caveat is restated in each: `bin/lua52f` reads a Lua table 4-6× faster than
 Factorio, so a host-side ratio between forms differing in table work understates
 the in-game difference — and every "vs hand-written Lua" column here is an
 upper bound, because the stand-in objects are cheaper than the engine's.
+
+## Standalone drafts
+
+Not round-4 items; nothing above indexes them and they answer to no survey. Same
+voice, same rules, same acceptable terminal outcome — a design recorded honestly
+is a finished draft whether or not anything is built from it.
+
+| | draft | verdict |
+|---|---|---|
+| [`recipes`](recipes-library-design.md) | the recipes-and-research guest library — `fkrecipes`, data-stage-only and pin-transparent, answering the 2026-08-30 library research round's open questions | **DECISIONS RESOLVED 2026-08-31**, implementation assigned to a standalone repo. |
+| [`record-replay`](record-replay-debugging.md) | Tier D of the toolkit's debugging tiers: record every host→guest byte, replay the guest against the recording under a real debugger, with tick-boundary memory checksums proving the capture surface was complete | **DESIGN RECORDED, NOT SCHEDULED.** Nothing implemented, no cost measured, nothing queued. Follows from the determinism invariant rather than from a measurement, which is why it could be written at all and why every number in it is an open question. Carries the Tier B "maybe someday" note, whose hook is the Tier A map's `fklua_map` version field. |
