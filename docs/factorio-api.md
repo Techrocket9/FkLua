@@ -154,7 +154,9 @@ The tail is applied over the struct, so it can also override a field the struct 
 
 The typed form is also cheaper on the host, because a flat block is read at known offsets where a tier-2 map is a walk over tagged key and value pairs. Measured host-side on one GUI element built both ways, on Lua 5.2.1: 0.74x for a row carrying two `LocalisedString` fields, and 0.40x for one whose five fields all have a fixed layout. The spread is the reason: a shared parameter whose type is itself a union stays a tier-2 slot inside the block, so it costs what it cost before.
 
-Which shared parameters a method has, and what each variant group accepts, are in the generated reference (`fklua docs`), with the types spelled the way Factorio spells them.
+The generated doc comment on both forms, and on the argument struct itself, lists the variant groups by name with the parameters each one accepts and which of those are required, so the keys that have no field are readable in the editor rather than only in the reference.
+
+Which shared parameters a method has, and what each variant group accepts, are in the generated reference (`fklua docs`) as well, with the types spelled the way Factorio spells them.
 
 ## Building a GUI
 

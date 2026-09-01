@@ -1205,6 +1205,33 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 		w("// nil extra means there is no tail. The block crosses as a flat\n")
 		w("// struct, which the host reads about 3x faster than the map form.\n")
 	}
+	// WHICH KEYS THE TAIL TAKES, on both forms of a variant-group member.
+	//
+	// "the variant tail goes in extra" names a parameter and nothing that goes
+	// in it, so a reader could not learn from the typed form that `position` is
+	// a parameter of create_segmented_unit at all -- WormholeBelts' item 11,
+	// whose first reading was that the typed path was unusable. The plain form
+	// needs it for the same reason and one more: there the groups are keys of
+	// the ONLY argument, so without this the member's whole tail is unnamed.
+	if gl := VariantGroupLines(m.VariantGroups, 76); len(gl) > 0 && !into {
+		intro := fmt.Sprintf(
+			"%s takes ONE tier-2 table, and besides the shared parameters "+
+				"these %d variant parameter group(s) are keys of it. A group is "+
+				"selected by the table's discriminant:", name, len(m.VariantGroups))
+		if typed {
+			intro = fmt.Sprintf(
+				"%s's %d variant parameter group(s) have no field in args: "+
+					"their parameters are keys of extra, and a group is selected "+
+					"by the discriminant among them:", name, len(m.VariantGroups))
+		}
+		w("//\n")
+		for _, l := range wrapComment(intro, 76) {
+			w("// %s\n", goDocText(l))
+		}
+		for _, l := range gl {
+			w("// %s\n", goDocText(l))
+		}
+	}
 	if into {
 		w("// %s is %s writing into dst, reusing its capacity rather than\n",
 			name, exportName(m.Name))
@@ -3192,6 +3219,13 @@ type goStructs struct {
 	// Object, so without a line saying what the handle IS and what Get() yields,
 	// a reader has a uint32 and no way to find out. See FieldSpec.LazyPayload.
 	note map[string]string
+	// variants maps a generated struct's NAME to the variant parameter groups
+	// of the member whose shared parameters it carries. Only the typed form of
+	// a variant-group method has one, and without it the struct's doc comment
+	// is a complete-looking picture of an incomplete parameter list: the group
+	// parameters are keys of `extra`, not fields here. See
+	// FieldSpec.Variants and variantdoc.go.
+	variants map[string]*VariantDoc
 	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
 	// attribute needs, keyed by type name and rendered once. At most eleven can
 	// exist -- one per fixed-width wire kind -- and they are registered on
@@ -3281,6 +3315,7 @@ func newGoStructs() *goStructs {
 		entry:     map[string]bool{},
 		ctn:       map[string]goContainer{},
 		note:      map[string]string{},
+		variants:  map[string]*VariantDoc{},
 		bulkOpts:  map[string]string{},
 	}
 }
@@ -3294,6 +3329,13 @@ func (g *goStructs) add(f FieldSpec, fallback string) (string, string, bool) {
 	name := exportName(f.TypeName)
 	if f.TypeName == "" {
 		name = fallback
+	}
+	// The variant-group listing, recorded BEFORE the early returns: it belongs
+	// to the name, the name is decided above, and a struct reached a second
+	// time carries the same spec. Recorded here rather than recovered at emit
+	// time for the same reason fieldType is -- Placed does not carry it.
+	if f.Variants != nil {
+		g.variants[name] = f.Variants
 	}
 	if g.blocked[name] {
 		return "", "struct " + name + " is itself deferred", false
@@ -3441,7 +3483,27 @@ func (g *goStructs) emit(w func(string, ...any)) {
 	for _, name := range g.order {
 		blk := g.byName[name]
 		w("\n// %s mirrors the API type of the same name, laid out to match the\n", name)
-		w("// wire exactly: fields at fixed offsets, an optional as a pointer.\ntype %s struct {\n", name)
+		w("// wire exactly: fields at fixed offsets, an optional as a pointer.\n")
+		// AND WHAT IS NOT A FIELD HERE. A variant-group method's shared
+		// parameters are these fields; its group parameters are keys of the
+		// typed form's extra and have no field, no type and no identifier
+		// anywhere in this package. A struct that lists only the shared half
+		// and says nothing reads as the whole parameter list.
+		if v := g.variants[name]; v != nil && len(v.Groups) > 0 {
+			w("//\n")
+			for _, l := range wrapComment(fmt.Sprintf(
+				"%s holds the SHARED parameters of %s. Its %d variant parameter "+
+					"group(s) are NOT fields here: their parameters are keys of "+
+					"the tier-2 tail, which the typed form takes as extra and the "+
+					"plain form takes as the whole of args.",
+				name, v.Owner, len(v.Groups)), 76) {
+				w("// %s\n", goDocText(l))
+			}
+			for _, l := range VariantGroupLines(v.Groups, 76) {
+				w("// %s\n", goDocText(l))
+			}
+		}
+		w("type %s struct {\n", name)
 		for _, p := range blk.Fields {
 			t := g.goFieldType(name, p)
 			// An optional becomes a pointer so nil can mean absent -- except a

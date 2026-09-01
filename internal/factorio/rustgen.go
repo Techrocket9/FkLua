@@ -1112,6 +1112,35 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 		w("    /// block, and `None` means there is no tail. The block crosses as\n")
 		w("    /// a flat struct, which the host reads about 3x faster.\n")
 	}
+	// WHICH KEYS THE TAIL TAKES, on both forms of a variant-group member --
+	// gogen.go's twin, and WormholeBelts' item 11: "the variant tail goes in
+	// `extra`" names a parameter and nothing that goes in it.
+	if gl := rustListing(m.VariantGroups, 72); len(gl) > 0 && !into {
+		intro := fmt.Sprintf(
+			"`%s` takes ONE tier-2 table, and besides the shared parameters "+
+				"these %d variant parameter group(s) are keys of it. A group is "+
+				"selected by the table's discriminant:", name, len(m.VariantGroups))
+		if typed {
+			intro = fmt.Sprintf(
+				"`%s`'s %d variant parameter group(s) have no field in `args`: "+
+					"their parameters are keys of `extra`, and a group is "+
+					"selected by the discriminant among them:",
+				name, len(m.VariantGroups))
+		}
+		w("    ///\n")
+		for _, l := range wrapComment(intro, 72) {
+			w("    /// %s\n", l)
+		}
+		// A BLANK COMMENT LINE FIRST: the entries are an indented block inside
+		// a fence, and CommonMark will not let an indented block interrupt a
+		// paragraph -- without this rustdoc folds the whole listing into the
+		// sentence above it. The fence itself is rustListing's, and it is why
+		// this listing is not a doctest.
+		w("    ///\n")
+		for _, l := range gl {
+			w("    /// %s\n", l)
+		}
+	}
 	if into {
 		w("    /// `%s` writing into `dst`, reusing its allocation rather than\n", rustName(m.Name))
 		w("    /// making a fresh one. `dst` is cleared first, so it is empty on\n")

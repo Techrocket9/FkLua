@@ -64,9 +64,20 @@ type Member struct {
 	// reach the packaged member table: that table ships inside every mod, and
 	// 148 KB of prose no host call reads would be paid by every player on every
 	// load. Neither LuaSourceWith nor APISignature looks at it.
-	Doc  string
-	Args []FieldSpec
-	Rets []FieldSpec
+	Doc string
+	// VariantGroups is the description's variant parameter groups for this
+	// member, reduced to the listing every renderer shows -- empty for the
+	// members that have none, which is all but four or five per pin.
+	//
+	// GUEST-SIDE ONLY, exactly like Doc: both binding generators render it into
+	// a doc comment and `fklua docs` renders it into a table, and nothing on the
+	// way to the packaged member table or the ABI signature looks at it. It is
+	// carried on the Member rather than re-read from the description because
+	// the generators walk a Report and have no Class in hand at the point they
+	// write the comment. See variantdoc.go.
+	VariantGroups []GroupDoc
+	Args          []FieldSpec
+	Rets          []FieldSpec
 	// TypedArgs is a SECOND argument list for the same member id, and only a
 	// method whose parameter table is a discriminated union has one.
 	//
@@ -1863,6 +1874,13 @@ func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {
 		// which the guest fills as a tagged table.
 		out.Args = []FieldSpec{{Name: "args", Kind: KindDyn}}
 
+		// THE GROUPS THEMSELVES, so both generators and the docs renderer can
+		// say what goes in that tier-2 table. Reduced once here rather than
+		// three times downstream -- see variantdoc.go, and WormholeBelts' item
+		// 11, which is what a reader gets from a typed method whose doc names
+		// no group and no group parameter.
+		out.VariantGroups = VariantGroupDocs(meth.VariantGroups)
+
 		// ...AND A SECOND, TYPED ARGUMENT LIST OVER THE SAME MEMBER ID. The
 		// tier-2 form above is what makes these members reachable at all; it is
 		// also 3.3x the cost of a flat block (agents/drafts/r4b-batched-gui-add.md)
@@ -1884,7 +1902,11 @@ func buildMethod(m *typeMapper, class string, meth Method) (Member, error) {
 		// already works.
 		if fields, err := m.mapFields(meth.Parameters, nil, 1); err == nil && len(fields) > 0 {
 			out.TypedArgs = []FieldSpec{
-				{Name: "args", Kind: KindStruct, Struct: fields},
+				{Name: "args", Kind: KindStruct, Struct: fields,
+					Variants: &VariantDoc{
+						Owner:  class + "::" + meth.Name,
+						Groups: out.VariantGroups,
+					}},
 				{Name: "extra", Kind: KindDyn, Optional: true},
 			}
 		}

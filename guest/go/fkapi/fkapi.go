@@ -8632,6 +8632,16 @@ func (o LuaControl) SetDriving(driving bool, force *bool) error {
 }
 
 // SetGuiArrow: Create an arrow which points at this entity.
+//
+// SetGuiArrow takes ONE tier-2 table, and besides the shared parameters these
+// 4 variant parameter group(s) are keys of it. A group is selected by the
+// table's discriminant:
+//
+//	crafting_queue: crafting_queueindex (required)
+//	entity: entity (required)
+//	item_stack: inventory_index (required), item_stack_index (required),
+//	  source (required)
+//	position: position (required)
 func (o LuaControl) SetGuiArrow(args Value) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -8649,6 +8659,16 @@ func (o LuaControl) SetGuiArrow(args Value) error {
 // tail goes in extra, whose keys are applied over the block, and a
 // nil extra means there is no tail. The block crosses as a flat
 // struct, which the host reads about 3x faster than the map form.
+//
+// SetGuiArrowTyped's 4 variant parameter group(s) have no field in args: their
+// parameters are keys of extra, and a group is selected by the discriminant
+// among them:
+//
+//	crafting_queue: crafting_queueindex (required)
+//	entity: entity (required)
+//	item_stack: inventory_index (required), item_stack_index (required),
+//	  source (required)
+//	position: position (required)
 func (o LuaControl) SetGuiArrowTyped(args LuaControlSetGuiArrowArgs, extra *Value) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -45912,6 +45932,43 @@ func LuaGuiValidBulk(objs []Object, dst []bool) (int, error) {
 type LuaGuiElement struct{ Object }
 
 // Add: Add a new child element to this GuiElement.
+//
+// Add takes ONE tier-2 table, and besides the shared parameters these 21
+// variant parameter group(s) are keys of it. A group is selected by the
+// table's discriminant:
+//
+//	button: mouse_button_filter, auto_toggle, toggled
+//	camera: position (required), surface_index, zoom
+//	checkbox: state (required)
+//	choose-elem-button: elem_type (required), item, tile, entity, signal,
+//	  fluid, recipe, decorative, item-group, achievement, equipment,
+//	  technology, asteroid-chunk, space-location, item-with-quality,
+//	  entity-with-quality, recipe-with-quality, equipment-with-quality,
+//	  elem_filters
+//	drop-down: items, selected_index
+//	flow: direction
+//	frame: direction
+//	line: direction
+//	list-box: items, selected_index
+//	minimap: position, surface_index, chart_player_index, force, zoom
+//	progressbar: value
+//	radiobutton: state (required)
+//	scroll-pane: horizontal_scroll_policy, vertical_scroll_policy
+//	slider: minimum_value, maximum_value, value, value_step,
+//	  discrete_values
+//	sprite: sprite, resize_to_sprite
+//	sprite-button: sprite, hovered_sprite, clicked_sprite, quality,
+//	  number, show_percent_for_small_numbers, mouse_button_filter,
+//	  auto_toggle, toggled
+//	switch: switch_state, allow_none_state, left_label_caption,
+//	  left_label_tooltip, right_label_caption, right_label_tooltip
+//	tab: badge_text
+//	table: column_count (required), draw_vertical_lines,
+//	  draw_horizontal_lines, draw_horizontal_line_after_headers,
+//	  vertical_centering
+//	text-box: text, icon_selector
+//	textfield: text, numeric, allow_decimal, allow_negative, is_password,
+//	  lose_focus_on_confirm, icon_selector
 func (o LuaGuiElement) Add(args Value) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -45931,6 +45988,43 @@ func (o LuaGuiElement) Add(args Value) (Object, error) {
 // tail goes in extra, whose keys are applied over the block, and a
 // nil extra means there is no tail. The block crosses as a flat
 // struct, which the host reads about 3x faster than the map form.
+//
+// AddTyped's 21 variant parameter group(s) have no field in args: their
+// parameters are keys of extra, and a group is selected by the discriminant
+// among them:
+//
+//	button: mouse_button_filter, auto_toggle, toggled
+//	camera: position (required), surface_index, zoom
+//	checkbox: state (required)
+//	choose-elem-button: elem_type (required), item, tile, entity, signal,
+//	  fluid, recipe, decorative, item-group, achievement, equipment,
+//	  technology, asteroid-chunk, space-location, item-with-quality,
+//	  entity-with-quality, recipe-with-quality, equipment-with-quality,
+//	  elem_filters
+//	drop-down: items, selected_index
+//	flow: direction
+//	frame: direction
+//	line: direction
+//	list-box: items, selected_index
+//	minimap: position, surface_index, chart_player_index, force, zoom
+//	progressbar: value
+//	radiobutton: state (required)
+//	scroll-pane: horizontal_scroll_policy, vertical_scroll_policy
+//	slider: minimum_value, maximum_value, value, value_step,
+//	  discrete_values
+//	sprite: sprite, resize_to_sprite
+//	sprite-button: sprite, hovered_sprite, clicked_sprite, quality,
+//	  number, show_percent_for_small_numbers, mouse_button_filter,
+//	  auto_toggle, toggled
+//	switch: switch_state, allow_none_state, left_label_caption,
+//	  left_label_tooltip, right_label_caption, right_label_tooltip
+//	tab: badge_text
+//	table: column_count (required), draw_vertical_lines,
+//	  draw_horizontal_lines, draw_horizontal_line_after_headers,
+//	  vertical_centering
+//	text-box: text, icon_selector
+//	textfield: text, numeric, allow_decimal, allow_negative, is_password,
+//	  lose_focus_on_confirm, icon_selector
 func (o LuaGuiElement) AddTyped(args LuaGuiElementAddArgs, extra *Value) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86128,6 +86222,111 @@ func (o LuaSurface) CreateEntitiesFromBlueprintString(args LuaSurfaceCreateEntit
 }
 
 // CreateEntity: Create an entity on this surface.
+//
+// CreateEntity takes ONE tier-2 table, and besides the shared parameters these
+// 75 variant parameter group(s) are keys of it. A group is selected by the
+// table's discriminant:
+//
+//	accumulator: control_behavior
+//	agricultural-tower: control_behavior
+//	ammo-turret: priority-list, ignore-unprioritised, control_behavior
+//	arithmetic-combinator: player_description, control_behavior
+//	artillery-flare: movement (required), height (required),
+//	  vertical_speed (required), frame_speed (required)
+//	artillery-projectile: speed
+//	artillery-turret: artillery_auto_targeting, control_behavior
+//	artillery-wagon: enable_logistics_while_moving, grid, orientation,
+//	  color, copy_color_from_train_stop, artillery_auto_targeting
+//	assembling-machine: recipe, recipe_quality, control_behavior
+//	asteroid: velocity
+//	asteroid-collector: result-inventory, chunk-filter, control_behavior
+//	beam: target_position, source_position, max_length, duration,
+//	  source_offset
+//	car: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, selected_gun_index,
+//	  request_filters, orientation
+//	cargo-landing-pad: bar, request_filters, control_behavior
+//	cargo-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, inventory
+//	character-corpse: inventory_size, player_index, color
+//	cliff: cliff_orientation
+//	constant-combinator: player_description, control_behavior
+//	container: bar, control_behavior
+//	decider-combinator: player_description, control_behavior
+//	deconstructible-tile-proxy: proxy_type
+//	display-panel: text, icon, always_show, show_in_chart,
+//	  control_behavior
+//	electric-energy-interface: power_production, power_usage, buffer_size
+//	electric-pole: auto_connect
+//	electric-turret: priority-list, ignore-unprioritised, control_behavior
+//	entity-ghost: inner_name (required), tags
+//	fire: initial_ground_flame_count
+//	fluid-turret: priority-list, ignore-unprioritised, control_behavior
+//	fluid-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop
+//	furnace: control_behavior
+//	highlight-box: bounding_box, box_type, render_player_index,
+//	  blink_interval, time_to_live
+//	infinity-cargo-wagon: enable_logistics_while_moving, grid,
+//	  orientation, color, copy_color_from_train_stop, inventory,
+//	  infinity_settings
+//	infinity-container: bar, request_filters, infinity_settings,
+//	  control_behavior
+//	infinity-pipe: infinity_settings
+//	inserter: filters, filter_mode, use_filters, drop_position,
+//	  pickup_position, override_stack_size, spoil_priority, control_behavior
+//	item-entity: stack (required)
+//	item-request-proxy: target (required), modules (required),
+//	  removal_plan
+//	lamp: color, always_on, control_behavior
+//	lane-splitter: filter, input_priority, output_priority
+//	linked-belt: type
+//	linked-container: link_id
+//	loader: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	loader-1x1: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	locomotive: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, snap_to_train_stop
+//	logistic-container: bar, request_filters, control_behavior
+//	mining-drill: filter, control_behavior
+//	particle: movement (required), height (required), vertical_speed
+//	  (required), frame_speed (required)
+//	plant: tick_grown
+//	power-switch: switch_state, control_behavior
+//	programmable-speaker: parameters, alert_parameters, control_behavior
+//	projectile: speed, max_range, base_damage_modifiers,
+//	  bonus_damage_modifiers
+//	proxy-container: control_behavior
+//	pump: fluid_filter, control_behavior
+//	rail-chain-signal: rail_layer, control_behavior
+//	rail-signal: rail_layer, control_behavior
+//	reactor: control_behavior
+//	resource: amount, enable_tree_removal, enable_cliff_removal,
+//	  snap_to_tile_center
+//	roboport: request_filters, control_behavior
+//	rocket-silo: recipe, recipe_quality, use_transitional_requests,
+//	  launch_to_orbit_automatically, control_behavior
+//	selector-combinator: player_description, control_behavior
+//	simple-entity-with-force: render_player_index, color, variation
+//	simple-entity-with-owner: render_player_index, color, variation
+//	space-platform-hub: bar, request_filters,
+//	  request_missing_construction_materials, control_behavior
+//	speech-bubble: text (required), lifetime
+//	spider-vehicle: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, automatic_targeting_parameters,
+//	  selected_gun_index, request_filters, color, label
+//	splitter: filter, input_priority, output_priority, control_behavior
+//	storage-tank: control_behavior
+//	stream: target_position, source_position
+//	tile-ghost: inner_name (required)
+//	train-stop: color, station, manual_trains_limit, priority,
+//	  control_behavior
+//	transport-belt: control_behavior
+//	turret: priority-list, ignore-unprioritised, control_behavior
+//	underground-belt: type
+//	valve: valve_threshold_override
+//	wall: control_behavior
 func (o LuaSurface) CreateEntity(args Value) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86151,6 +86350,111 @@ func (o LuaSurface) CreateEntity(args Value) (*Object, error) {
 // tail goes in extra, whose keys are applied over the block, and a
 // nil extra means there is no tail. The block crosses as a flat
 // struct, which the host reads about 3x faster than the map form.
+//
+// CreateEntityTyped's 75 variant parameter group(s) have no field in args:
+// their parameters are keys of extra, and a group is selected by the
+// discriminant among them:
+//
+//	accumulator: control_behavior
+//	agricultural-tower: control_behavior
+//	ammo-turret: priority-list, ignore-unprioritised, control_behavior
+//	arithmetic-combinator: player_description, control_behavior
+//	artillery-flare: movement (required), height (required),
+//	  vertical_speed (required), frame_speed (required)
+//	artillery-projectile: speed
+//	artillery-turret: artillery_auto_targeting, control_behavior
+//	artillery-wagon: enable_logistics_while_moving, grid, orientation,
+//	  color, copy_color_from_train_stop, artillery_auto_targeting
+//	assembling-machine: recipe, recipe_quality, control_behavior
+//	asteroid: velocity
+//	asteroid-collector: result-inventory, chunk-filter, control_behavior
+//	beam: target_position, source_position, max_length, duration,
+//	  source_offset
+//	car: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, selected_gun_index,
+//	  request_filters, orientation
+//	cargo-landing-pad: bar, request_filters, control_behavior
+//	cargo-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, inventory
+//	character-corpse: inventory_size, player_index, color
+//	cliff: cliff_orientation
+//	constant-combinator: player_description, control_behavior
+//	container: bar, control_behavior
+//	decider-combinator: player_description, control_behavior
+//	deconstructible-tile-proxy: proxy_type
+//	display-panel: text, icon, always_show, show_in_chart,
+//	  control_behavior
+//	electric-energy-interface: power_production, power_usage, buffer_size
+//	electric-pole: auto_connect
+//	electric-turret: priority-list, ignore-unprioritised, control_behavior
+//	entity-ghost: inner_name (required), tags
+//	fire: initial_ground_flame_count
+//	fluid-turret: priority-list, ignore-unprioritised, control_behavior
+//	fluid-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop
+//	furnace: control_behavior
+//	highlight-box: bounding_box, box_type, render_player_index,
+//	  blink_interval, time_to_live
+//	infinity-cargo-wagon: enable_logistics_while_moving, grid,
+//	  orientation, color, copy_color_from_train_stop, inventory,
+//	  infinity_settings
+//	infinity-container: bar, request_filters, infinity_settings,
+//	  control_behavior
+//	infinity-pipe: infinity_settings
+//	inserter: filters, filter_mode, use_filters, drop_position,
+//	  pickup_position, override_stack_size, spoil_priority, control_behavior
+//	item-entity: stack (required)
+//	item-request-proxy: target (required), modules (required),
+//	  removal_plan
+//	lamp: color, always_on, control_behavior
+//	lane-splitter: filter, input_priority, output_priority
+//	linked-belt: type
+//	linked-container: link_id
+//	loader: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	loader-1x1: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	locomotive: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, snap_to_train_stop
+//	logistic-container: bar, request_filters, control_behavior
+//	mining-drill: filter, control_behavior
+//	particle: movement (required), height (required), vertical_speed
+//	  (required), frame_speed (required)
+//	plant: tick_grown
+//	power-switch: switch_state, control_behavior
+//	programmable-speaker: parameters, alert_parameters, control_behavior
+//	projectile: speed, max_range, base_damage_modifiers,
+//	  bonus_damage_modifiers
+//	proxy-container: control_behavior
+//	pump: fluid_filter, control_behavior
+//	rail-chain-signal: rail_layer, control_behavior
+//	rail-signal: rail_layer, control_behavior
+//	reactor: control_behavior
+//	resource: amount, enable_tree_removal, enable_cliff_removal,
+//	  snap_to_tile_center
+//	roboport: request_filters, control_behavior
+//	rocket-silo: recipe, recipe_quality, use_transitional_requests,
+//	  launch_to_orbit_automatically, control_behavior
+//	selector-combinator: player_description, control_behavior
+//	simple-entity-with-force: render_player_index, color, variation
+//	simple-entity-with-owner: render_player_index, color, variation
+//	space-platform-hub: bar, request_filters,
+//	  request_missing_construction_materials, control_behavior
+//	speech-bubble: text (required), lifetime
+//	spider-vehicle: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, automatic_targeting_parameters,
+//	  selected_gun_index, request_filters, color, label
+//	splitter: filter, input_priority, output_priority, control_behavior
+//	storage-tank: control_behavior
+//	stream: target_position, source_position
+//	tile-ghost: inner_name (required)
+//	train-stop: color, station, manual_trains_limit, priority,
+//	  control_behavior
+//	transport-belt: control_behavior
+//	turret: priority-list, ignore-unprioritised, control_behavior
+//	underground-belt: type
+//	valve: valve_threshold_override
+//	wall: control_behavior
 func (o LuaSurface) CreateEntityTyped(args LuaSurfaceCreateEntityArgs, extra *Value) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86194,6 +86498,13 @@ func (o LuaSurface) CreateParticle(args LuaSurfaceCreateParticleArgs) error {
 }
 
 // CreateSegmentedUnit: Create a segmented unit on the surface.
+//
+// CreateSegmentedUnit takes ONE tier-2 table, and besides the shared
+// parameters these 2 variant parameter group(s) are keys of it. A group is
+// selected by the table's discriminant:
+//
+//	body-nodes: body_nodes (required)
+//	position-and-direction: position (required), direction, extended
 func (o LuaSurface) CreateSegmentedUnit(args Value) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86217,6 +86528,13 @@ func (o LuaSurface) CreateSegmentedUnit(args Value) (*Object, error) {
 // tail goes in extra, whose keys are applied over the block, and a
 // nil extra means there is no tail. The block crosses as a flat
 // struct, which the host reads about 3x faster than the map form.
+//
+// CreateSegmentedUnitTyped's 2 variant parameter group(s) have no field in
+// args: their parameters are keys of extra, and a group is selected by the
+// discriminant among them:
+//
+//	body-nodes: body_nodes (required)
+//	position-and-direction: position (required), direction, extended
 func (o LuaSurface) CreateSegmentedUnitTyped(args LuaSurfaceCreateSegmentedUnitArgs, extra *Value) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -104889,6 +105207,17 @@ func (v LuaControlCancelCraftingArgs) ToValue() Value {
 
 // LuaControlSetGuiArrowArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
+//
+// LuaControlSetGuiArrowArgs holds the SHARED parameters of
+// LuaControl::set_gui_arrow. Its 4 variant parameter group(s) are NOT fields
+// here: their parameters are keys of the tier-2 tail, which the typed form
+// takes as extra and the plain form takes as the whole of args.
+//
+//	crafting_queue: crafting_queueindex (required)
+//	entity: entity (required)
+//	item_stack: inventory_index (required), item_stack_index (required),
+//	  source (required)
+//	position: position (required)
 type LuaControlSetGuiArrowArgs struct {
 	Margin uint32
 	Type   string
@@ -112388,6 +112717,44 @@ func (v AsteroidMapSettings) ToValue() Value {
 
 // LuaGuiElementAddArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
+//
+// LuaGuiElementAddArgs holds the SHARED parameters of LuaGuiElement::add. Its
+// 21 variant parameter group(s) are NOT fields here: their parameters are keys
+// of the tier-2 tail, which the typed form takes as extra and the plain form
+// takes as the whole of args.
+//
+//	button: mouse_button_filter, auto_toggle, toggled
+//	camera: position (required), surface_index, zoom
+//	checkbox: state (required)
+//	choose-elem-button: elem_type (required), item, tile, entity, signal,
+//	  fluid, recipe, decorative, item-group, achievement, equipment,
+//	  technology, asteroid-chunk, space-location, item-with-quality,
+//	  entity-with-quality, recipe-with-quality, equipment-with-quality,
+//	  elem_filters
+//	drop-down: items, selected_index
+//	flow: direction
+//	frame: direction
+//	line: direction
+//	list-box: items, selected_index
+//	minimap: position, surface_index, chart_player_index, force, zoom
+//	progressbar: value
+//	radiobutton: state (required)
+//	scroll-pane: horizontal_scroll_policy, vertical_scroll_policy
+//	slider: minimum_value, maximum_value, value, value_step,
+//	  discrete_values
+//	sprite: sprite, resize_to_sprite
+//	sprite-button: sprite, hovered_sprite, clicked_sprite, quality,
+//	  number, show_percent_for_small_numbers, mouse_button_filter,
+//	  auto_toggle, toggled
+//	switch: switch_state, allow_none_state, left_label_caption,
+//	  left_label_tooltip, right_label_caption, right_label_tooltip
+//	tab: badge_text
+//	table: column_count (required), draw_vertical_lines,
+//	  draw_horizontal_lines, draw_horizontal_line_after_headers,
+//	  vertical_centering
+//	text-box: text, icon_selector
+//	textfield: text, numeric, allow_decimal, allow_negative, is_password,
+//	  lose_focus_on_confirm, icon_selector
 type LuaGuiElementAddArgs struct {
 	Type                      string
 	Name                      *string
@@ -121666,6 +122033,112 @@ func (v LuaSurfaceCreateEntitiesFromBlueprintStringArgs) ToValue() Value {
 
 // LuaSurfaceCreateEntityArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
+//
+// LuaSurfaceCreateEntityArgs holds the SHARED parameters of
+// LuaSurface::create_entity. Its 75 variant parameter group(s) are NOT fields
+// here: their parameters are keys of the tier-2 tail, which the typed form
+// takes as extra and the plain form takes as the whole of args.
+//
+//	accumulator: control_behavior
+//	agricultural-tower: control_behavior
+//	ammo-turret: priority-list, ignore-unprioritised, control_behavior
+//	arithmetic-combinator: player_description, control_behavior
+//	artillery-flare: movement (required), height (required),
+//	  vertical_speed (required), frame_speed (required)
+//	artillery-projectile: speed
+//	artillery-turret: artillery_auto_targeting, control_behavior
+//	artillery-wagon: enable_logistics_while_moving, grid, orientation,
+//	  color, copy_color_from_train_stop, artillery_auto_targeting
+//	assembling-machine: recipe, recipe_quality, control_behavior
+//	asteroid: velocity
+//	asteroid-collector: result-inventory, chunk-filter, control_behavior
+//	beam: target_position, source_position, max_length, duration,
+//	  source_offset
+//	car: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, selected_gun_index,
+//	  request_filters, orientation
+//	cargo-landing-pad: bar, request_filters, control_behavior
+//	cargo-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, inventory
+//	character-corpse: inventory_size, player_index, color
+//	cliff: cliff_orientation
+//	constant-combinator: player_description, control_behavior
+//	container: bar, control_behavior
+//	decider-combinator: player_description, control_behavior
+//	deconstructible-tile-proxy: proxy_type
+//	display-panel: text, icon, always_show, show_in_chart,
+//	  control_behavior
+//	electric-energy-interface: power_production, power_usage, buffer_size
+//	electric-pole: auto_connect
+//	electric-turret: priority-list, ignore-unprioritised, control_behavior
+//	entity-ghost: inner_name (required), tags
+//	fire: initial_ground_flame_count
+//	fluid-turret: priority-list, ignore-unprioritised, control_behavior
+//	fluid-wagon: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop
+//	furnace: control_behavior
+//	highlight-box: bounding_box, box_type, render_player_index,
+//	  blink_interval, time_to_live
+//	infinity-cargo-wagon: enable_logistics_while_moving, grid,
+//	  orientation, color, copy_color_from_train_stop, inventory,
+//	  infinity_settings
+//	infinity-container: bar, request_filters, infinity_settings,
+//	  control_behavior
+//	infinity-pipe: infinity_settings
+//	inserter: filters, filter_mode, use_filters, drop_position,
+//	  pickup_position, override_stack_size, spoil_priority, control_behavior
+//	item-entity: stack (required)
+//	item-request-proxy: target (required), modules (required),
+//	  removal_plan
+//	lamp: color, always_on, control_behavior
+//	lane-splitter: filter, input_priority, output_priority
+//	linked-belt: type
+//	linked-container: link_id
+//	loader: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	loader-1x1: type, filters, filter_mode, belt_stack_size_override,
+//	  control_behavior
+//	locomotive: enable_logistics_while_moving, grid, orientation, color,
+//	  copy_color_from_train_stop, snap_to_train_stop
+//	logistic-container: bar, request_filters, control_behavior
+//	mining-drill: filter, control_behavior
+//	particle: movement (required), height (required), vertical_speed
+//	  (required), frame_speed (required)
+//	plant: tick_grown
+//	power-switch: switch_state, control_behavior
+//	programmable-speaker: parameters, alert_parameters, control_behavior
+//	projectile: speed, max_range, base_damage_modifiers,
+//	  bonus_damage_modifiers
+//	proxy-container: control_behavior
+//	pump: fluid_filter, control_behavior
+//	rail-chain-signal: rail_layer, control_behavior
+//	rail-signal: rail_layer, control_behavior
+//	reactor: control_behavior
+//	resource: amount, enable_tree_removal, enable_cliff_removal,
+//	  snap_to_tile_center
+//	roboport: request_filters, control_behavior
+//	rocket-silo: recipe, recipe_quality, use_transitional_requests,
+//	  launch_to_orbit_automatically, control_behavior
+//	selector-combinator: player_description, control_behavior
+//	simple-entity-with-force: render_player_index, color, variation
+//	simple-entity-with-owner: render_player_index, color, variation
+//	space-platform-hub: bar, request_filters,
+//	  request_missing_construction_materials, control_behavior
+//	speech-bubble: text (required), lifetime
+//	spider-vehicle: enable_logistics_while_moving, grid, trunk_inventory,
+//	  ammo_inventory, driver_is_main_gunner, automatic_targeting_parameters,
+//	  selected_gun_index, request_filters, color, label
+//	splitter: filter, input_priority, output_priority, control_behavior
+//	storage-tank: control_behavior
+//	stream: target_position, source_position
+//	tile-ghost: inner_name (required)
+//	train-stop: color, station, manual_trains_limit, priority,
+//	  control_behavior
+//	transport-belt: control_behavior
+//	turret: priority-list, ignore-unprioritised, control_behavior
+//	underground-belt: type
+//	valve: valve_threshold_override
+//	wall: control_behavior
 type LuaSurfaceCreateEntityArgs struct {
 	Name                     Value
 	Position                 MapPosition
@@ -122135,6 +122608,14 @@ func (v LuaSurfaceCreateParticleArgs) ToValue() Value {
 
 // LuaSurfaceCreateSegmentedUnitArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
+//
+// LuaSurfaceCreateSegmentedUnitArgs holds the SHARED parameters of
+// LuaSurface::create_segmented_unit. Its 2 variant parameter group(s) are NOT
+// fields here: their parameters are keys of the tier-2 tail, which the typed
+// form takes as extra and the plain form takes as the whole of args.
+//
+//	body-nodes: body_nodes (required)
+//	position-and-direction: position (required), direction, extended
 type LuaSurfaceCreateSegmentedUnitArgs struct {
 	Name      Value
 	Quality   *Object

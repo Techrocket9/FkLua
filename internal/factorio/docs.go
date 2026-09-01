@@ -184,8 +184,11 @@ func writeParams(b *strings.Builder, c Class, m Member, names map[string]string)
 	if !ok {
 		return
 	}
-	ps := append([]Parameter(nil), meth.Parameters...)
-	sort.SliceStable(ps, func(i, j int) bool { return ps[i].Order < ps[j].Order })
+	// THE SAME REDUCTION THE BINDINGS RENDER, from variantdoc.go. This renderer
+	// and the two generators show one listing three ways, and three walks of
+	// the description would be three chances to disagree about what a group
+	// contains -- which is exactly the drift the shared helper exists to stop.
+	ps := ParamDocs(meth.Parameters)
 	if len(ps) > 0 {
 		if len(meth.VariantGroups) > 0 {
 			// SHARED is the word the typed-args form uses for exactly this set,
@@ -196,38 +199,35 @@ func writeParams(b *strings.Builder, c Class, m Member, names map[string]string)
 		}
 		writeParamTable(b, ps)
 	}
-	if len(meth.VariantGroups) == 0 {
+	gs := VariantGroupDocs(meth.VariantGroups)
+	if len(gs) == 0 {
 		return
 	}
-	gs := append([]VariantGroup(nil), meth.VariantGroups...)
-	sort.SliceStable(gs, func(i, j int) bool { return gs[i].Name < gs[j].Name })
 	fmt.Fprintf(b, "Variant groups (%d), selected by the table's discriminant. "+
 		"These have no field in the typed argument block and go in `extra`:\n\n",
 		len(gs))
 	for _, g := range gs {
 		fmt.Fprintf(b, "**`%s`**", g.Name)
-		if d := oneLine(g.Description); d != "" {
-			fmt.Fprintf(b, " — %s", d)
+		if g.Description != "" {
+			fmt.Fprintf(b, " — %s", g.Description)
 		}
 		b.WriteString("\n\n")
-		gp := append([]Parameter(nil), g.Parameters...)
-		sort.SliceStable(gp, func(i, j int) bool { return gp[i].Order < gp[j].Order })
-		writeParamTable(b, gp)
+		writeParamTable(b, g.Params)
 	}
 }
 
-func writeParamTable(b *strings.Builder, ps []Parameter) {
+func writeParamTable(b *strings.Builder, ps []ParamDoc) {
 	if len(ps) == 0 {
 		return
 	}
 	b.WriteString("| name | type | | description |\n|---|---|---|---|\n")
 	for _, p := range ps {
-		req := "required"
-		if p.Optional {
-			req = "optional"
+		req := "optional"
+		if p.Required {
+			req = "required"
 		}
 		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n",
-			p.Name, p.Type.String(), req, oneLine(p.Description))
+			p.Name, p.Type, req, p.Description)
 	}
 	b.WriteString("\n")
 }

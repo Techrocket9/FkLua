@@ -240,6 +240,19 @@ type FieldSpec struct {
 	// nothing downstream of LayoutStruct ever sees it -- Placed does not carry
 	// it, and no offset depends on it.
 	LazyPayload string
+	// Variants is the VARIANT PARAMETER GROUP listing of the member whose
+	// SHARED parameters this struct carries, and it is the second member of
+	// this struct that is DOCUMENTATION rather than layout.
+	//
+	// A variant group's parameters are not fields of the typed form's argument
+	// block: they are keys of the tier-2 tail beside it. So the struct is a
+	// correct and INCOMPLETE picture of what the method takes, and its doc
+	// comment is written from the struct's own name with no other route back to
+	// the method -- which is why the listing travels here rather than being
+	// looked up at emit time. Set only on the argument struct of a
+	// variant-group method's typed form; nil everywhere else, and nothing
+	// downstream of LayoutStruct sees it. See variantdoc.go.
+	Variants *VariantDoc
 	// Struct is the nested layout when Kind is KindStruct.
 	Struct []FieldSpec
 	// Elem is the element when Kind is KindArray, or the VALUE when KindDict.

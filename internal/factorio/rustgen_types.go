@@ -219,6 +219,12 @@ type rustStructs struct {
 	// Object, so without a line saying what the handle IS and what get() yields,
 	// a reader has a u32 and no way to find out. See FieldSpec::LazyPayload.
 	note map[string]string
+	// variants maps a generated struct's NAME to the variant parameter groups
+	// of the member whose shared parameters it carries -- gogen.go's twin. Only
+	// the typed form of a variant-group method has one, and without it the
+	// struct's doc comment is a complete-looking picture of an incomplete
+	// parameter list. See FieldSpec::Variants and variantdoc.go.
+	variants map[string]*VariantDoc
 	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
 	// attribute needs, keyed by type name and rendered once. gogen_bulk.go's
 	// twin -- see rustgen_bulk.go.
@@ -250,6 +256,7 @@ func newRustStructs() *rustStructs {
 		dict:      map[string]structRustDict{},
 		ctn:       map[string]rustContainer{},
 		note:      map[string]string{},
+		variants:  map[string]*VariantDoc{},
 		bulkOpts:  map[string]string{},
 	}
 }
@@ -265,6 +272,12 @@ func (g *rustStructs) add(f FieldSpec, fallback string) (string, string, bool) {
 	name := exportName(f.TypeName)
 	if f.TypeName == "" {
 		name = fallback
+	}
+	// The variant-group listing, recorded BEFORE the early returns: it belongs
+	// to the name, the name is decided above, and a struct reached a second
+	// time carries the same spec. gogen.go's twin.
+	if f.Variants != nil {
+		g.variants[name] = f.Variants
 	}
 	if g.blocked[name] {
 		return "", "struct " + name + " is itself deferred", false
@@ -405,6 +418,29 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 	for _, name := range g.order {
 		blk := g.byName[name]
 		w("\n/// Mirrors the API type of the same name, laid out to match the wire.\n")
+		// AND WHAT IS NOT A FIELD HERE -- gogen.go's twin. A variant-group
+		// method's shared parameters are these fields; its group parameters are
+		// keys of the tier-2 tail and have no field, no type and no identifier
+		// anywhere in this crate.
+		if v := g.variants[name]; v != nil && len(v.Groups) > 0 {
+			w("///\n")
+			for _, l := range wrapComment(fmt.Sprintf(
+				"`%s` holds the SHARED parameters of `%s`. Its %d variant "+
+					"parameter group(s) are NOT fields here: their parameters "+
+					"are keys of the tier-2 tail, which the typed form takes as "+
+					"`extra` and the plain form takes as the whole of `args`.",
+				name, v.Owner, len(v.Groups)), 72) {
+				w("/// %s\n", l)
+			}
+			// A BLANK COMMENT LINE FIRST -- rustgen.go's twin: an indented
+			// block cannot interrupt a paragraph in CommonMark. The listing is
+			// FENCED here as it is there, because an indented block in a Rust
+			// doc comment is a doctest. See rustListing.
+			w("///\n")
+			for _, l := range rustListing(v.Groups, 72) {
+				w("/// %s\n", l)
+			}
+		}
 		w("#[derive(Clone, Debug, Default)]\npub struct %s {\n", name)
 		for _, p := range blk.Fields {
 			t := g.fieldTypeOf(name, p)
