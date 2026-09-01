@@ -8819,6 +8819,10 @@ impl LuaControl {
     }
 
     /// Teleport the entity to a given position, possibly on another surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn teleport(&self, position: MapPosition, surface: Option<Object>, raise_teleported: Option<bool>, snap_to_grid: Option<bool>, build_check_type: Option<u32>) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 40];
@@ -9542,6 +9546,10 @@ impl LuaControl {
     }
 
     /// The force of this entity.
+    ///
+    /// value is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn set_force(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -10956,6 +10964,10 @@ impl LuaCustomChartTag {
     }
 
     /// The player who last edited this tag.
+    ///
+    /// value is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_last_user(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -12640,6 +12652,10 @@ pub fn lua_display_panel_control_behavior_valid_bulk(objs: &[Object], dst: &mut 
 pub struct LuaElectricEnergySourcePrototype(pub Object);
 
 impl LuaElectricEnergySourcePrototype {
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_input_flow_limit(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -12655,6 +12671,10 @@ impl LuaElectricEnergySourcePrototype {
         Ok(v0)
     }
 
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_output_flow_limit(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -13006,6 +13026,14 @@ impl LuaEntity {
     }
 
     /// Cancels deconstruction if it is scheduled, does nothing otherwise.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn cancel_deconstruction(&self, force: Object, player: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 12];
         wr_u32(&mut a[..], 0, force.0);
@@ -13021,6 +13049,14 @@ impl LuaEntity {
     }
 
     /// Cancels upgrade if it is scheduled, does nothing otherwise.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn cancel_upgrade(&self, force: Object, player: Option<Object>) -> Result<bool, Status> {
         let mut a = [0u8; 12];
         let mut r = [0u8; 1];
@@ -13100,6 +13136,10 @@ impl LuaEntity {
     }
 
     /// Copies settings from the given entity onto this entity.
+    ///
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub fn copy_settings(&self, entity: Object, by_player: Option<Object>) -> Result<Vec<ItemWithQualityCount>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -13124,6 +13164,10 @@ impl LuaEntity {
     }
 
     /// Copies settings from the given entity onto this entity.
+    ///
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     /// `copy_settings` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -13182,6 +13226,14 @@ impl LuaEntity {
     }
 
     /// Damages the entity.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// r#type is declared DamageTypeID (LuaDamagePrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaDamagePrototype handle. Find one under the prototypes global.
     pub fn damage(&self, damage: f32, force: Object, r#type: Option<Object>, source: Option<Object>, cause: Option<Object>) -> Result<f32, Status> {
         let mut a = [0u8; 32];
         let mut r = [0u8; 4];
@@ -13231,6 +13283,10 @@ impl LuaEntity {
     }
 
     /// Immediately kills the entity.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn die(&self, force: Option<Object>, cause: Option<Object>) -> Result<bool, Status> {
         let mut a = [0u8; 16];
         let mut r = [0u8; 1];
@@ -13654,6 +13710,10 @@ impl LuaEntity {
     }
 
     /// The input flow limit for the electric energy source.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_electric_input_flow_limit(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -13673,6 +13733,10 @@ impl LuaEntity {
     }
 
     /// The output flow limit for the electric energy source.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_electric_output_flow_limit(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -14870,6 +14934,10 @@ impl LuaEntity {
     }
 
     /// Is this entity registered for deconstruction with this force?
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn is_registered_for_deconstruction(&self, force: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -14939,6 +15007,14 @@ impl LuaEntity {
     }
 
     /// Sets the entity to be deconstructed by construction robots.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn order_deconstruction(&self, force: Object, player: Option<Object>, undo_index: Option<u32>) -> Result<bool, Status> {
         let mut a = [0u8; 20];
         let mut r = [0u8; 1];
@@ -15040,6 +15116,10 @@ impl LuaEntity {
         Ok(v0)
     }
 
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn request_to_close(&self, force: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, force.0);
@@ -15050,6 +15130,10 @@ impl LuaEntity {
         Ok(())
     }
 
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn request_to_open(&self, force: Object, extra_time: Option<u32>) -> Result<(), Status> {
         let mut a = [0u8; 12];
         wr_u32(&mut a[..], 0, force.0);
@@ -15316,6 +15400,10 @@ impl LuaEntity {
     }
 
     /// Sets the given recipe in this assembly machine.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn set_recipe(&self, recipe: Option<&Value>, quality: Option<Object>) -> Result<Vec<ItemWithQualityCount>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 32];
@@ -15343,6 +15431,10 @@ impl LuaEntity {
     }
 
     /// Sets the given recipe in this assembly machine.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     /// `set_recipe` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -15667,6 +15759,10 @@ impl LuaEntity {
     }
 
     /// The player this character is associated with, if any.
+    ///
+    /// value is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_associated_player(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -18018,6 +18114,10 @@ impl LuaEntity {
     }
 
     /// The last player that changed any setting on this entity.
+    ///
+    /// value is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_last_user(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -19256,6 +19356,10 @@ impl LuaEntity {
 
     /// The player that this `simple-entity-with-owner`,
     /// `simple-entity-with-force`, or `highlight-box` is visible to.
+    ///
+    /// value is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_render_player(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -19367,6 +19471,10 @@ impl LuaEntity {
     }
 
     /// The quality produced when this crafting machine finishes crafting.
+    ///
+    /// value is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn set_result_quality(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -24156,6 +24264,10 @@ pub fn lua_entity_valve_threshold_override_bulk(objs: &[Object], dst: &mut [Bulk
 pub struct LuaEntityPrototype(pub Object);
 
 impl LuaEntityPrototype {
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_attraction_range_elongation(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24175,6 +24287,10 @@ impl LuaEntityPrototype {
     }
 
     /// The crafting speed of this crafting-machine or character.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_crafting_speed(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24190,6 +24306,10 @@ impl LuaEntityPrototype {
         Ok(v0)
     }
 
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_energy_distribution_efficiency(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24210,6 +24330,10 @@ impl LuaEntityPrototype {
 
     /// Gets the fluid capacity of this entity or 0 if this entity doesn't
     /// support fluids.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_fluid_capacity(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24227,6 +24351,10 @@ impl LuaEntityPrototype {
 
     /// The fluid usage of this generator, fusion generator or fusion reactor
     /// prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_fluid_usage_per_tick(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24246,6 +24374,10 @@ impl LuaEntityPrototype {
     }
 
     /// The extension speed of this inserter.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_inserter_extension_speed(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24265,6 +24397,10 @@ impl LuaEntityPrototype {
     }
 
     /// The rotation speed of this inserter.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_inserter_rotation_speed(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24285,6 +24421,10 @@ impl LuaEntityPrototype {
 
     /// Gets the base size of the given inventory on this entity or `nil` if the
     /// given inventory doesn't exist.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_inventory_size(&self, index: u32, quality: Option<Object>) -> Result<Option<u32>, Status> {
         let mut a = [0u8; 12];
         let mut r = [0u8; 8];
@@ -24305,6 +24445,10 @@ impl LuaEntityPrototype {
     }
 
     /// The maximum circuit wire distance for this entity.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_circuit_wire_distance(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24322,6 +24466,10 @@ impl LuaEntityPrototype {
 
     /// The radius of the area constantly revealed by this radar, or cargo
     /// landing pad, in chunks.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_distance_of_nearby_sector_revealed(&self, quality: Option<Object>) -> Result<Option<u32>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24341,6 +24489,10 @@ impl LuaEntityPrototype {
     }
 
     /// The radius of the area this radar can chart, in chunks.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_distance_of_sector_revealed(&self, quality: Option<Object>) -> Result<Option<u32>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24360,6 +24512,10 @@ impl LuaEntityPrototype {
     }
 
     /// The max energy for this flying robot prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_energy(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24379,6 +24535,10 @@ impl LuaEntityPrototype {
     }
 
     /// The theoretical maximum energy production for this entity.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_energy_production(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24395,6 +24555,10 @@ impl LuaEntityPrototype {
     }
 
     /// The theoretical maximum energy usage for this entity.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_energy_usage(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24411,6 +24575,10 @@ impl LuaEntityPrototype {
     }
 
     /// Max health of this entity.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_health(&self, quality: Option<Object>) -> Result<f32, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 4];
@@ -24428,6 +24596,10 @@ impl LuaEntityPrototype {
 
     /// The maximum power output of this burner generator or generator
     /// prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_power_output(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24447,6 +24619,10 @@ impl LuaEntityPrototype {
     }
 
     /// The maximum wire distance for this entity.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_max_wire_distance(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24463,6 +24639,10 @@ impl LuaEntityPrototype {
     }
 
     /// The mining radius of this mining drill prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_mining_drill_radius(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24482,6 +24662,10 @@ impl LuaEntityPrototype {
     }
 
     /// The pumping speed of this offshore pump or normal pump.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_pumping_speed(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24498,6 +24682,10 @@ impl LuaEntityPrototype {
     }
 
     /// The base researching speed of this lab prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_researching_speed(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -24517,6 +24705,10 @@ impl LuaEntityPrototype {
     }
 
     /// The supply area of this electric pole or beacon prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_supply_area_distance(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -24533,6 +24725,10 @@ impl LuaEntityPrototype {
     }
 
     /// The maximum flow rate through this valve.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_valve_flow_rate(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -36499,6 +36695,10 @@ impl LuaEquipmentGrid {
 
     /// Clear all equipment from the grid, removing it without actually
     /// returning it.
+    ///
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub fn clear(&self, by_player: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 8];
         if let Some(v) = by_player {
@@ -36609,6 +36809,10 @@ impl LuaEquipmentGrid {
     }
 
     /// Total energy per tick generated by the equipment inside this grid.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_generator_energy(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -36699,6 +36903,10 @@ impl LuaEquipmentGrid {
     }
 
     /// Remove all equipment from the grid.
+    ///
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub fn take_all(&self, by_player: Option<Object>) -> Result<Vec<ItemWithQualityCount>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 8];
@@ -36722,6 +36930,10 @@ impl LuaEquipmentGrid {
     }
 
     /// Remove all equipment from the grid.
+    ///
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     /// `take_all` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -37580,6 +37792,10 @@ pub fn lua_equipment_grid_prototype_width_bulk(objs: &[Object], dst: &mut [u32])
 pub struct LuaEquipmentPrototype(pub Object);
 
 impl LuaEquipmentPrototype {
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_energy_consumption(&self, quality: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -37595,6 +37811,10 @@ impl LuaEquipmentPrototype {
         Ok(v0)
     }
 
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_inventory_bonus(&self, quality: Option<Object>) -> Result<Option<u32>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -37613,6 +37833,10 @@ impl LuaEquipmentPrototype {
         Ok(v0)
     }
 
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_movement_bonus(&self, quality: Option<Object>) -> Result<Option<f32>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -37632,6 +37856,10 @@ impl LuaEquipmentPrototype {
     }
 
     /// The shield value of this equipment.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_shield(&self, quality: Option<Object>) -> Result<f32, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 4];
@@ -40303,6 +40531,10 @@ pub struct LuaForce(pub Object);
 impl LuaForce {
     /// Adds a custom chart tag to the given surface and returns the new tag or
     /// `nil` if the given position isn't valid for a chart tag.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn add_chart_tag(&self, surface: Object, tag: ChartTagSpec) -> Result<Option<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 80];
@@ -40336,6 +40568,10 @@ impl LuaForce {
     }
 
     /// Cancels pending chart requests for the given surface or all surfaces.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn cancel_charting(&self, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 8];
         if let Some(v) = surface {
@@ -40359,6 +40595,10 @@ impl LuaForce {
     }
 
     /// Chart a portion of the map.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn chart(&self, surface: Object, area: BoundingBox) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 48];
@@ -40372,6 +40612,10 @@ impl LuaForce {
     }
 
     /// Chart all generated chunks.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn chart_all(&self, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 8];
         if let Some(v) = surface {
@@ -40386,6 +40630,10 @@ impl LuaForce {
     }
 
     /// Erases chart data for this force.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn clear_chart(&self, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 8];
         if let Some(v) = surface {
@@ -40400,6 +40648,18 @@ impl LuaForce {
     }
 
     /// Copies the given surface's chart from the given force to this force.
+    ///
+    /// source_force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
+    ///
+    /// source_surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
+    ///
+    /// destination_surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn copy_chart(&self, source_force: Object, source_surface: Object, destination_surface: Object) -> Result<(), Status> {
         let mut a = [0u8; 12];
         wr_u32(&mut a[..], 0, source_force.0);
@@ -40414,6 +40674,10 @@ impl LuaForce {
 
     /// Copies all of the given changeable values (except charts) from the given
     /// force to this force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn copy_from(&self, force: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, force.0);
@@ -40526,6 +40790,10 @@ impl LuaForce {
     }
 
     /// Finds all custom chart tags within a given area on the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn find_chart_tags(&self, surface: Object, area: Option<BoundingBox>) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 48];
@@ -40550,6 +40818,10 @@ impl LuaForce {
     }
 
     /// Finds all custom chart tags within a given area on the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     /// `find_chart_tags` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -40578,6 +40850,10 @@ impl LuaForce {
         Ok(())
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn find_logistic_network_by_position(&self, position: MapPosition, surface: Object) -> Result<Option<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -40608,6 +40884,10 @@ impl LuaForce {
     }
 
     /// Is `other` force in this force's cease fire list?
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_cease_fire(&self, other: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -40621,6 +40901,10 @@ impl LuaForce {
     }
 
     /// Gets the raw chart data for a given chunk as a binary string.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_chunk_chart(&self, surface: Object, chunk_position: ChunkPosition) -> Result<Option<LuaStr>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -40640,6 +40924,10 @@ impl LuaForce {
 
     /// The entity build statistics for this force (built and mined) for the
     /// given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_entity_build_count_statistics(&self, surface: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -40667,6 +40955,10 @@ impl LuaForce {
     }
 
     /// Fetches the evolution factor of this force on the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_evolution_factor(&self, surface: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -40684,6 +40976,10 @@ impl LuaForce {
 
     /// Fetches the spawner kill part of the evolution factor of this force on
     /// the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_evolution_factor_by_killing_spawners(&self, surface: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -40701,6 +40997,10 @@ impl LuaForce {
 
     /// Fetches the pollution part of the evolution factor of this force on the
     /// given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_evolution_factor_by_pollution(&self, surface: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -40718,6 +41018,10 @@ impl LuaForce {
 
     /// Fetches the time part of the evolution factor of this force on the given
     /// surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_evolution_factor_by_time(&self, surface: Option<Object>) -> Result<f64, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -40734,6 +41038,10 @@ impl LuaForce {
     }
 
     /// The fluid production statistics for this force for the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_fluid_production_statistics(&self, surface: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -40747,6 +41055,10 @@ impl LuaForce {
     }
 
     /// Is `other` force in this force's friends list.
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_friend(&self, other: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -40800,6 +41112,10 @@ impl LuaForce {
     }
 
     /// The item production statistics for this force for the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_item_production_statistics(&self, surface: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -40813,6 +41129,10 @@ impl LuaForce {
     }
 
     /// The kill counter statistics for this force for the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_kill_count_statistics(&self, surface: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -40916,6 +41236,10 @@ impl LuaForce {
         Ok(())
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_spawn_position(&self, surface: Object) -> Result<MapPosition, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 4];
@@ -40929,6 +41253,10 @@ impl LuaForce {
         Ok(v0)
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_surface_hidden(&self, surface: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -40955,6 +41283,10 @@ impl LuaForce {
     }
 
     /// Has a chunk been charted?
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn is_chunk_charted(&self, surface: Object, chunk_position: ChunkPosition) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -40970,6 +41302,10 @@ impl LuaForce {
     }
 
     /// Has a chunk been requested for charting?
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn is_chunk_requested_for_charting(&self, surface: Object, chunk_position: ChunkPosition) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -40986,6 +41322,10 @@ impl LuaForce {
 
     /// Is the given chunk currently charted and visible (not covered by fog of
     /// war) on the map.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn is_chunk_visible(&self, surface: Object, chunk_position: ChunkPosition) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -41001,6 +41341,10 @@ impl LuaForce {
     }
 
     /// Is this force an enemy?
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn is_enemy(&self, other: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -41014,6 +41358,10 @@ impl LuaForce {
     }
 
     /// Is this force a friend?
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn is_friend(&self, other: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -41038,6 +41386,10 @@ impl LuaForce {
     }
 
     /// Is the specified quality unlocked for this force?
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn is_quality_unlocked(&self, quality: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, quality.0);
@@ -41049,6 +41401,11 @@ impl LuaForce {
     }
 
     /// Is the specified planet unlocked for this force?
+    ///
+    /// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaSpaceLocationPrototype handle. Find one under the prototypes
+    /// global.
     pub fn is_space_location_unlocked(&self, name: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, name.0);
@@ -41080,6 +41437,10 @@ impl LuaForce {
     }
 
     /// Locks the quality to not be accessible to this force.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn lock_quality(&self, quality: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, quality.0);
@@ -41091,6 +41452,11 @@ impl LuaForce {
     }
 
     /// Locks the planet to not be accessible to this force.
+    ///
+    /// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaSpaceLocationPrototype handle. Find one under the prototypes
+    /// global.
     pub fn lock_space_location(&self, name: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, name.0);
@@ -41139,6 +41505,10 @@ impl LuaForce {
     }
 
     /// Force a rechart of the whole chart.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn rechart(&self, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 8];
         if let Some(v) = surface {
@@ -41236,6 +41606,10 @@ impl LuaForce {
     }
 
     /// Add `other` force to this force's cease fire list.
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn set_cease_fire(&self, other: Object, cease_fire: bool) -> Result<(), Status> {
         let mut a = [0u8; 8];
         wr_u32(&mut a[..], 0, other.0);
@@ -41248,6 +41622,10 @@ impl LuaForce {
     }
 
     /// Sets the evolution factor of this force on the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_evolution_factor(&self, factor: f64, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         a[0..8].copy_from_slice(&(factor).to_le_bytes());
@@ -41264,6 +41642,10 @@ impl LuaForce {
 
     /// Sets the spawner kill part of the evolution factor of this force on the
     /// given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_evolution_factor_by_killing_spawners(&self, factor: f64, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         a[0..8].copy_from_slice(&(factor).to_le_bytes());
@@ -41280,6 +41662,10 @@ impl LuaForce {
 
     /// Sets the pollution part of the evolution factor of this force on the
     /// given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_evolution_factor_by_pollution(&self, factor: f64, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         a[0..8].copy_from_slice(&(factor).to_le_bytes());
@@ -41296,6 +41682,10 @@ impl LuaForce {
 
     /// Sets the time part of the evolution factor of this force on the given
     /// surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_evolution_factor_by_time(&self, factor: f64, surface: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         a[0..8].copy_from_slice(&(factor).to_le_bytes());
@@ -41311,6 +41701,10 @@ impl LuaForce {
     }
 
     /// Add `other` force to this force's friends list.
+    ///
+    /// other is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn set_friend(&self, other: Object, friend: bool) -> Result<(), Status> {
         let mut a = [0u8; 8];
         wr_u32(&mut a[..], 0, other.0);
@@ -41359,6 +41753,10 @@ impl LuaForce {
         Ok(())
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_spawn_position(&self, position: MapPosition, surface: Object) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -41371,6 +41769,10 @@ impl LuaForce {
         Ok(())
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn set_surface_hidden(&self, surface: Object, hidden: bool) -> Result<(), Status> {
         let mut a = [0u8; 8];
         wr_u32(&mut a[..], 0, surface.0);
@@ -41394,6 +41796,10 @@ impl LuaForce {
         Ok(())
     }
 
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn unchart_chunk(&self, chunk_position: ChunkPosition, surface: Object) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -41407,6 +41813,10 @@ impl LuaForce {
     }
 
     /// Unlocks the quality to be accessible to this force.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn unlock_quality(&self, quality: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, quality.0);
@@ -41418,6 +41828,11 @@ impl LuaForce {
     }
 
     /// Unlocks the planet to be accessible to this force.
+    ///
+    /// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaSpaceLocationPrototype handle. Find one under the prototypes
+    /// global.
     pub fn unlock_space_location(&self, name: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, name.0);
@@ -44295,6 +44710,9 @@ impl LuaGameScript {
     }
 
     /// Bans the given player from this multiplayer game.
+    ///
+    /// player is declared PlayerIdentification | string. Only the handle arm
+    /// has a fixed layout, so this position carries only the LuaPlayer handle.
     pub fn ban_player(&self, player: Object, reason: Option<&str>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         wr_u32(&mut a[..], 0, player.0);
@@ -44401,6 +44819,10 @@ impl LuaGameScript {
     }
 
     /// Deletes the given surface and all entities on it if possible.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn delete_surface(&self, surface: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -44497,6 +44919,10 @@ impl LuaGameScript {
     }
 
     /// The pollution statistics for this the given surface.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn get_pollution_statistics(&self, surface: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -44617,6 +45043,10 @@ impl LuaGameScript {
     }
 
     /// Kicks the given player from this multiplayer game.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn kick_player(&self, player: Object, reason: Option<&str>) -> Result<(), Status> {
         let mut a = [0u8; 16];
         wr_u32(&mut a[..], 0, player.0);
@@ -44632,6 +45062,14 @@ impl LuaGameScript {
     }
 
     /// Marks two forces to be merged together.
+    ///
+    /// source is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// destination is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub fn merge_forces(&self, source: Object, destination: Object) -> Result<(), Status> {
         let mut a = [0u8; 8];
         wr_u32(&mut a[..], 0, source.0);
@@ -44644,6 +45082,10 @@ impl LuaGameScript {
     }
 
     /// Mutes the given player.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn mute_player(&self, player: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, player.0);
@@ -44683,6 +45125,10 @@ impl LuaGameScript {
     }
 
     /// Purges the given players messages from the game.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn purge_player(&self, player: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, player.0);
@@ -44871,6 +45317,9 @@ impl LuaGameScript {
     }
 
     /// Unbans the given player from this multiplayer game.
+    ///
+    /// player is declared PlayerIdentification | string. Only the handle arm
+    /// has a fixed layout, so this position carries only the LuaPlayer handle.
     pub fn unban_player(&self, player: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, player.0);
@@ -44882,6 +45331,10 @@ impl LuaGameScript {
     }
 
     /// Unmutes the given player.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn unmute_player(&self, player: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, player.0);
@@ -48519,6 +48972,10 @@ impl LuaGuiElement {
 
     /// The quality to be shown in the bottom left corner of this sprite-button,
     /// or `nil` to show nothing.
+    ///
+    /// value is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn set_quality(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -54980,6 +55437,10 @@ impl LuaItemPrototype {
     }
 
     /// The durability of this tool item prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_durability(&self, quality: Option<Object>) -> Result<Option<f64>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 16];
@@ -55094,6 +55555,10 @@ impl LuaItemPrototype {
     }
 
     /// The inventory size bonus for this armor prototype.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_inventory_size_bonus(&self, quality: Option<Object>) -> Result<Option<u32>, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 8];
@@ -55113,6 +55578,10 @@ impl LuaItemPrototype {
     }
 
     /// Effects of this module at the specified quality.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_module_effects(&self, quality: Option<Object>) -> Result<Option<ModuleEffects>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 8];
@@ -55176,6 +55645,10 @@ impl LuaItemPrototype {
 
     /// The number of ticks before this item spoils, or `0` if it does not
     /// spoil.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn get_spoil_ticks(&self, quality: Option<Object>) -> Result<u32, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 4];
@@ -63080,6 +63553,10 @@ pub struct LuaPermissionGroup(pub Object);
 
 impl LuaPermissionGroup {
     /// Adds the given player to this group.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn add_player(&self, player: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -63117,6 +63594,10 @@ impl LuaPermissionGroup {
     }
 
     /// Removes the given player from this group.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn remove_player(&self, player: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -63461,6 +63942,10 @@ pub struct LuaPlanet(pub Object);
 
 impl LuaPlanet {
     /// Associates the given surface with this planet.
+    ///
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurface handle.
     pub fn associate_surface(&self, surface: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, surface.0);
@@ -63483,6 +63968,10 @@ impl LuaPlanet {
     }
 
     /// Gets the built space platforms orbiting this planet on the given force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_space_platforms(&self, force: Object) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 4];
@@ -63503,6 +63992,10 @@ impl LuaPlanet {
     }
 
     /// Gets the built space platforms orbiting this planet on the given force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     /// `get_space_platforms` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -64305,6 +64798,10 @@ impl LuaPlayer {
 
     /// Invokes the "smart pipette" action on the player as if the user pressed
     /// it.
+    ///
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub fn pipette(&self, id: &Value, quality: Option<Object>, allow_ghost: Option<bool>) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 32];
@@ -64641,6 +65138,10 @@ impl LuaPlayer {
     }
 
     /// Swaps this player's character with another player's character.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn swap_characters(&self, player: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -72879,6 +73380,11 @@ pub struct LuaRecipe(pub Object);
 
 impl LuaRecipe {
     /// Checks if recipe has given category
+    ///
+    /// category is declared RecipeCategoryID (LuaRecipeCategoryPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaRecipeCategoryPrototype handle. Find one under the
+    /// prototypes global.
     pub fn has_category(&self, category: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -73582,6 +74088,11 @@ pub struct LuaRecipePrototype(pub Object);
 
 impl LuaRecipePrototype {
     /// Checks if recipe has given category
+    ///
+    /// category is declared RecipeCategoryID (LuaRecipeCategoryPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaRecipeCategoryPrototype handle. Find one under the
+    /// prototypes global.
     pub fn has_category(&self, category: Object) -> Result<bool, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 1];
@@ -75066,6 +75577,10 @@ impl LuaRecord {
     }
 
     /// The active index of this BlueprintBookRecord.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn get_active_index(&self, player: Object) -> Result<u32, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -75260,6 +75775,10 @@ impl LuaRecord {
     }
 
     /// Gets the currently selected record of the book for the given player.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn get_selected_record(&self, player: Object) -> Result<Option<Object>, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 8];
@@ -80234,6 +80753,14 @@ impl LuaSegmentedUnit {
     }
 
     /// Damages the unit.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// r#type is declared DamageTypeID (LuaDamagePrototype | string). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaDamagePrototype handle. Find one under the prototypes global.
     pub fn damage(&self, damage: f32, force: Object, r#type: Option<Object>, source: Option<Object>, cause: Option<Object>) -> Result<f32, Status> {
         let mut a = [0u8; 32];
         let mut r = [0u8; 4];
@@ -80272,6 +80799,14 @@ impl LuaSegmentedUnit {
     }
 
     /// Immediately kills the unit.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// damage_type is declared DamageTypeID (LuaDamagePrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaDamagePrototype handle. Find one under the prototypes global.
     pub fn die(&self, force: Option<Object>, cause: Option<Object>, damage_type: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 24];
         if let Some(v) = force {
@@ -80437,6 +80972,10 @@ impl LuaSegmentedUnit {
     }
 
     /// The force that the unit belongs to.
+    ///
+    /// value is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn set_force(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -81135,6 +81674,10 @@ pub struct LuaSettings(pub Object);
 impl LuaSettings {
     /// Gets the current per-player settings for the given player, indexed by
     /// prototype name.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn get_player_settings(&self, player: Object) -> Result<BTreeMap<LuaStr, ModSetting>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 4];
@@ -81268,6 +81811,10 @@ impl LuaSettings {
         Ok(v0)
     }
 
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn get_player_settings_raw(&self, player: Object) -> Result<Object, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 4];
@@ -81767,6 +82314,10 @@ impl LuaSimulation {
         Ok(())
     }
 
+    ///
+    /// value is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_camera_player(&self, value: Object) -> Result<(), Status> {
         let mut a = [0u8; 4];
         wr_u32(&mut a[..], 0, value.0);
@@ -87196,6 +87747,10 @@ impl LuaSurface {
     }
 
     /// Send a group to build a new base.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn build_enemy_base(&self, position: MapPosition, unit_count: u32, force: Option<Object>) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 32];
@@ -87855,6 +88410,10 @@ impl LuaSurface {
 
     /// Whether the given decorative prototype collides at the given position
     /// and direction.
+    ///
+    /// prototype is declared DecorativeID (LuaDecorativePrototype | string).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaDecorativePrototype handle. Find one under the prototypes global.
     pub fn decorative_prototype_collides(&self, prototype: Object, position: MapPosition) -> Result<bool, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -87961,6 +88520,10 @@ impl LuaSurface {
     }
 
     /// Find the logistic network with a cell closest to a given position.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn find_closest_logistic_network_by_position(&self, position: MapPosition, force: Object) -> Result<Option<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -88025,6 +88588,10 @@ impl LuaSurface {
 
     /// Find enemy units (entities with type "unit") of a given force within an
     /// area.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn find_enemy_units(&self, center: MapPosition, radius: f64, force: Option<Object>) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 32];
@@ -88051,6 +88618,10 @@ impl LuaSurface {
 
     /// Find enemy units (entities with type "unit") of a given force within an
     /// area.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     /// `find_enemy_units` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -88195,6 +88766,10 @@ impl LuaSurface {
     }
 
     /// Find the logistic network that covers a given position.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn find_logistic_network_by_position(&self, position: MapPosition, force: Object) -> Result<Option<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -88214,6 +88789,10 @@ impl LuaSurface {
 
     /// Finds all of the logistics networks whose construction area intersects
     /// with the given position.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn find_logistic_networks_by_construction_area(&self, position: MapPosition, force: Object) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -88236,6 +88815,10 @@ impl LuaSurface {
 
     /// Finds all of the logistics networks whose construction area intersects
     /// with the given position.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     /// `find_logistic_networks_by_construction_area` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -88557,6 +89140,10 @@ impl LuaSurface {
 
     /// Gets the cover tile for the given force and tile on this surface if one
     /// is set.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_default_cover_tile(&self, force: Object, tile: &Value) -> Result<Option<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 24];
@@ -88591,6 +89178,10 @@ impl LuaSurface {
 
     /// Returns all the military targets (entities with force) on this chunk for
     /// the given force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_entities_with_force(&self, chunk_position: ChunkPosition, force: Object) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 12];
@@ -88613,6 +89204,10 @@ impl LuaSurface {
 
     /// Returns all the military targets (entities with force) on this chunk for
     /// the given force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     /// `get_entities_with_force` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -88683,6 +89278,11 @@ impl LuaSurface {
     }
 
     /// Gets the value of surface property on this surface.
+    ///
+    /// property is declared SurfacePropertyID (LuaSurfacePropertyPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurfacePropertyPrototype handle. Find one under the
+    /// prototypes global.
     pub fn get_property(&self, property: Object) -> Result<f64, Status> {
         let mut a = [0u8; 4];
         let mut r = [0u8; 8];
@@ -89185,6 +89785,10 @@ impl LuaSurface {
     }
 
     /// Sets the cover tile for the given force and tile on this surface.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn set_default_cover_tile(&self, force: Object, from_tile: &Value, to_tile: &Value) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 40];
@@ -89258,6 +89862,11 @@ impl LuaSurface {
     }
 
     /// Sets the value of surface property on this surface.
+    ///
+    /// property is declared SurfacePropertyID (LuaSurfacePropertyPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSurfacePropertyPrototype handle. Find one under the
+    /// prototypes global.
     pub fn set_property(&self, property: Object, value: f64) -> Result<(), Status> {
         let mut a = [0u8; 16];
         wr_u32(&mut a[..], 0, property.0);
@@ -89293,6 +89902,10 @@ impl LuaSurface {
     }
 
     /// Set tiles at specified locations.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn set_tiles(&self, tiles: &[Tile], correct_tiles: Option<bool>, remove_colliding_entities: Option<&Value>, remove_colliding_decoratives: Option<bool>, raise_event: Option<bool>, player: Option<Object>, undo_index: Option<u32>) -> Result<(), Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 56];
@@ -92559,6 +93172,14 @@ pub struct LuaTile(pub Object);
 
 impl LuaTile {
     /// Cancels deconstruction if it is scheduled, does nothing otherwise.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn cancel_deconstruction(&self, force: Object, player: Option<Object>) -> Result<(), Status> {
         let mut a = [0u8; 12];
         wr_u32(&mut a[..], 0, force.0);
@@ -92587,6 +93208,10 @@ impl LuaTile {
     }
 
     /// Gets all tile ghosts on this tile.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn get_tile_ghosts(&self, force: Option<Object>) -> Result<Vec<Object>, Status> {
         let _mark = AllocMark::new();
         let mut a = [0u8; 8];
@@ -92610,6 +93235,10 @@ impl LuaTile {
     }
 
     /// Gets all tile ghosts on this tile.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     /// `get_tile_ghosts` writing into `dst`, reusing its allocation rather than
     /// making a fresh one. `dst` is cleared first, so it is empty on
     /// every error path as well as when the call finds nothing.
@@ -92638,6 +93267,10 @@ impl LuaTile {
     }
 
     /// Does this tile have any tile ghosts on it.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn has_tile_ghost(&self, force: Option<Object>) -> Result<bool, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 1];
@@ -92654,6 +93287,14 @@ impl LuaTile {
     }
 
     /// Orders deconstruction of this tile by the given force.
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
+    ///
+    /// player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+    /// Only the handle arm has a fixed layout, so this position carries only
+    /// the LuaPlayer handle.
     pub fn order_deconstruction(&self, force: Object, player: Option<Object>) -> Result<Option<Object>, Status> {
         let mut a = [0u8; 12];
         let mut r = [0u8; 8];
@@ -92674,6 +93315,10 @@ impl LuaTile {
     }
 
     /// Is this tile marked for deconstruction?
+    ///
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the handle
+    /// arm has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub fn to_be_deconstructed(&self, force: Option<Object>) -> Result<bool, Status> {
         let mut a = [0u8; 8];
         let mut r = [0u8; 1];
@@ -105983,6 +106628,9 @@ pub fn val_ctn_map_luastr_luastr(v: &BTreeMap<LuaStr, LuaStr>) -> Value {
 pub struct SignalID {
     pub r#type: Option<LuaStr>,
     pub name: Option<LuaStr>,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Option<Object>,
 }
 
@@ -107008,6 +107656,9 @@ impl LuaBootstrapLevelResult {
 #[derive(Clone, Debug, Default)]
 pub struct ItemIDAndQualityIDPair {
     pub name: Value,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Option<Object>,
 }
 
@@ -108590,6 +109241,9 @@ impl MarketIngredient {
 pub struct LuaEntityCloneArgs {
     pub position: MapPosition,
     pub surface: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub create_build_effect_smoke: Option<bool>,
 }
@@ -108687,6 +109341,9 @@ impl ItemWithQualityCount {
 pub struct LuaEntityDestroyArgs {
     pub do_cliff_correction: Option<bool>,
     pub raise_destroy: Option<bool>,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub undo_index: Option<u32>,
 }
@@ -108921,6 +109578,9 @@ impl HeatSetting {
 #[derive(Clone, Debug, Default)]
 pub struct InfinityInventoryFilter {
     pub name: Value,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Option<Object>,
     pub count: Option<u32>,
     pub mode: Option<LuaStr>,
@@ -109057,6 +109717,9 @@ pub struct CargoDestination {
     pub station: Option<Object>,
     pub hatch: Option<Object>,
     pub transform_launch_products: Option<bool>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub position: Option<MapPosition>,
     pub land_at_exact_position: Option<bool>,
@@ -109227,7 +109890,13 @@ impl LuaEntityMineArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaEntityOrderUpgradeArgs {
     pub target: Value,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub undo_index: Option<u32>,
 }
@@ -109392,6 +110061,9 @@ impl LuaEntityReviveArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaEntityRotateArgs {
     pub reverse: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
 }
 
@@ -110057,6 +110729,9 @@ impl ProgrammableSpeakerParameters {
 #[derive(Clone, Debug, Default)]
 pub struct RecipeIDAndQualityIDPair {
     pub name: Value,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Object,
 }
 
@@ -111772,8 +112447,14 @@ impl LuaEquipmentGridMoveArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaEquipmentGridPutArgs {
     pub name: Value,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Option<Object>,
     pub position: Option<EquipmentPosition>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub ghost: Option<bool>,
 }
@@ -111845,6 +112526,9 @@ impl LuaEquipmentGridPutArgs {
 pub struct LuaEquipmentGridTakeArgs {
     pub position: Option<EquipmentPosition>,
     pub equipment: Option<Object>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
 }
 
@@ -112388,6 +113072,9 @@ pub struct ChartTagSpec {
     pub position: MapPosition,
     pub icon: Option<SignalID>,
     pub text: Option<LuaStr>,
+    /// last_user is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub last_user: Option<Object>,
 }
 
@@ -112447,6 +113134,10 @@ impl ChartTagSpec {
 #[derive(Clone, Debug, Default)]
 pub struct LuaForceCreateSpacePlatformArgs {
     pub name: Option<LuaStr>,
+    /// planet is declared SpaceLocationID (LuaSpaceLocationPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSpaceLocationPrototype handle. Find one under
+    /// the prototypes global.
     pub planet: Object,
     pub starter_pack: Value,
 }
@@ -112595,6 +113286,10 @@ pub struct LogisticFilter {
     pub min: Option<i32>,
     pub max: Option<u32>,
     pub minimum_delivery_count: Option<u32>,
+    /// import_from is declared SpaceLocationID (LuaSpaceLocationPrototype |
+    /// string). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaSpaceLocationPrototype handle. Find one under
+    /// the prototypes global.
     pub import_from: Option<Object>,
 }
 
@@ -113257,7 +113952,13 @@ impl TerritorySettings {
 #[derive(Clone, Debug, Default)]
 pub struct LuaGameScriptGetVehiclesArgs {
     pub unit_number: Option<u32>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub r#type: Option<Value>,
     pub is_moving: Option<bool>,
@@ -113660,8 +114361,17 @@ impl LuaGameScriptShowMessageDialogArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaGameScriptTakeScreenshotArgs {
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub position: Option<MapPosition>,
     pub resolution: Option<TilePosition>,
@@ -113883,6 +114593,9 @@ impl LuaGameScriptTakeScreenshotArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaGameScriptTakeTechnologyScreenshotArgs {
     pub path: Option<LuaStr>,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Object,
     pub selected_technology: Option<Value>,
     pub skip_disabled: Option<bool>,
@@ -115207,12 +115920,21 @@ impl MapDifficultySettings {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaItemCommonBuildBlueprintArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub position: MapPosition,
     pub direction: Option<u32>,
     pub build_mode: Option<u32>,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub raise_built: Option<bool>,
 }
@@ -115298,10 +116020,19 @@ impl LuaItemCommonBuildBlueprintArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaItemCommonCancelDeconstructAreaArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub super_forced: Option<bool>,
 }
@@ -115367,7 +116098,13 @@ impl LuaItemCommonCancelDeconstructAreaArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaItemCommonCreateBlueprintArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub always_include_tiles: Option<bool>,
@@ -115469,10 +116206,19 @@ impl LuaItemCommonCreateBlueprintArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaItemCommonDeconstructAreaArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub super_forced: Option<bool>,
 }
@@ -116637,7 +117383,13 @@ pub struct LuaPlayerAddPinArgs {
     pub preview_distance: Option<u16>,
     pub always_visible: Option<bool>,
     pub entity: Option<Object>,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub position: Option<MapPosition>,
 }
@@ -116996,6 +117748,9 @@ impl LuaPlayerConnectToServerArgs {
 pub struct LuaPlayerCreateLocalFlyingTextArgs {
     pub text: Value,
     pub position: Option<MapPosition>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub create_at_cursor: Option<bool>,
     pub color: Option<Color>,
@@ -117120,6 +117875,9 @@ pub struct LuaPlayerGetAlertsArgs {
     pub prototype: Option<Object>,
     pub position: Option<MapPosition>,
     pub r#type: Option<u32>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
 }
 
@@ -117282,6 +118040,9 @@ pub struct LuaPlayerRemoveAlertArgs {
     pub prototype: Option<Value>,
     pub position: Option<MapPosition>,
     pub r#type: Option<u32>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
     pub icon: Option<SignalID>,
     pub message: Option<Value>,
@@ -117387,6 +118148,9 @@ pub struct LuaPlayerSetControllerArgs {
     pub final_transition_time: Option<u32>,
     pub chart_mode_cutoff: Option<f64>,
     pub position: Option<MapPosition>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
 }
 
@@ -118420,12 +119184,21 @@ impl RailLocation {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaRecordBuildBlueprintArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub position: MapPosition,
     pub direction: Option<u32>,
     pub build_mode: Option<u32>,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub raise_built: Option<bool>,
 }
@@ -118511,10 +119284,19 @@ impl LuaRecordBuildBlueprintArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaRecordCancelDeconstructAreaArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub super_forced: Option<bool>,
 }
@@ -118580,7 +119362,13 @@ impl LuaRecordCancelDeconstructAreaArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaRecordCreateBlueprintArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub always_include_tiles: Option<bool>,
@@ -118682,10 +119470,19 @@ impl LuaRecordCreateBlueprintArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaRecordDeconstructAreaArgs {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub area: BoundingBox,
     pub skip_fog_of_war: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
     pub super_forced: Option<bool>,
 }
@@ -118763,6 +119560,9 @@ pub struct LuaRenderingDrawAnimationArgs {
     pub use_target_orientation: Option<bool>,
     pub oriented_offset: Option<Vector>,
     pub target: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -118995,6 +119795,9 @@ pub struct LuaRenderingDrawArcArgs {
     pub start_angle: f32,
     pub angle: f32,
     pub target: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -119149,6 +119952,9 @@ pub struct LuaRenderingDrawCircleArgs {
     pub width: Option<f32>,
     pub filled: Option<bool>,
     pub target: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -119317,6 +120123,9 @@ pub struct LuaRenderingDrawLightArgs {
     pub oriented: Option<bool>,
     pub color: Option<Color>,
     pub target: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -119510,6 +120319,9 @@ pub struct LuaRenderingDrawLineArgs {
     pub dash_offset: Option<f64>,
     pub from: Value,
     pub to: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -119689,6 +120501,9 @@ pub struct LuaRenderingDrawPolygonArgs {
     pub orientation: Option<f32>,
     pub orientation_target: Option<Value>,
     pub use_target_orientation: Option<bool>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -119890,6 +120705,9 @@ pub struct LuaRenderingDrawRectangleArgs {
     pub filled: Option<bool>,
     pub left_top: Value,
     pub right_bottom: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -120060,6 +120878,9 @@ pub struct LuaRenderingDrawSpriteArgs {
     pub use_target_orientation: Option<bool>,
     pub oriented_offset: Option<Vector>,
     pub target: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub time_to_live: Option<u32>,
     pub blink_interval: Option<u16>,
@@ -120267,6 +121088,9 @@ impl LuaRenderingDrawSpriteArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaRenderingDrawTextArgs {
     pub text: Value,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Object,
     pub target: Value,
     pub color: Color,
@@ -120969,6 +121793,9 @@ impl ScheduleRecordPosition {
 pub struct LuaSegmentedUnitCloneArgs {
     pub position: MapPosition,
     pub surface: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub territory: Option<Object>,
 }
@@ -121993,6 +122820,9 @@ pub struct LuaSurfaceCanFastReplaceArgs {
     pub name: Value,
     pub position: MapPosition,
     pub direction: Option<u32>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
 }
 
@@ -122047,6 +122877,9 @@ pub struct LuaSurfaceCanPlaceEntityArgs {
     pub name: Value,
     pub position: MapPosition,
     pub direction: Option<u32>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub build_check_type: Option<u32>,
     pub forced: Option<bool>,
@@ -122132,7 +122965,13 @@ impl LuaSurfaceCanPlaceEntityArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCancelDeconstructAreaArgs {
     pub area: BoundingBox,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub skip_fog_of_war: Option<bool>,
     pub item: Option<Object>,
@@ -122219,7 +123058,13 @@ impl LuaSurfaceCancelDeconstructAreaArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCancelUpgradeAreaArgs {
     pub area: BoundingBox,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub skip_fog_of_war: Option<bool>,
     pub item: Object,
@@ -122278,7 +123123,13 @@ impl LuaSurfaceCancelUpgradeAreaArgs {
 pub struct LuaSurfaceCloneAreaArgs {
     pub source_area: BoundingBox,
     pub destination_area: BoundingBox,
+    /// destination_surface is declared SurfaceIdentification (uint32 |
+    /// string | LuaSurface). Only the handle arm has a fixed layout, so
+    /// this position carries only the LuaSurface handle.
     pub destination_surface: Option<Object>,
+    /// destination_force is declared ForceID (string | uint8 | LuaForce).
+    /// Only the handle arm has a fixed layout, so this position carries
+    /// only the LuaForce handle.
     pub destination_force: Option<Object>,
     pub clone_tiles: Option<bool>,
     pub clone_entities: Option<bool>,
@@ -122410,7 +123261,13 @@ pub struct LuaSurfaceCloneBrushArgs {
     pub source_offset: TilePosition,
     pub destination_offset: TilePosition,
     pub source_positions: Vec<TilePosition>,
+    /// destination_surface is declared SurfaceIdentification (uint32 |
+    /// string | LuaSurface). Only the handle arm has a fixed layout, so
+    /// this position carries only the LuaSurface handle.
     pub destination_surface: Option<Object>,
+    /// destination_force is declared LuaForce | string. Only the handle arm
+    /// has a fixed layout, so this position carries only the LuaForce
+    /// handle.
     pub destination_force: Option<Object>,
     pub clone_tiles: Option<bool>,
     pub clone_entities: Option<bool>,
@@ -122574,7 +123431,13 @@ impl LuaSurfaceCloneBrushArgs {
 pub struct LuaSurfaceCloneEntitiesArgs {
     pub entities: Vec<Object>,
     pub destination_offset: Vector,
+    /// destination_surface is declared SurfaceIdentification (uint32 |
+    /// string | LuaSurface). Only the handle arm has a fixed layout, so
+    /// this position carries only the LuaSurface handle.
     pub destination_surface: Option<Object>,
+    /// destination_force is declared ForceID (string | uint8 | LuaForce).
+    /// Only the handle arm has a fixed layout, so this position carries
+    /// only the LuaForce handle.
     pub destination_force: Option<Object>,
     pub snap_to_grid: Option<bool>,
     pub create_build_effect_smoke: Option<bool>,
@@ -123130,10 +123993,16 @@ impl Decorative {
 pub struct LuaSurfaceCreateEntitiesFromBlueprintStringArgs {
     pub string: LuaStr,
     pub position: MapPosition,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub direction: Option<u32>,
     pub flip_horizontal: Option<bool>,
     pub flip_vertical: Option<bool>,
+    /// by_player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub by_player: Option<Object>,
 }
 
@@ -123336,7 +124205,16 @@ pub struct LuaSurfaceCreateEntityArgs {
     pub position: MapPosition,
     pub direction: Option<u32>,
     pub mirror: Option<bool>,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
+    /// The plain form of this member takes the whole table as tier 2, where
+    /// any arm goes.
     pub quality: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle. The plain form of this member takes the whole table
+    /// as tier 2, where any arm goes.
     pub force: Option<Object>,
     pub target: Option<Value>,
     pub source: Option<Value>,
@@ -123344,6 +124222,10 @@ pub struct LuaSurfaceCreateEntityArgs {
     pub snap_to_grid: Option<bool>,
     pub fast_replace: Option<bool>,
     pub undo_index: Option<u32>,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle. The plain form of this member
+    /// takes the whole table as tier 2, where any arm goes.
     pub player: Option<Object>,
     pub character: Option<Object>,
     pub spill: Option<bool>,
@@ -123658,6 +124540,9 @@ impl BlueprintInventoryWithFilters {
 pub struct BlueprintItemFilter {
     pub index: u32,
     pub name: Option<Value>,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
     pub quality: Option<Object>,
     pub comparator: Option<LuaStr>,
 }
@@ -123717,6 +124602,9 @@ impl BlueprintItemFilter {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateParticleArgs {
+    /// name is declared ParticleID (LuaParticlePrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaParticlePrototype handle. Find one under the prototypes global.
     pub name: Object,
     pub position: MapPosition,
     pub movement: Vector,
@@ -123777,7 +124665,16 @@ impl LuaSurfaceCreateParticleArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateSegmentedUnitArgs {
     pub name: Value,
+    /// quality is declared QualityID (LuaQualityPrototype | string). Only
+    /// the handle arm has a fixed layout, so this position carries only the
+    /// LuaQualityPrototype handle. Find one under the prototypes global.
+    /// The plain form of this member takes the whole table as tier 2, where
+    /// any arm goes.
     pub quality: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle. The plain form of this member takes the whole table
+    /// as tier 2, where any arm goes.
     pub force: Option<Object>,
     pub territory: Option<Object>,
 }
@@ -123910,6 +124807,10 @@ impl LuaSurfaceCreateTerritoryArgs {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateTrivialSmokeArgs {
+    /// name is declared TrivialSmokeID (LuaTrivialSmokePrototype | string).
+    /// Only the handle arm has a fixed layout, so this position carries
+    /// only the LuaTrivialSmokePrototype handle. Find one under the
+    /// prototypes global.
     pub name: Object,
     pub position: MapPosition,
 }
@@ -123943,6 +124844,9 @@ impl LuaSurfaceCreateTrivialSmokeArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceCreateUnitGroupArgs {
     pub position: MapPosition,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
 }
 
@@ -123982,7 +124886,13 @@ impl LuaSurfaceCreateUnitGroupArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceDeconstructAreaArgs {
     pub area: BoundingBox,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub skip_fog_of_war: Option<bool>,
     pub item: Option<Object>,
@@ -124373,6 +125283,9 @@ impl DecorativeResult {
 pub struct LuaSurfaceFindNearestEnemyArgs {
     pub position: MapPosition,
     pub max_distance: f64,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
 }
 
@@ -124416,6 +125329,9 @@ impl LuaSurfaceFindNearestEnemyArgs {
 pub struct LuaSurfaceFindNearestEnemyEntityWithOwnerArgs {
     pub position: MapPosition,
     pub max_distance: f64,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
 }
 
@@ -124458,6 +125374,9 @@ impl LuaSurfaceFindNearestEnemyEntityWithOwnerArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceFindUnitsArgs {
     pub area: BoundingBox,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub condition: LuaStr,
 }
@@ -124497,6 +125416,9 @@ pub struct LuaSurfaceRequestPathArgs {
     pub collision_mask: CollisionMask,
     pub start: MapPosition,
     pub goal: MapPosition,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
     pub radius: Option<f64>,
     pub pathfind_flags: Option<PathfinderFlags>,
@@ -124706,6 +125628,9 @@ impl PathfinderFlags {
 pub struct LuaSurfaceSetMultiCommandArgs {
     pub command: Value,
     pub unit_count: u32,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub unit_search_distance: Option<u32>,
 }
@@ -124761,6 +125686,9 @@ pub struct LuaSurfaceSpillInventoryArgs {
     pub position: MapPosition,
     pub inventory: Object,
     pub enable_looted: Option<bool>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub allow_belts: Option<bool>,
     pub max_radius: Option<f64>,
@@ -124859,6 +125787,9 @@ pub struct LuaSurfaceSpillItemStackArgs {
     pub position: MapPosition,
     pub stack: Value,
     pub enable_looted: Option<bool>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub allow_belts: Option<bool>,
     pub max_radius: Option<f64>,
@@ -124955,7 +125886,13 @@ impl LuaSurfaceSpillItemStackArgs {
 #[derive(Clone, Debug, Default)]
 pub struct LuaSurfaceUpgradeAreaArgs {
     pub area: BoundingBox,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Object,
+    /// player is declared PlayerIdentification (uint32 | string |
+    /// LuaPlayer). Only the handle arm has a fixed layout, so this position
+    /// carries only the LuaPlayer handle.
     pub player: Option<Object>,
     pub skip_fog_of_war: Option<bool>,
     pub item: Object,
@@ -125379,7 +126316,13 @@ impl TrainSchedule {
 /// Mirrors the API type of the same name, laid out to match the wire.
 #[derive(Clone, Debug, Default)]
 pub struct TrainStopFilter {
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub is_full: Option<bool>,
     pub is_connected_to_rail: Option<bool>,
@@ -125492,7 +126435,13 @@ impl TrainStopFilter {
 #[derive(Clone, Debug, Default)]
 pub struct TrainFilter {
     pub train_id: Option<u32>,
+    /// surface is declared SurfaceIdentification (uint32 | string |
+    /// LuaSurface). Only the handle arm has a fixed layout, so this
+    /// position carries only the LuaSurface handle.
     pub surface: Option<Object>,
+    /// force is declared ForceID (string | uint8 | LuaForce). Only the
+    /// handle arm has a fixed layout, so this position carries only the
+    /// LuaForce handle.
     pub force: Option<Object>,
     pub stock: Option<Value>,
     pub min_stocks: Option<u32>,

@@ -156,6 +156,10 @@ The typed form is also cheaper on the host, because a flat block is read at know
 
 The generated doc comment on both forms, and on the argument struct itself, lists the variant groups by name with the parameters each one accepts and which of those are required, so the keys that have no field are readable in the editor rather than only in the reference.
 
+Some parameters and struct fields are declared as a union that names one class alongside a string or a number: `SpaceLocationID` is `LuaSpaceLocationPrototype | string`, `ForceID` is `string | uint8 | LuaForce`. A union of that shape collapses to the class, because a read of the same type returns the object and the scalar arms are ways of naming one on the way in. The binding therefore takes a handle, and the generated doc comment names the union it collapsed from and which class the handle is, so you can see what the position carries. To use a string arm, obtain the handle it names first: a prototype comes from the `prototypes` global, and the note says so where that is true, since seven of the classes whose name ends in `Prototype` are not there. A force, surface or player comes from the object that owns it.
+
+The variant-group methods are the exception, because they are the only members generated in two forms. On those, the plain form takes the whole argument table as tier 2 and every arm of the union still goes there, and the note on the typed form's fields says so. A member with only one form, such as `create_space_platform` above, has no such escape: the handle is the only way in.
+
 Which shared parameters a method has, and what each variant group accepts, are in the generated reference (`fklua docs`) as well, with the types spelled the way Factorio spells them.
 
 ## Building a GUI

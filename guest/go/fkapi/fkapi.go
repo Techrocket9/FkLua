@@ -8686,6 +8686,10 @@ func (o LuaControl) SetGuiArrowTyped(args LuaControlSetGuiArrowArgs, extra *Valu
 
 // Teleport: Teleport the entity to a given position, possibly on another
 // surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaControl) Teleport(position MapPosition, surface *Object, raise_teleported *bool, snap_to_grid *bool, build_check_type *uint32) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -9912,6 +9916,9 @@ func LuaControlForceBulk(objs []Object, dst []Object) (int, error) {
 }
 
 // SetForce: The force of this entity.
+//
+// value is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaControl) SetForce(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -10731,6 +10738,10 @@ func LuaCustomChartTagLastUserBulk(objs []Object, dst []BulkOptObject) (int, err
 }
 
 // SetLastUser: The player who last edited this tag.
+//
+// value is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaCustomChartTag) SetLastUser(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12316,6 +12327,10 @@ func LuaDisplayPanelControlBehaviorValidBulk(objs []Object, dst []bool) (int, er
 type LuaElectricEnergySourcePrototype struct{ Object }
 
 // GetInputFlowLimit:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaElectricEnergySourcePrototype) GetInputFlowLimit(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12333,6 +12348,10 @@ func (o LuaElectricEnergySourcePrototype) GetInputFlowLimit(quality *Object) (fl
 }
 
 // GetOutputFlowLimit:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaElectricEnergySourcePrototype) GetOutputFlowLimit(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12683,6 +12702,13 @@ func (o LuaEntity) CanWiresReach(entity Object) (bool, error) {
 
 // CancelDeconstruction: Cancels deconstruction if it is scheduled, does
 // nothing otherwise.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) CancelDeconstruction(force Object, player *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12699,6 +12725,13 @@ func (o LuaEntity) CancelDeconstruction(force Object, player *Object) error {
 }
 
 // CancelUpgrade: Cancels upgrade if it is scheduled, does nothing otherwise.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) CancelUpgrade(force Object, player *Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12780,6 +12813,10 @@ func (o LuaEntity) ConnectRollingStock(direction uint32) (bool, error) {
 }
 
 // CopySettings: Copies settings from the given entity onto this entity.
+//
+// by_player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) CopySettings(entity Object, by_player *Object) ([]ItemWithQualityCount, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12805,6 +12842,10 @@ func (o LuaEntity) CopySettings(entity Object, by_player *Object) ([]ItemWithQua
 }
 
 // CopySettingsInto: Copies settings from the given entity onto this entity.
+//
+// by_player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 // CopySettingsInto is CopySettings writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -12868,6 +12909,13 @@ func (o LuaEntity) CreateCargoPod(cargo_hatch *Object) (*Object, error) {
 }
 
 // Damage: Damages the entity.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// type_ is declared DamageTypeID (LuaDamagePrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaDamagePrototype handle. Find one under the prototypes global.
 func (o LuaEntity) Damage(damage float32, force Object, type_ *Object, source *Object, cause *Object) (float32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -12917,6 +12965,9 @@ func (o LuaEntity) Destroy(args LuaEntityDestroyArgs) (bool, error) {
 }
 
 // Die: Immediately kills the entity.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaEntity) Die(force *Object, cause *Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -13389,6 +13440,10 @@ func (o LuaEntity) GetDriver() (*Value, error) {
 
 // GetElectricInputFlowLimit: The input flow limit for the electric energy
 // source.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntity) GetElectricInputFlowLimit(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -13411,6 +13466,10 @@ func (o LuaEntity) GetElectricInputFlowLimit(quality *Object) (*float64, error) 
 
 // GetElectricOutputFlowLimit: The output flow limit for the electric energy
 // source.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntity) GetElectricOutputFlowLimit(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -14750,6 +14809,9 @@ func (o LuaEntity) IsRegisteredForConstruction() (bool, error) {
 
 // IsRegisteredForDeconstruction: Is this entity registered for deconstruction
 // with this force?
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaEntity) IsRegisteredForDeconstruction(force Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -14824,6 +14886,13 @@ func (o LuaEntity) Mine(args LuaEntityMineArgs) (bool, error) {
 
 // OrderDeconstruction: Sets the entity to be deconstructed by construction
 // robots.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) OrderDeconstruction(force Object, player *Object, undo_index *uint32) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -14929,6 +14998,9 @@ func (o LuaEntity) RemoveMarketItem(offer uint32) (bool, error) {
 }
 
 // RequestToClose:
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaEntity) RequestToClose(force Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -14941,6 +15013,9 @@ func (o LuaEntity) RequestToClose(force Object) error {
 }
 
 // RequestToOpen:
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaEntity) RequestToOpen(force Object, extra_time *uint32) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -15215,6 +15290,10 @@ func (o LuaEntity) SetPriorityTarget(index uint32, entity_id *Value) error {
 }
 
 // SetRecipe: Sets the given recipe in this assembly machine.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntity) SetRecipe(recipe *Value, quality *Object) ([]ItemWithQualityCount, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -15243,6 +15322,10 @@ func (o LuaEntity) SetRecipe(recipe *Value, quality *Object) ([]ItemWithQualityC
 }
 
 // SetRecipeInto: Sets the given recipe in this assembly machine.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 // SetRecipeInto is SetRecipe writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -15744,6 +15827,10 @@ func LuaEntityAssociatedPlayerBulk(objs []Object, dst []BulkOptObject) (int, err
 }
 
 // SetAssociatedPlayer: The player this character is associated with, if any.
+//
+// value is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) SetAssociatedPlayer(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -19455,6 +19542,10 @@ func LuaEntityLastUserBulk(objs []Object, dst []BulkOptObject) (int, error) {
 }
 
 // SetLastUser: The last player that changed any setting on this entity.
+//
+// value is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) SetLastUser(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -21496,6 +21587,10 @@ func LuaEntityRenderPlayerBulk(objs []Object, dst []BulkOptObject) (int, error) 
 
 // SetRenderPlayer: The player that this 'simple-entity-with-owner',
 // 'simple-entity-with-force', or 'highlight-box' is visible to.
+//
+// value is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEntity) SetRenderPlayer(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -21654,6 +21749,10 @@ func LuaEntityResultQualityBulk(objs []Object, dst []BulkOptObject) (int, error)
 
 // SetResultQuality: The quality produced when this crafting machine finishes
 // crafting.
+//
+// value is declared QualityID (LuaQualityPrototype | string). Only the handle
+// arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntity) SetResultQuality(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23762,6 +23861,10 @@ func (o LuaEntity) SetVehicleAutomaticTargetingParameters(value VehicleAutomatic
 type LuaEntityPrototype struct{ Object }
 
 // GetAttractionRangeElongation:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetAttractionRangeElongation(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23783,6 +23886,10 @@ func (o LuaEntityPrototype) GetAttractionRangeElongation(quality *Object) (*floa
 }
 
 // GetCraftingSpeed: The crafting speed of this crafting-machine or character.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetCraftingSpeed(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23800,6 +23907,10 @@ func (o LuaEntityPrototype) GetCraftingSpeed(quality *Object) (float64, error) {
 }
 
 // GetEnergyDistributionEfficiency:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetEnergyDistributionEfficiency(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23822,6 +23933,10 @@ func (o LuaEntityPrototype) GetEnergyDistributionEfficiency(quality *Object) (*f
 
 // GetFluidCapacity: Gets the fluid capacity of this entity or 0 if this entity
 // doesn't support fluids.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetFluidCapacity(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23840,6 +23955,10 @@ func (o LuaEntityPrototype) GetFluidCapacity(quality *Object) (float64, error) {
 
 // GetFluidUsagePerTick: The fluid usage of this generator, fusion generator or
 // fusion reactor prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetFluidUsagePerTick(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23861,6 +23980,10 @@ func (o LuaEntityPrototype) GetFluidUsagePerTick(quality *Object) (*float64, err
 }
 
 // GetInserterExtensionSpeed: The extension speed of this inserter.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetInserterExtensionSpeed(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23882,6 +24005,10 @@ func (o LuaEntityPrototype) GetInserterExtensionSpeed(quality *Object) (*float64
 }
 
 // GetInserterRotationSpeed: The rotation speed of this inserter.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetInserterRotationSpeed(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23904,6 +24031,10 @@ func (o LuaEntityPrototype) GetInserterRotationSpeed(quality *Object) (*float64,
 
 // GetInventorySize: Gets the base size of the given inventory on this entity
 // or 'nil' if the given inventory doesn't exist.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetInventorySize(index uint32, quality *Object) (*uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23927,6 +24058,10 @@ func (o LuaEntityPrototype) GetInventorySize(index uint32, quality *Object) (*ui
 
 // GetMaxCircuitWireDistance: The maximum circuit wire distance for this
 // entity.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxCircuitWireDistance(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23945,6 +24080,10 @@ func (o LuaEntityPrototype) GetMaxCircuitWireDistance(quality *Object) (float64,
 
 // GetMaxDistanceOfNearbySectorRevealed: The radius of the area constantly
 // revealed by this radar, or cargo landing pad, in chunks.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxDistanceOfNearbySectorRevealed(quality *Object) (*uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23967,6 +24106,10 @@ func (o LuaEntityPrototype) GetMaxDistanceOfNearbySectorRevealed(quality *Object
 
 // GetMaxDistanceOfSectorRevealed: The radius of the area this radar can chart,
 // in chunks.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxDistanceOfSectorRevealed(quality *Object) (*uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -23988,6 +24131,10 @@ func (o LuaEntityPrototype) GetMaxDistanceOfSectorRevealed(quality *Object) (*ui
 }
 
 // GetMaxEnergy: The max energy for this flying robot prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxEnergy(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24010,6 +24157,10 @@ func (o LuaEntityPrototype) GetMaxEnergy(quality *Object) (*float64, error) {
 
 // GetMaxEnergyProduction: The theoretical maximum energy production for this
 // entity.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxEnergyProduction(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24027,6 +24178,10 @@ func (o LuaEntityPrototype) GetMaxEnergyProduction(quality *Object) (float64, er
 }
 
 // GetMaxEnergyUsage: The theoretical maximum energy usage for this entity.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxEnergyUsage(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24044,6 +24199,10 @@ func (o LuaEntityPrototype) GetMaxEnergyUsage(quality *Object) (float64, error) 
 }
 
 // GetMaxHealth: Max health of this entity.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxHealth(quality *Object) (float32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24062,6 +24221,10 @@ func (o LuaEntityPrototype) GetMaxHealth(quality *Object) (float32, error) {
 
 // GetMaxPowerOutput: The maximum power output of this burner generator or
 // generator prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxPowerOutput(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24083,6 +24246,10 @@ func (o LuaEntityPrototype) GetMaxPowerOutput(quality *Object) (*float64, error)
 }
 
 // GetMaxWireDistance: The maximum wire distance for this entity.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMaxWireDistance(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24100,6 +24267,10 @@ func (o LuaEntityPrototype) GetMaxWireDistance(quality *Object) (float64, error)
 }
 
 // GetMiningDrillRadius: The mining radius of this mining drill prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetMiningDrillRadius(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24121,6 +24292,10 @@ func (o LuaEntityPrototype) GetMiningDrillRadius(quality *Object) (*float64, err
 }
 
 // GetPumpingSpeed: The pumping speed of this offshore pump or normal pump.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetPumpingSpeed(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24138,6 +24313,10 @@ func (o LuaEntityPrototype) GetPumpingSpeed(quality *Object) (float64, error) {
 }
 
 // GetResearchingSpeed: The base researching speed of this lab prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetResearchingSpeed(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24160,6 +24339,10 @@ func (o LuaEntityPrototype) GetResearchingSpeed(quality *Object) (*float64, erro
 
 // GetSupplyAreaDistance: The supply area of this electric pole or beacon
 // prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetSupplyAreaDistance(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -24177,6 +24360,10 @@ func (o LuaEntityPrototype) GetSupplyAreaDistance(quality *Object) (float64, err
 }
 
 // GetValveFlowRate: The maximum flow rate through this valve.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEntityPrototype) GetValveFlowRate(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -35777,6 +35964,10 @@ func (o LuaEquipmentGrid) CancelRemoval(equipment Object) (bool, error) {
 
 // Clear: Clear all equipment from the grid, removing it without actually
 // returning it.
+//
+// by_player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEquipmentGrid) Clear(by_player *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -35896,6 +36087,10 @@ func (o LuaEquipmentGrid) GetContentsInto(dst []EquipmentWithQualityCounts) ([]E
 
 // GetGeneratorEnergy: Total energy per tick generated by the equipment inside
 // this grid.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEquipmentGrid) GetGeneratorEnergy(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -35991,6 +36186,10 @@ func (o LuaEquipmentGrid) Take(args LuaEquipmentGridTakeArgs) (*ItemWithQualityC
 }
 
 // TakeAll: Remove all equipment from the grid.
+//
+// by_player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaEquipmentGrid) TakeAll(by_player *Object) ([]ItemWithQualityCount, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -36015,6 +36214,10 @@ func (o LuaEquipmentGrid) TakeAll(by_player *Object) ([]ItemWithQualityCount, er
 }
 
 // TakeAllInto: Remove all equipment from the grid.
+//
+// by_player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 // TakeAllInto is TakeAll writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -36814,6 +37017,10 @@ func LuaEquipmentGridPrototypeWidthBulk(objs []Object, dst []uint32) (int, error
 type LuaEquipmentPrototype struct{ Object }
 
 // GetEnergyConsumption:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEquipmentPrototype) GetEnergyConsumption(quality *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -36831,6 +37038,10 @@ func (o LuaEquipmentPrototype) GetEnergyConsumption(quality *Object) (float64, e
 }
 
 // GetInventoryBonus:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEquipmentPrototype) GetInventoryBonus(quality *Object) (*uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -36852,6 +37063,10 @@ func (o LuaEquipmentPrototype) GetInventoryBonus(quality *Object) (*uint32, erro
 }
 
 // GetMovementBonus:
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEquipmentPrototype) GetMovementBonus(quality *Object) (*float32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -36873,6 +37088,10 @@ func (o LuaEquipmentPrototype) GetMovementBonus(quality *Object) (*float32, erro
 }
 
 // GetShield: The shield value of this equipment.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaEquipmentPrototype) GetShield(quality *Object) (float32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39482,6 +39701,10 @@ type LuaForce struct{ Object }
 
 // AddChartTag: Adds a custom chart tag to the given surface and returns the
 // new tag or 'nil' if the given position isn't valid for a chart tag.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) AddChartTag(surface Object, tag ChartTagSpec) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39517,6 +39740,10 @@ func (o LuaForce) AddResearch(technology Value) (bool, error) {
 
 // CancelCharting: Cancels pending chart requests for the given surface or all
 // surfaces.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) CancelCharting(surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39540,6 +39767,10 @@ func (o LuaForce) CancelCurrentResearch() error {
 }
 
 // Chart: Chart a portion of the map.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) Chart(surface Object, area BoundingBox) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39553,6 +39784,10 @@ func (o LuaForce) Chart(surface Object, area BoundingBox) error {
 }
 
 // ChartAll: Chart all generated chunks.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) ChartAll(surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39568,6 +39803,10 @@ func (o LuaForce) ChartAll(surface *Object) error {
 }
 
 // ClearChart: Erases chart data for this force.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) ClearChart(surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39584,6 +39823,18 @@ func (o LuaForce) ClearChart(surface *Object) error {
 
 // CopyChart: Copies the given surface's chart from the given force to this
 // force.
+//
+// source_force is declared ForceID (string | uint8 | LuaForce). Only the
+// handle arm has a fixed layout, so this position carries only the LuaForce
+// handle.
+//
+// source_surface is declared SurfaceIdentification (uint32 | string |
+// LuaSurface). Only the handle arm has a fixed layout, so this position
+// carries only the LuaSurface handle.
+//
+// destination_surface is declared SurfaceIdentification (uint32 | string |
+// LuaSurface). Only the handle arm has a fixed layout, so this position
+// carries only the LuaSurface handle.
 func (o LuaForce) CopyChart(source_force Object, source_surface Object, destination_surface Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39599,6 +39850,9 @@ func (o LuaForce) CopyChart(source_force Object, source_surface Object, destinat
 
 // CopyFrom: Copies all of the given changeable values (except charts) from the
 // given force to this force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) CopyFrom(force Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39710,6 +39964,10 @@ func (o LuaForce) EnableResearch() error {
 
 // FindChartTags: Finds all custom chart tags within a given area on the given
 // surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) FindChartTags(surface Object, area *BoundingBox) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39736,6 +39994,10 @@ func (o LuaForce) FindChartTags(surface Object, area *BoundingBox) ([]Object, er
 
 // FindChartTagsInto: Finds all custom chart tags within a given area on the
 // given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 // FindChartTagsInto is FindChartTags writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -39769,6 +40031,10 @@ func (o LuaForce) FindChartTagsInto(dst []Object, surface Object, area *Bounding
 }
 
 // FindLogisticNetworkByPosition:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) FindLogisticNetworkByPosition(position MapPosition, surface Object) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39802,6 +40068,9 @@ func (o LuaForce) GetAmmoDamageModifier(ammo string) (float64, error) {
 }
 
 // GetCeaseFire: Is 'other' force in this force's cease fire list?
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) GetCeaseFire(other Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39816,6 +40085,10 @@ func (o LuaForce) GetCeaseFire(other Object) (bool, error) {
 }
 
 // GetChunkChart: Gets the raw chart data for a given chunk as a binary string.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetChunkChart(surface Object, chunk_position ChunkPosition) (*string, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39836,6 +40109,10 @@ func (o LuaForce) GetChunkChart(surface Object, chunk_position ChunkPosition) (*
 
 // GetEntityBuildCountStatistics: The entity build statistics for this force
 // (built and mined) for the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetEntityBuildCountStatistics(surface Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39865,6 +40142,10 @@ func (o LuaForce) GetEntityCount(name Value) (uint32, error) {
 
 // GetEvolutionFactor: Fetches the evolution factor of this force on the given
 // surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetEvolutionFactor(surface *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39883,6 +40164,10 @@ func (o LuaForce) GetEvolutionFactor(surface *Object) (float64, error) {
 
 // GetEvolutionFactorByKillingSpawners: Fetches the spawner kill part of the
 // evolution factor of this force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetEvolutionFactorByKillingSpawners(surface *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39901,6 +40186,10 @@ func (o LuaForce) GetEvolutionFactorByKillingSpawners(surface *Object) (float64,
 
 // GetEvolutionFactorByPollution: Fetches the pollution part of the evolution
 // factor of this force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetEvolutionFactorByPollution(surface *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39919,6 +40208,10 @@ func (o LuaForce) GetEvolutionFactorByPollution(surface *Object) (float64, error
 
 // GetEvolutionFactorByTime: Fetches the time part of the evolution factor of
 // this force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetEvolutionFactorByTime(surface *Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39937,6 +40230,10 @@ func (o LuaForce) GetEvolutionFactorByTime(surface *Object) (float64, error) {
 
 // GetFluidProductionStatistics: The fluid production statistics for this force
 // for the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetFluidProductionStatistics(surface Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -39951,6 +40248,9 @@ func (o LuaForce) GetFluidProductionStatistics(surface Object) (Object, error) {
 }
 
 // GetFriend: Is 'other' force in this force's friends list.
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) GetFriend(other Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40009,6 +40309,10 @@ func (o LuaForce) GetItemLaunched(item Value) (uint32, error) {
 
 // GetItemProductionStatistics: The item production statistics for this force
 // for the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetItemProductionStatistics(surface Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40024,6 +40328,10 @@ func (o LuaForce) GetItemProductionStatistics(surface Object) (Object, error) {
 
 // GetKillCountStatistics: The kill counter statistics for this force for the
 // given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetKillCountStatistics(surface Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40136,6 +40444,10 @@ func (o LuaForce) GetLogisticGroupsInto(dst []string, type_ *uint32) ([]string, 
 }
 
 // GetSpawnPosition:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetSpawnPosition(surface Object) (MapPosition, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40150,6 +40462,10 @@ func (o LuaForce) GetSpawnPosition(surface Object) (MapPosition, error) {
 }
 
 // GetSurfaceHidden:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) GetSurfaceHidden(surface Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40178,6 +40494,10 @@ func (o LuaForce) GetTurretAttackModifier(turret Value) (float64, error) {
 }
 
 // IsChunkCharted: Has a chunk been charted?
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) IsChunkCharted(surface Object, chunk_position ChunkPosition) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40193,6 +40513,10 @@ func (o LuaForce) IsChunkCharted(surface Object, chunk_position ChunkPosition) (
 }
 
 // IsChunkRequestedForCharting: Has a chunk been requested for charting?
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) IsChunkRequestedForCharting(surface Object, chunk_position ChunkPosition) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40209,6 +40533,10 @@ func (o LuaForce) IsChunkRequestedForCharting(surface Object, chunk_position Chu
 
 // IsChunkVisible: Is the given chunk currently charted and visible (not
 // covered by fog of war) on the map.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) IsChunkVisible(surface Object, chunk_position ChunkPosition) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40224,6 +40552,9 @@ func (o LuaForce) IsChunkVisible(surface Object, chunk_position ChunkPosition) (
 }
 
 // IsEnemy: Is this force an enemy?
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) IsEnemy(other Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40238,6 +40569,9 @@ func (o LuaForce) IsEnemy(other Object) (bool, error) {
 }
 
 // IsFriend: Is this force a friend?
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) IsFriend(other Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40264,6 +40598,10 @@ func (o LuaForce) IsPathfinderBusy() (bool, error) {
 }
 
 // IsQualityUnlocked: Is the specified quality unlocked for this force?
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaForce) IsQualityUnlocked(quality Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40276,6 +40614,10 @@ func (o LuaForce) IsQualityUnlocked(quality Object) error {
 }
 
 // IsSpaceLocationUnlocked: Is the specified planet unlocked for this force?
+//
+// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaSpaceLocationPrototype handle. Find one under the prototypes global.
 func (o LuaForce) IsSpaceLocationUnlocked(name Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40308,6 +40650,10 @@ func (o LuaForce) KillAllUnits() error {
 }
 
 // LockQuality: Locks the quality to not be accessible to this force.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaForce) LockQuality(quality Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40320,6 +40666,10 @@ func (o LuaForce) LockQuality(quality Object) error {
 }
 
 // LockSpaceLocation: Locks the planet to not be accessible to this force.
+//
+// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaSpaceLocationPrototype handle. Find one under the prototypes global.
 func (o LuaForce) LockSpaceLocation(name Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40369,6 +40719,10 @@ func (o LuaForce) Print(message Value, print_settings *PrintSettings) error {
 }
 
 // Rechart: Force a rechart of the whole chart.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) Rechart(surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40467,6 +40821,9 @@ func (o LuaForce) SetAmmoDamageModifier(ammo string, modifier float64) error {
 }
 
 // SetCeaseFire: Add 'other' force to this force's cease fire list.
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) SetCeaseFire(other Object, cease_fire bool) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40481,6 +40838,10 @@ func (o LuaForce) SetCeaseFire(other Object, cease_fire bool) error {
 
 // SetEvolutionFactor: Sets the evolution factor of this force on the given
 // surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetEvolutionFactor(factor float64, surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40498,6 +40859,10 @@ func (o LuaForce) SetEvolutionFactor(factor float64, surface *Object) error {
 
 // SetEvolutionFactorByKillingSpawners: Sets the spawner kill part of the
 // evolution factor of this force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetEvolutionFactorByKillingSpawners(factor float64, surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40515,6 +40880,10 @@ func (o LuaForce) SetEvolutionFactorByKillingSpawners(factor float64, surface *O
 
 // SetEvolutionFactorByPollution: Sets the pollution part of the evolution
 // factor of this force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetEvolutionFactorByPollution(factor float64, surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40532,6 +40901,10 @@ func (o LuaForce) SetEvolutionFactorByPollution(factor float64, surface *Object)
 
 // SetEvolutionFactorByTime: Sets the time part of the evolution factor of this
 // force on the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetEvolutionFactorByTime(factor float64, surface *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40548,6 +40921,9 @@ func (o LuaForce) SetEvolutionFactorByTime(factor float64, surface *Object) erro
 }
 
 // SetFriend: Add 'other' force to this force's friends list.
+//
+// other is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaForce) SetFriend(other Object, friend bool) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40601,6 +40977,10 @@ func (o LuaForce) SetItemLaunched(item Value, count uint32) error {
 }
 
 // SetSpawnPosition:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetSpawnPosition(position MapPosition, surface Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40614,6 +40994,10 @@ func (o LuaForce) SetSpawnPosition(position MapPosition, surface Object) error {
 }
 
 // SetSurfaceHidden:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) SetSurfaceHidden(surface Object, hidden bool) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40640,6 +41024,10 @@ func (o LuaForce) SetTurretAttackModifier(turret Value, modifier float64) error 
 }
 
 // UnchartChunk:
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaForce) UnchartChunk(chunk_position ChunkPosition, surface Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40653,6 +41041,10 @@ func (o LuaForce) UnchartChunk(chunk_position ChunkPosition, surface Object) err
 }
 
 // UnlockQuality: Unlocks the quality to be accessible to this force.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaForce) UnlockQuality(quality Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -40665,6 +41057,10 @@ func (o LuaForce) UnlockQuality(quality Object) error {
 }
 
 // UnlockSpaceLocation: Unlocks the planet to be accessible to this force.
+//
+// name is declared SpaceLocationID (LuaSpaceLocationPrototype | string). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaSpaceLocationPrototype handle. Find one under the prototypes global.
 func (o LuaForce) UnlockSpaceLocation(name Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43482,6 +43878,9 @@ func (o LuaGameScript) AutoSave(name *string) error {
 }
 
 // BanPlayer: Bans the given player from this multiplayer game.
+//
+// player is declared PlayerIdentification | string. Only the handle arm has a
+// fixed layout, so this position carries only the LuaPlayer handle.
 func (o LuaGameScript) BanPlayer(player Object, reason *string) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43593,6 +43992,10 @@ func (o LuaGameScript) CreateSurface(name string, settings *MapGenSettings) (Obj
 }
 
 // DeleteSurface: Deletes the given surface and all entities on it if possible.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaGameScript) DeleteSurface(surface Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43693,6 +44096,10 @@ func (o LuaGameScript) GetPlayer(player Value) (*Object, error) {
 }
 
 // GetPollutionStatistics: The pollution statistics for this the given surface.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaGameScript) GetPollutionStatistics(surface Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43831,6 +44238,10 @@ func (o LuaGameScript) IsMultiplayer() (bool, error) {
 }
 
 // KickPlayer: Kicks the given player from this multiplayer game.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaGameScript) KickPlayer(player Object, reason *string) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43847,6 +44258,12 @@ func (o LuaGameScript) KickPlayer(player Object, reason *string) error {
 }
 
 // MergeForces: Marks two forces to be merged together.
+//
+// source is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// destination is declared ForceID (string | uint8 | LuaForce). Only the handle
+// arm has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaGameScript) MergeForces(source Object, destination Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43860,6 +44277,10 @@ func (o LuaGameScript) MergeForces(source Object, destination Object) error {
 }
 
 // MutePlayer: Mutes the given player.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaGameScript) MutePlayer(player Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -43900,6 +44321,10 @@ func (o LuaGameScript) Print(message Value, print_settings *PrintSettings) error
 }
 
 // PurgePlayer: Purges the given players messages from the game.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaGameScript) PurgePlayer(player Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -44087,6 +44512,9 @@ func (o LuaGameScript) TakeTechnologyScreenshot(args LuaGameScriptTakeTechnology
 }
 
 // UnbanPlayer: Unbans the given player from this multiplayer game.
+//
+// player is declared PlayerIdentification | string. Only the handle arm has a
+// fixed layout, so this position carries only the LuaPlayer handle.
 func (o LuaGameScript) UnbanPlayer(player Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -44099,6 +44527,10 @@ func (o LuaGameScript) UnbanPlayer(player Object) error {
 }
 
 // UnmutePlayer: Unmutes the given player.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaGameScript) UnmutePlayer(player Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -48222,6 +48654,10 @@ func LuaGuiElementQualityBulk(objs []Object, dst []BulkOptObject) (int, error) {
 
 // SetQuality: The quality to be shown in the bottom left corner of this
 // sprite-button, or 'nil' to show nothing.
+//
+// value is declared QualityID (LuaQualityPrototype | string). Only the handle
+// arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaGuiElement) SetQuality(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -54022,6 +54458,10 @@ func (o LuaItemPrototype) GetCursorBoxType(selection_mode uint32) (*string, erro
 }
 
 // GetDurability: The durability of this tool item prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaItemPrototype) GetDurability(quality *Object) (*float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -54149,6 +54589,10 @@ func (o LuaItemPrototype) GetEntityTypeFilters(selection_mode uint32) ([]EntrySt
 }
 
 // GetInventorySizeBonus: The inventory size bonus for this armor prototype.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaItemPrototype) GetInventorySizeBonus(quality *Object) (*uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -54170,6 +54614,10 @@ func (o LuaItemPrototype) GetInventorySizeBonus(quality *Object) (*uint32, error
 }
 
 // GetModuleEffects: Effects of this module at the specified quality.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaItemPrototype) GetModuleEffects(quality *Object) (*ModuleEffects, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -54241,6 +54689,10 @@ func (o LuaItemPrototype) GetSelectionModeFlags(selection_mode uint32) ([]EntryS
 
 // GetSpoilTicks: The number of ticks before this item spoils, or '0' if it
 // does not spoil.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaItemPrototype) GetSpoilTicks(quality *Object) (uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -62025,6 +62477,10 @@ func LuaParticlePrototypeVerticalAccelerationBulk(objs []Object, dst []float32) 
 type LuaPermissionGroup struct{ Object }
 
 // AddPlayer: Adds the given player to this group.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaPermissionGroup) AddPlayer(player Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -62065,6 +62521,10 @@ func (o LuaPermissionGroup) Destroy() (bool, error) {
 }
 
 // RemovePlayer: Removes the given player from this group.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaPermissionGroup) RemovePlayer(player Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -62409,6 +62869,10 @@ func LuaPermissionGroupsValidBulk(objs []Object, dst []bool) (int, error) {
 type LuaPlanet struct{ Object }
 
 // AssociateSurface: Associates the given surface with this planet.
+//
+// surface is declared SurfaceIdentification (uint32 | string | LuaSurface).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaSurface handle.
 func (o LuaPlanet) AssociateSurface(surface Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -62434,6 +62898,9 @@ func (o LuaPlanet) CreateSurface() (Object, error) {
 
 // GetSpacePlatforms: Gets the built space platforms orbiting this planet on
 // the given force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaPlanet) GetSpacePlatforms(force Object) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -62456,6 +62923,9 @@ func (o LuaPlanet) GetSpacePlatforms(force Object) ([]Object, error) {
 
 // GetSpacePlatformsInto: Gets the built space platforms orbiting this planet
 // on the given force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 // GetSpacePlatformsInto is GetSpacePlatforms writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -63279,6 +63749,10 @@ func (o LuaPlayer) MuteAlert(alert_type uint32) (bool, error) {
 
 // Pipette: Invokes the "smart pipette" action on the player as if the user
 // pressed it.
+//
+// quality is declared QualityID (LuaQualityPrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaQualityPrototype handle. Find one under the prototypes global.
 func (o LuaPlayer) Pipette(id Value, quality *Object, allow_ghost *bool) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -63629,6 +64103,10 @@ func (o LuaPlayer) StartSelection(position MapPosition, selection_mode uint32) e
 
 // SwapCharacters: Swaps this player's character with another player's
 // character.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaPlayer) SwapCharacters(player Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -71857,6 +72335,10 @@ func LuaReactorControlBehaviorValidBulk(objs []Object, dst []bool) (int, error) 
 type LuaRecipe struct{ Object }
 
 // HasCategory: Checks if recipe has given category
+//
+// category is declared RecipeCategoryID (LuaRecipeCategoryPrototype | string).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaRecipeCategoryPrototype handle. Find one under the prototypes global.
 func (o LuaRecipe) HasCategory(category Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -72532,6 +73014,10 @@ func LuaRecipeCategoryPrototypeValidBulk(objs []Object, dst []bool) (int, error)
 type LuaRecipePrototype struct{ Object }
 
 // HasCategory: Checks if recipe has given category
+//
+// category is declared RecipeCategoryID (LuaRecipeCategoryPrototype | string).
+// Only the handle arm has a fixed layout, so this position carries only the
+// LuaRecipeCategoryPrototype handle. Find one under the prototypes global.
 func (o LuaRecipePrototype) HasCategory(category Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -73988,6 +74474,10 @@ func (o LuaRecord) ExportRecord() (string, error) {
 }
 
 // GetActiveIndex: The active index of this BlueprintBookRecord.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaRecord) GetActiveIndex(player Object) (uint32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -74205,6 +74695,10 @@ func (o LuaRecord) GetMapper(index uint32, type_ string) (Value, error) {
 
 // GetSelectedRecord: Gets the currently selected record of the book for the
 // given player.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaRecord) GetSelectedRecord(player Object) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -79128,6 +79622,13 @@ func (o LuaSegmentedUnit) Clone(args LuaSegmentedUnitCloneArgs) (*Object, error)
 }
 
 // Damage: Damages the unit.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// type_ is declared DamageTypeID (LuaDamagePrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaDamagePrototype handle. Find one under the prototypes global.
 func (o LuaSegmentedUnit) Damage(damage float32, force Object, type_ *Object, source *Object, cause *Object) (float32, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -79167,6 +79668,13 @@ func (o LuaSegmentedUnit) Destroy(args LuaSegmentedUnitDestroyArgs) error {
 }
 
 // Die: Immediately kills the unit.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// damage_type is declared DamageTypeID (LuaDamagePrototype | string). Only the
+// handle arm has a fixed layout, so this position carries only the
+// LuaDamagePrototype handle. Find one under the prototypes global.
 func (o LuaSegmentedUnit) Die(force *Object, cause *Object, damage_type *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -79394,6 +79902,9 @@ func LuaSegmentedUnitForceBulk(objs []Object, dst []Object) (int, error) {
 }
 
 // SetForce: The force that the unit belongs to.
+//
+// value is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSegmentedUnit) SetForce(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -79983,6 +80494,10 @@ type LuaSettings struct{ Object }
 
 // GetPlayerSettings: Gets the current per-player settings for the given
 // player, indexed by prototype name.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 // GetPlayerSettings is keyed by a UNION, so it comes back as an ordered slice of
 // pairs rather than a map. WHICH ARM OF THE UNION arrives is Lua's
 // choice, not this ABI's: the host walks the table with pairs(), and
@@ -80204,6 +80719,10 @@ func LuaSettingsStartupRawBulk(objs []Object, dst []Object) (int, error) {
 }
 
 // GetPlayerSettingsRaw:
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaSettings) GetPlayerSettingsRaw(player Object) (Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -80630,6 +81149,10 @@ func (o LuaSimulation) SetCameraAltInfo(value bool) error {
 }
 
 // SetCameraPlayer:
+//
+// value is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaSimulation) SetCameraPlayer(value Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -85963,6 +86486,9 @@ func (o LuaSurface) BuildCheckerboard(area BoundingBox) error {
 }
 
 // BuildEnemyBase: Send a group to build a new base.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) BuildEnemyBase(position MapPosition, unit_count uint32, force *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86614,6 +87140,10 @@ func (o LuaSurface) DeconstructArea(args LuaSurfaceDeconstructAreaArgs) error {
 
 // DecorativePrototypeCollides: Whether the given decorative prototype collides
 // at the given position and direction.
+//
+// prototype is declared DecorativeID (LuaDecorativePrototype | string). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaDecorativePrototype handle. Find one under the prototypes global.
 func (o LuaSurface) DecorativePrototypeCollides(prototype Object, position MapPosition) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86722,6 +87252,9 @@ func (o LuaSurface) ExecuteLightning(args LuaSurfaceExecuteLightningArgs) error 
 
 // FindClosestLogisticNetworkByPosition: Find the logistic network with a cell
 // closest to a given position.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) FindClosestLogisticNetworkByPosition(position MapPosition, force Object) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86793,6 +87326,9 @@ func (o LuaSurface) FindDecorativesFilteredInto(dst []DecorativeResult, args Lua
 
 // FindEnemyUnits: Find enemy units (entities with type "unit") of a given
 // force within an area.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) FindEnemyUnits(center MapPosition, radius float64, force *Object) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -86820,6 +87356,9 @@ func (o LuaSurface) FindEnemyUnits(center MapPosition, radius float64, force *Ob
 
 // FindEnemyUnitsInto: Find enemy units (entities with type "unit") of a given
 // force within an area.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 // FindEnemyUnitsInto is FindEnemyUnits writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -86982,6 +87521,9 @@ func (o LuaSurface) FindEntity(entity Value, position MapPosition) (*Object, err
 
 // FindLogisticNetworkByPosition: Find the logistic network that covers a given
 // position.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) FindLogisticNetworkByPosition(position MapPosition, force Object) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -87002,6 +87544,9 @@ func (o LuaSurface) FindLogisticNetworkByPosition(position MapPosition, force Ob
 
 // FindLogisticNetworksByConstructionArea: Finds all of the logistics networks
 // whose construction area intersects with the given position.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) FindLogisticNetworksByConstructionArea(position MapPosition, force Object) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -87025,6 +87570,9 @@ func (o LuaSurface) FindLogisticNetworksByConstructionArea(position MapPosition,
 
 // FindLogisticNetworksByConstructionAreaInto: Finds all of the logistics
 // networks whose construction area intersects with the given position.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 // FindLogisticNetworksByConstructionAreaInto is FindLogisticNetworksByConstructionArea writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -87374,6 +87922,9 @@ func (o LuaSurface) GetConnectedTilesInto(dst []TilePosition, position TilePosit
 
 // GetDefaultCoverTile: Gets the cover tile for the given force and tile on
 // this surface if one is set.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) GetDefaultCoverTile(force Object, tile Value) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -87409,6 +87960,9 @@ func (o LuaSurface) GetDoubleHiddenTile(position TilePosition) (string, error) {
 
 // GetEntitiesWithForce: Returns all the military targets (entities with force)
 // on this chunk for the given force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) GetEntitiesWithForce(chunk_position ChunkPosition, force Object) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -87432,6 +87986,9 @@ func (o LuaSurface) GetEntitiesWithForce(chunk_position ChunkPosition, force Obj
 
 // GetEntitiesWithForceInto: Returns all the military targets (entities with
 // force) on this chunk for the given force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 // GetEntitiesWithForceInto is GetEntitiesWithForce writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -87507,6 +88064,11 @@ func (o LuaSurface) GetPollution(position MapPosition) (float64, error) {
 }
 
 // GetProperty: Gets the value of surface property on this surface.
+//
+// property is declared SurfacePropertyID (LuaSurfacePropertyPrototype |
+// string). Only the handle arm has a fixed layout, so this position carries
+// only the LuaSurfacePropertyPrototype handle. Find one under the prototypes
+// global.
 func (o LuaSurface) GetProperty(property Object) (float64, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -88052,6 +88614,9 @@ func (o LuaSurface) SetChunkGeneratedStatus(chunk_position ChunkPosition, status
 
 // SetDefaultCoverTile: Sets the cover tile for the given force and tile on
 // this surface.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaSurface) SetDefaultCoverTile(force Object, from_tile Value, to_tile Value) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -88125,6 +88690,11 @@ func (o LuaSurface) SetPollution(position MapPosition, amount float64) error {
 }
 
 // SetProperty: Sets the value of surface property on this surface.
+//
+// property is declared SurfacePropertyID (LuaSurfacePropertyPrototype |
+// string). Only the handle arm has a fixed layout, so this position carries
+// only the LuaSurfacePropertyPrototype handle. Find one under the prototypes
+// global.
 func (o LuaSurface) SetProperty(property Object, value float64) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -88161,6 +88731,10 @@ func (o LuaSurface) SetTerritoryForChunks(chunk_positions []ChunkPosition, terri
 }
 
 // SetTiles: Set tiles at specified locations.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaSurface) SetTiles(tiles []Tile, correct_tiles *bool, remove_colliding_entities *Value, remove_colliding_decoratives *bool, raise_event *bool, player *Object, undo_index *uint32) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -91319,6 +91893,13 @@ type LuaTile struct{ Object }
 
 // CancelDeconstruction: Cancels deconstruction if it is scheduled, does
 // nothing otherwise.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaTile) CancelDeconstruction(force Object, player *Object) error {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -91349,6 +91930,9 @@ func (o LuaTile) CollidesWith(layer string) (bool, error) {
 }
 
 // GetTileGhosts: Gets all tile ghosts on this tile.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaTile) GetTileGhosts(force *Object) ([]Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -91373,6 +91957,9 @@ func (o LuaTile) GetTileGhosts(force *Object) ([]Object, error) {
 }
 
 // GetTileGhostsInto: Gets all tile ghosts on this tile.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 // GetTileGhostsInto is GetTileGhosts writing into dst, reusing its capacity rather than
 // allocating. The returned slice aliases dst when it fit; otherwise a
 // new one is allocated and dst is untouched, so ALWAYS use the return
@@ -91405,6 +91992,9 @@ func (o LuaTile) GetTileGhostsInto(dst []Object, force *Object) ([]Object, error
 }
 
 // HasTileGhost: Does this tile have any tile ghosts on it.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaTile) HasTileGhost(force *Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -91422,6 +92012,13 @@ func (o LuaTile) HasTileGhost(force *Object) (bool, error) {
 }
 
 // OrderDeconstruction: Orders deconstruction of this tile by the given force.
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
+//
+// player is declared PlayerIdentification (uint32 | string | LuaPlayer). Only
+// the handle arm has a fixed layout, so this position carries only the
+// LuaPlayer handle.
 func (o LuaTile) OrderDeconstruction(force Object, player *Object) (*Object, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -91444,6 +92041,9 @@ func (o LuaTile) OrderDeconstruction(force Object, player *Object) (*Object, err
 }
 
 // ToBeDeconstructed: Is this tile marked for deconstruction?
+//
+// force is declared ForceID (string | uint8 | LuaForce). Only the handle arm
+// has a fixed layout, so this position carries only the LuaForce handle.
 func (o LuaTile) ToBeDeconstructed(force *Object) (bool, error) {
 	mark := allocMark()
 	defer allocRelease(mark)
@@ -103542,8 +104142,11 @@ func valCtnSliceEntryStringString(v []EntryStringString) Value {
 // SignalID mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type SignalID struct {
-	Type    *string
-	Name    *string
+	Type *string
+	Name *string
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality *Object
 }
 
@@ -104644,7 +105247,10 @@ func (v LuaBootstrapLevelResult) ToValue() Value {
 // ItemIDAndQualityIDPair mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type ItemIDAndQualityIDPair struct {
-	Name    Value
+	Name Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality *Object
 }
 
@@ -106332,8 +106938,11 @@ func (v MarketIngredient) ToValue() Value {
 // LuaEntityCloneArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaEntityCloneArgs struct {
-	Position               MapPosition
-	Surface                *Object
+	Position MapPosition
+	Surface  *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force                  *Object
 	CreateBuildEffectSmoke *bool
 }
@@ -106438,8 +107047,11 @@ func (v ItemWithQualityCount) ToValue() Value {
 type LuaEntityDestroyArgs struct {
 	DoCliffCorrection *bool
 	RaiseDestroy      *bool
-	Player            *Object
-	UndoIndex         *uint32
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	Player    *Object
+	UndoIndex *uint32
 }
 
 func (v LuaEntityDestroyArgs) encodeAt(p *byte) {
@@ -106690,7 +107302,10 @@ func (v HeatSetting) ToValue() Value {
 // InfinityInventoryFilter mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type InfinityInventoryFilter struct {
-	Name    Value
+	Name Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality *Object
 	Count   *uint32
 	Mode    *string
@@ -106838,10 +107453,13 @@ type CargoDestination struct {
 	Station                 *Object
 	Hatch                   *Object
 	TransformLaunchProducts *bool
-	Surface                 *Object
-	Position                *MapPosition
-	LandAtExactPosition     *bool
-	SpacePlatform           *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface             *Object
+	Position            *MapPosition
+	LandAtExactPosition *bool
+	SpacePlatform       *Object
 }
 
 func (v CargoDestination) encodeAt(p *byte) {
@@ -107022,8 +107640,14 @@ func (v LuaEntityMineArgs) ToValue() Value {
 // LuaEntityOrderUpgradeArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaEntityOrderUpgradeArgs struct {
-	Target    Value
-	Force     Object
+	Target Value
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player    *Object
 	UndoIndex *uint32
 }
@@ -107200,7 +107824,10 @@ func (v LuaEntityReviveArgs) ToValue() Value {
 // LuaEntityRotateArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaEntityRotateArgs struct {
-	Reverse  *bool
+	Reverse *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	ByPlayer *Object
 }
 
@@ -107913,7 +108540,10 @@ func (v ProgrammableSpeakerParameters) ToValue() Value {
 // RecipeIDAndQualityIDPair mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type RecipeIDAndQualityIDPair struct {
-	Name    Value
+	Name Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality Object
 }
 
@@ -109726,9 +110356,15 @@ func (v LuaEquipmentGridMoveArgs) ToValue() Value {
 // LuaEquipmentGridPutArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaEquipmentGridPutArgs struct {
-	Name     Value
+	Name Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality  *Object
 	Position *EquipmentPosition
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	ByPlayer *Object
 	Ghost    *bool
 }
@@ -109806,7 +110442,10 @@ func (v LuaEquipmentGridPutArgs) ToValue() Value {
 type LuaEquipmentGridTakeArgs struct {
 	Position  *EquipmentPosition
 	Equipment *Object
-	ByPlayer  *Object
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer *Object
 }
 
 func (v LuaEquipmentGridTakeArgs) encodeAt(p *byte) {
@@ -110382,6 +111021,9 @@ type ChartTagSpec struct {
 	Position MapPosition
 	Icon     *SignalID
 	Text     *string
+	// LastUser is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	LastUser *Object
 }
 
@@ -110445,7 +111087,11 @@ func (v ChartTagSpec) ToValue() Value {
 // LuaForceCreateSpacePlatformArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaForceCreateSpacePlatformArgs struct {
-	Name        *string
+	Name *string
+	// Planet is declared SpaceLocationID (LuaSpaceLocationPrototype | string).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaSpaceLocationPrototype handle. Find one under the prototypes
+	// global.
 	Planet      Object
 	StarterPack Value
 }
@@ -110603,7 +111249,11 @@ type LogisticFilter struct {
 	Min                  *int32
 	Max                  *uint32
 	MinimumDeliveryCount *uint32
-	ImportFrom           *Object
+	// ImportFrom is declared SpaceLocationID (LuaSpaceLocationPrototype |
+	// string). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSpaceLocationPrototype handle. Find one under the
+	// prototypes global.
+	ImportFrom *Object
 }
 
 func (v LogisticFilter) encodeAt(p *byte) {
@@ -111320,8 +111970,14 @@ func (v TerritorySettings) ToValue() Value {
 // LuaGameScriptGetVehiclesArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaGameScriptGetVehiclesArgs struct {
-	UnitNumber   *uint32
-	Force        *Object
+	UnitNumber *uint32
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface      *Object
 	Type         *Value
 	IsMoving     *bool
@@ -111760,8 +112416,17 @@ func (v LuaGameScriptShowMessageDialogArgs) ToValue() Value {
 // LuaGameScriptTakeScreenshotArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaGameScriptTakeScreenshotArgs struct {
-	Player                    *Object
-	ByPlayer                  *Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	Player *Object
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface                   *Object
 	Position                  *MapPosition
 	Resolution                *TilePosition
@@ -112002,7 +112667,10 @@ func (v LuaGameScriptTakeScreenshotArgs) ToValue() Value {
 // LuaGameScriptTakeTechnologyScreenshotArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaGameScriptTakeTechnologyScreenshotArgs struct {
-	Path               *string
+	Path *string
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player             Object
 	SelectedTechnology *Value
 	SkipDisabled       *bool
@@ -113395,14 +114063,23 @@ func (v MapDifficultySettings) ToValue() Value {
 // LuaItemCommonBuildBlueprintArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaItemCommonBuildBlueprintArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Position     MapPosition
 	Direction    *uint32
 	BuildMode    *uint32
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	RaiseBuilt   *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer   *Object
+	RaiseBuilt *bool
 }
 
 func (v LuaItemCommonBuildBlueprintArgs) encodeAt(p *byte) {
@@ -113493,12 +114170,21 @@ func (v LuaItemCommonBuildBlueprintArgs) ToValue() Value {
 // LuaItemCommonCancelDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaItemCommonCancelDeconstructAreaArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Area         BoundingBox
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	SuperForced  *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer    *Object
+	SuperForced *bool
 }
 
 func (v LuaItemCommonCancelDeconstructAreaArgs) encodeAt(p *byte) {
@@ -113567,7 +114253,13 @@ func (v LuaItemCommonCancelDeconstructAreaArgs) ToValue() Value {
 // LuaItemCommonCreateBlueprintArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaItemCommonCreateBlueprintArgs struct {
-	Surface             Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force               Object
 	Area                BoundingBox
 	AlwaysIncludeTiles  *bool
@@ -113677,12 +114369,21 @@ func (v LuaItemCommonCreateBlueprintArgs) ToValue() Value {
 // LuaItemCommonDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaItemCommonDeconstructAreaArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Area         BoundingBox
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	SuperForced  *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer    *Object
+	SuperForced *bool
 }
 
 func (v LuaItemCommonDeconstructAreaArgs) encodeAt(p *byte) {
@@ -114933,9 +115634,15 @@ type LuaPlayerAddPinArgs struct {
 	PreviewDistance *uint16
 	AlwaysVisible   *bool
 	Entity          *Object
-	Player          *Object
-	Surface         *Object
-	Position        *MapPosition
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	Player *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface  *Object
+	Position *MapPosition
 }
 
 func (v LuaPlayerAddPinArgs) encodeAt(p *byte) {
@@ -115321,8 +116028,11 @@ func (v LuaPlayerConnectToServerArgs) ToValue() Value {
 // LuaPlayerCreateLocalFlyingTextArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaPlayerCreateLocalFlyingTextArgs struct {
-	Text           Value
-	Position       *MapPosition
+	Text     Value
+	Position *MapPosition
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface        *Object
 	CreateAtCursor *bool
 	Color          *Color
@@ -115457,7 +116167,10 @@ type LuaPlayerGetAlertsArgs struct {
 	Prototype *Object
 	Position  *MapPosition
 	Type      *uint32
-	Surface   *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface *Object
 }
 
 func (v LuaPlayerGetAlertsArgs) encodeAt(p *byte) {
@@ -115633,9 +116346,12 @@ type LuaPlayerRemoveAlertArgs struct {
 	Prototype *Value
 	Position  *MapPosition
 	Type      *uint32
-	Surface   *Object
-	Icon      *SignalID
-	Message   *Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface *Object
+	Icon    *SignalID
+	Message *Value
 }
 
 func (v LuaPlayerRemoveAlertArgs) encodeAt(p *byte) {
@@ -115747,7 +116463,10 @@ type LuaPlayerSetControllerArgs struct {
 	FinalTransitionTime *uint32
 	ChartModeCutoff     *float64
 	Position            *MapPosition
-	Surface             *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface *Object
 }
 
 func (v LuaPlayerSetControllerArgs) encodeAt(p *byte) {
@@ -116851,14 +117570,23 @@ func (v RailLocation) ToValue() Value {
 // LuaRecordBuildBlueprintArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRecordBuildBlueprintArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Position     MapPosition
 	Direction    *uint32
 	BuildMode    *uint32
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	RaiseBuilt   *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer   *Object
+	RaiseBuilt *bool
 }
 
 func (v LuaRecordBuildBlueprintArgs) encodeAt(p *byte) {
@@ -116949,12 +117677,21 @@ func (v LuaRecordBuildBlueprintArgs) ToValue() Value {
 // LuaRecordCancelDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRecordCancelDeconstructAreaArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Area         BoundingBox
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	SuperForced  *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer    *Object
+	SuperForced *bool
 }
 
 func (v LuaRecordCancelDeconstructAreaArgs) encodeAt(p *byte) {
@@ -117023,7 +117760,13 @@ func (v LuaRecordCancelDeconstructAreaArgs) ToValue() Value {
 // LuaRecordCreateBlueprintArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRecordCreateBlueprintArgs struct {
-	Surface             Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force               Object
 	Area                BoundingBox
 	AlwaysIncludeTiles  *bool
@@ -117133,12 +117876,21 @@ func (v LuaRecordCreateBlueprintArgs) ToValue() Value {
 // LuaRecordDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRecordDeconstructAreaArgs struct {
-	Surface      Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        Object
 	Area         BoundingBox
 	SkipFogOfWar *bool
-	ByPlayer     *Object
-	SuperForced  *bool
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer    *Object
+	SuperForced *bool
 }
 
 func (v LuaRecordDeconstructAreaArgs) encodeAt(p *byte) {
@@ -117219,14 +117971,17 @@ type LuaRenderingDrawAnimationArgs struct {
 	UseTargetOrientation *bool
 	OrientedOffset       *Vector
 	Target               Value
-	Surface              Object
-	TimeToLive           *uint32
-	BlinkInterval        *uint16
-	Forces               *Value
-	Players              []Object
-	Visible              *bool
-	OnlyInAltMode        *bool
-	RenderMode           *string
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface       Object
+	TimeToLive    *uint32
+	BlinkInterval *uint16
+	Forces        *Value
+	Players       []Object
+	Visible       *bool
+	OnlyInAltMode *bool
+	RenderMode    *string
 }
 
 func (v LuaRenderingDrawAnimationArgs) encodeAt(p *byte) {
@@ -117466,12 +118221,15 @@ func (v LuaRenderingDrawAnimationArgs) ToValue() Value {
 // LuaRenderingDrawArcArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRenderingDrawArcArgs struct {
-	Color         Color
-	MaxRadius     float64
-	MinRadius     float64
-	StartAngle    float32
-	Angle         float32
-	Target        Value
+	Color      Color
+	MaxRadius  float64
+	MinRadius  float64
+	StartAngle float32
+	Angle      float32
+	Target     Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface       Object
 	TimeToLive    *uint32
 	BlinkInterval *uint16
@@ -117633,11 +118391,14 @@ func (v LuaRenderingDrawArcArgs) ToValue() Value {
 // LuaRenderingDrawCircleArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRenderingDrawCircleArgs struct {
-	Color         Color
-	Radius        float64
-	Width         *float32
-	Filled        *bool
-	Target        Value
+	Color  Color
+	Radius float64
+	Width  *float32
+	Filled *bool
+	Target Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface       Object
 	TimeToLive    *uint32
 	BlinkInterval *uint16
@@ -117820,14 +118581,17 @@ type LuaRenderingDrawLightArgs struct {
 	Oriented        *bool
 	Color           *Color
 	Target          Value
-	Surface         Object
-	TimeToLive      *uint32
-	BlinkInterval   *uint16
-	Forces          *Value
-	Players         []Object
-	Visible         *bool
-	OnlyInAltMode   *bool
-	RenderMode      *string
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface       Object
+	TimeToLive    *uint32
+	BlinkInterval *uint16
+	Forces        *Value
+	Players       []Object
+	Visible       *bool
+	OnlyInAltMode *bool
+	RenderMode    *string
 }
 
 func (v LuaRenderingDrawLightArgs) encodeAt(p *byte) {
@@ -118023,13 +118787,16 @@ func (v LuaRenderingDrawLightArgs) ToValue() Value {
 // LuaRenderingDrawLineArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRenderingDrawLineArgs struct {
-	Color         Color
-	Width         float32
-	GapLength     *float64
-	DashLength    *float64
-	DashOffset    *float64
-	From          Value
-	To            Value
+	Color      Color
+	Width      float32
+	GapLength  *float64
+	DashLength *float64
+	DashOffset *float64
+	From       Value
+	To         Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface       Object
 	TimeToLive    *uint32
 	BlinkInterval *uint16
@@ -118224,15 +118991,18 @@ type LuaRenderingDrawPolygonArgs struct {
 	Orientation          *float32
 	OrientationTarget    *Value
 	UseTargetOrientation *bool
-	Surface              Object
-	TimeToLive           *uint32
-	BlinkInterval        *uint16
-	Forces               *Value
-	Players              []Object
-	Visible              *bool
-	DrawOnGround         *bool
-	OnlyInAltMode        *bool
-	RenderMode           *string
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface       Object
+	TimeToLive    *uint32
+	BlinkInterval *uint16
+	Forces        *Value
+	Players       []Object
+	Visible       *bool
+	DrawOnGround  *bool
+	OnlyInAltMode *bool
+	RenderMode    *string
 }
 
 func (v LuaRenderingDrawPolygonArgs) encodeAt(p *byte) {
@@ -118437,11 +119207,14 @@ func (v LuaRenderingDrawPolygonArgs) ToValue() Value {
 // LuaRenderingDrawRectangleArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRenderingDrawRectangleArgs struct {
-	Color         Color
-	Width         *float32
-	Filled        *bool
-	LeftTop       Value
-	RightBottom   Value
+	Color       Color
+	Width       *float32
+	Filled      *bool
+	LeftTop     Value
+	RightBottom Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface       Object
 	TimeToLive    *uint32
 	BlinkInterval *uint16
@@ -118626,14 +119399,17 @@ type LuaRenderingDrawSpriteArgs struct {
 	UseTargetOrientation *bool
 	OrientedOffset       *Vector
 	Target               Value
-	Surface              Object
-	TimeToLive           *uint32
-	BlinkInterval        *uint16
-	Forces               *Value
-	Players              []Object
-	Visible              *bool
-	OnlyInAltMode        *bool
-	RenderMode           *string
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface       Object
+	TimeToLive    *uint32
+	BlinkInterval *uint16
+	Forces        *Value
+	Players       []Object
+	Visible       *bool
+	OnlyInAltMode *bool
+	RenderMode    *string
 }
 
 func (v LuaRenderingDrawSpriteArgs) encodeAt(p *byte) {
@@ -118851,7 +119627,10 @@ func (v LuaRenderingDrawSpriteArgs) ToValue() Value {
 // LuaRenderingDrawTextArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaRenderingDrawTextArgs struct {
-	Text              Value
+	Text Value
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
 	Surface           Object
 	Target            Value
 	Color             Color
@@ -119616,8 +120395,11 @@ func (v ScheduleRecordPosition) ToValue() Value {
 // LuaSegmentedUnitCloneArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSegmentedUnitCloneArgs struct {
-	Position  MapPosition
-	Surface   *Object
+	Position MapPosition
+	Surface  *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force     *Object
 	Territory *Object
 }
@@ -120713,7 +121495,10 @@ type LuaSurfaceCanFastReplaceArgs struct {
 	Name      Value
 	Position  MapPosition
 	Direction *uint32
-	Force     *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force *Object
 }
 
 func (v LuaSurfaceCanFastReplaceArgs) encodeAt(p *byte) {
@@ -120768,9 +121553,12 @@ func (v LuaSurfaceCanFastReplaceArgs) ToValue() Value {
 // LuaSurfaceCanPlaceEntityArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCanPlaceEntityArgs struct {
-	Name           Value
-	Position       MapPosition
-	Direction      *uint32
+	Name      Value
+	Position  MapPosition
+	Direction *uint32
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force          *Object
 	BuildCheckType *uint32
 	Forced         *bool
@@ -120862,8 +121650,14 @@ func (v LuaSurfaceCanPlaceEntityArgs) ToValue() Value {
 // LuaSurfaceCancelDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCancelDeconstructAreaArgs struct {
-	Area         BoundingBox
-	Force        Object
+	Area BoundingBox
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player       *Object
 	SkipFogOfWar *bool
 	Item         *Object
@@ -120956,8 +121750,14 @@ func (v LuaSurfaceCancelDeconstructAreaArgs) ToValue() Value {
 // LuaSurfaceCancelUpgradeAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCancelUpgradeAreaArgs struct {
-	Area         BoundingBox
-	Force        Object
+	Area BoundingBox
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player       *Object
 	SkipFogOfWar *bool
 	Item         Object
@@ -121018,9 +121818,15 @@ func (v LuaSurfaceCancelUpgradeAreaArgs) ToValue() Value {
 // LuaSurfaceCloneAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCloneAreaArgs struct {
-	SourceArea                  BoundingBox
-	DestinationArea             BoundingBox
-	DestinationSurface          *Object
+	SourceArea      BoundingBox
+	DestinationArea BoundingBox
+	// DestinationSurface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	DestinationSurface *Object
+	// DestinationForce is declared ForceID (string | uint8 | LuaForce). Only
+	// the handle arm has a fixed layout, so this position carries only the
+	// LuaForce handle.
 	DestinationForce            *Object
 	CloneTiles                  *bool
 	CloneEntities               *bool
@@ -121160,10 +121966,15 @@ func (v LuaSurfaceCloneAreaArgs) ToValue() Value {
 // LuaSurfaceCloneBrushArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCloneBrushArgs struct {
-	SourceOffset                TilePosition
-	DestinationOffset           TilePosition
-	SourcePositions             []TilePosition
-	DestinationSurface          *Object
+	SourceOffset      TilePosition
+	DestinationOffset TilePosition
+	SourcePositions   []TilePosition
+	// DestinationSurface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	DestinationSurface *Object
+	// DestinationForce is declared LuaForce | string. Only the handle arm has
+	// a fixed layout, so this position carries only the LuaForce handle.
 	DestinationForce            *Object
 	CloneTiles                  *bool
 	CloneEntities               *bool
@@ -121338,9 +122149,15 @@ func (v LuaSurfaceCloneBrushArgs) ToValue() Value {
 // LuaSurfaceCloneEntitiesArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCloneEntitiesArgs struct {
-	Entities               []Object
-	DestinationOffset      Vector
-	DestinationSurface     *Object
+	Entities          []Object
+	DestinationOffset Vector
+	// DestinationSurface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	DestinationSurface *Object
+	// DestinationForce is declared ForceID (string | uint8 | LuaForce). Only
+	// the handle arm has a fixed layout, so this position carries only the
+	// LuaForce handle.
 	DestinationForce       *Object
 	SnapToGrid             *bool
 	CreateBuildEffectSmoke *bool
@@ -121940,13 +122757,19 @@ func (v Decorative) ToValue() Value {
 // LuaSurfaceCreateEntitiesFromBlueprintStringArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCreateEntitiesFromBlueprintStringArgs struct {
-	String         string
-	Position       MapPosition
+	String   string
+	Position MapPosition
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force          *Object
 	Direction      *uint32
 	FlipHorizontal *bool
 	FlipVertical   *bool
-	ByPlayer       *Object
+	// ByPlayer is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
+	ByPlayer *Object
 }
 
 func (v LuaSurfaceCreateEntitiesFromBlueprintStringArgs) encodeAt(p *byte) {
@@ -122140,18 +122963,31 @@ func (v LuaSurfaceCreateEntitiesFromBlueprintStringArgs) ToValue() Value {
 //	valve: valve_threshold_override
 //	wall: control_behavior
 type LuaSurfaceCreateEntityArgs struct {
-	Name                     Value
-	Position                 MapPosition
-	Direction                *uint32
-	Mirror                   *bool
-	Quality                  *Object
-	Force                    *Object
-	Target                   *Value
-	Source                   *Value
-	Cause                    *Value
-	SnapToGrid               *bool
-	FastReplace              *bool
-	UndoIndex                *uint32
+	Name      Value
+	Position  MapPosition
+	Direction *uint32
+	Mirror    *bool
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global. The
+	// plain form of this member takes the whole table as tier 2, where any arm
+	// goes.
+	Quality *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle. The plain form of this member takes the whole table as tier 2,
+	// where any arm goes.
+	Force       *Object
+	Target      *Value
+	Source      *Value
+	Cause       *Value
+	SnapToGrid  *bool
+	FastReplace *bool
+	UndoIndex   *uint32
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle. The plain form of this member takes the whole
+	// table as tier 2, where any arm goes.
 	Player                   *Object
 	Character                *Object
 	Spill                    *bool
@@ -122493,8 +123329,11 @@ func (v BlueprintInventoryWithFilters) ToValue() Value {
 // BlueprintItemFilter mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type BlueprintItemFilter struct {
-	Index      uint32
-	Name       *Value
+	Index uint32
+	Name  *Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global.
 	Quality    *Object
 	Comparator *string
 }
@@ -122559,6 +123398,9 @@ func (v BlueprintItemFilter) ToValue() Value {
 // LuaSurfaceCreateParticleArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCreateParticleArgs struct {
+	// Name is declared ParticleID (LuaParticlePrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaParticlePrototype handle. Find one under the prototypes global.
 	Name          Object
 	Position      MapPosition
 	Movement      Vector
@@ -122617,8 +123459,17 @@ func (v LuaSurfaceCreateParticleArgs) ToValue() Value {
 //	body-nodes: body_nodes (required)
 //	position-and-direction: position (required), direction, extended
 type LuaSurfaceCreateSegmentedUnitArgs struct {
-	Name      Value
-	Quality   *Object
+	Name Value
+	// Quality is declared QualityID (LuaQualityPrototype | string). Only the
+	// handle arm has a fixed layout, so this position carries only the
+	// LuaQualityPrototype handle. Find one under the prototypes global. The
+	// plain form of this member takes the whole table as tier 2, where any arm
+	// goes.
+	Quality *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle. The plain form of this member takes the whole table as tier 2,
+	// where any arm goes.
 	Force     *Object
 	Territory *Object
 }
@@ -122762,6 +123613,10 @@ func (v LuaSurfaceCreateTerritoryArgs) ToValue() Value {
 // LuaSurfaceCreateTrivialSmokeArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCreateTrivialSmokeArgs struct {
+	// Name is declared TrivialSmokeID (LuaTrivialSmokePrototype | string).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaTrivialSmokePrototype handle. Find one under the prototypes
+	// global.
 	Name     Object
 	Position MapPosition
 }
@@ -122797,7 +123652,10 @@ func (v LuaSurfaceCreateTrivialSmokeArgs) ToValue() Value {
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceCreateUnitGroupArgs struct {
 	Position MapPosition
-	Force    *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force *Object
 }
 
 func (v LuaSurfaceCreateUnitGroupArgs) encodeAt(p *byte) {
@@ -122838,8 +123696,14 @@ func (v LuaSurfaceCreateUnitGroupArgs) ToValue() Value {
 // LuaSurfaceDeconstructAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceDeconstructAreaArgs struct {
-	Area         BoundingBox
-	Force        Object
+	Area BoundingBox
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player       *Object
 	SkipFogOfWar *bool
 	Item         *Object
@@ -123262,7 +124126,10 @@ func (v DecorativeResult) ToValue() Value {
 type LuaSurfaceFindNearestEnemyArgs struct {
 	Position    MapPosition
 	MaxDistance float64
-	Force       *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force *Object
 }
 
 func (v LuaSurfaceFindNearestEnemyArgs) encodeAt(p *byte) {
@@ -123308,7 +124175,10 @@ func (v LuaSurfaceFindNearestEnemyArgs) ToValue() Value {
 type LuaSurfaceFindNearestEnemyEntityWithOwnerArgs struct {
 	Position    MapPosition
 	MaxDistance float64
-	Force       *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force *Object
 }
 
 func (v LuaSurfaceFindNearestEnemyEntityWithOwnerArgs) encodeAt(p *byte) {
@@ -123352,7 +124222,10 @@ func (v LuaSurfaceFindNearestEnemyEntityWithOwnerArgs) ToValue() Value {
 // LuaSurfaceFindUnitsArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceFindUnitsArgs struct {
-	Area      BoundingBox
+	Area BoundingBox
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force     Object
 	Condition string
 }
@@ -123390,10 +124263,13 @@ func (v LuaSurfaceFindUnitsArgs) ToValue() Value {
 // LuaSurfaceRequestPathArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceRequestPathArgs struct {
-	BoundingBox            BoundingBox
-	CollisionMask          CollisionMask
-	Start                  MapPosition
-	Goal                   MapPosition
+	BoundingBox   BoundingBox
+	CollisionMask CollisionMask
+	Start         MapPosition
+	Goal          MapPosition
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force                  Object
 	Radius                 *float64
 	PathfindFlags          *PathfinderFlags
@@ -123618,8 +124494,11 @@ func (v PathfinderFlags) ToValue() Value {
 // LuaSurfaceSetMultiCommandArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceSetMultiCommandArgs struct {
-	Command            Value
-	UnitCount          uint32
+	Command   Value
+	UnitCount uint32
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force              *Object
 	UnitSearchDistance *uint32
 }
@@ -123676,9 +124555,12 @@ func (v LuaSurfaceSetMultiCommandArgs) ToValue() Value {
 // LuaSurfaceSpillInventoryArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceSpillInventoryArgs struct {
-	Position                  MapPosition
-	Inventory                 Object
-	EnableLooted              *bool
+	Position     MapPosition
+	Inventory    Object
+	EnableLooted *bool
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force                     *Object
 	AllowBelts                *bool
 	MaxRadius                 *float64
@@ -123782,9 +124664,12 @@ func (v LuaSurfaceSpillInventoryArgs) ToValue() Value {
 // LuaSurfaceSpillItemStackArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceSpillItemStackArgs struct {
-	Position                  MapPosition
-	Stack                     Value
-	EnableLooted              *bool
+	Position     MapPosition
+	Stack        Value
+	EnableLooted *bool
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force                     *Object
 	AllowBelts                *bool
 	MaxRadius                 *float64
@@ -123888,8 +124773,14 @@ func (v LuaSurfaceSpillItemStackArgs) ToValue() Value {
 // LuaSurfaceUpgradeAreaArgs mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type LuaSurfaceUpgradeAreaArgs struct {
-	Area         BoundingBox
-	Force        Object
+	Area BoundingBox
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
+	Force Object
+	// Player is declared PlayerIdentification (uint32 | string | LuaPlayer).
+	// Only the handle arm has a fixed layout, so this position carries only
+	// the LuaPlayer handle.
 	Player       *Object
 	SkipFogOfWar *bool
 	Item         Object
@@ -124340,7 +125231,13 @@ func (v TrainSchedule) ToValue() Value {
 // TrainStopFilter mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type TrainStopFilter struct {
-	Surface                   *Object
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force                     *Object
 	IsFull                    *bool
 	IsConnectedToRail         *bool
@@ -124462,8 +125359,14 @@ func (v TrainStopFilter) ToValue() Value {
 // TrainFilter mirrors the API type of the same name, laid out to match the
 // wire exactly: fields at fixed offsets, an optional as a pointer.
 type TrainFilter struct {
-	TrainId      *uint32
-	Surface      *Object
+	TrainId *uint32
+	// Surface is declared SurfaceIdentification (uint32 | string |
+	// LuaSurface). Only the handle arm has a fixed layout, so this position
+	// carries only the LuaSurface handle.
+	Surface *Object
+	// Force is declared ForceID (string | uint8 | LuaForce). Only the handle
+	// arm has a fixed layout, so this position carries only the LuaForce
+	// handle.
 	Force        *Object
 	Stock        *Value
 	MinStocks    *uint32

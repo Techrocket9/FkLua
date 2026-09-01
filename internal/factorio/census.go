@@ -193,6 +193,23 @@ type CensusData struct {
 	// a language difference, and the Rust count is compared against this by a
 	// test instead of being written down twice.
 	BulkVariantBindings int `json:"bulk_variant_bindings"`
+	// CollapsedUnionArgs is how many positions a GUEST SENDS a value at whose
+	// declared type is a union canonicalUnion reduced to its single class arm --
+	// `LuaForceCreateSpacePlatformArgs.planet`, declared `SpaceLocationID` and
+	// crossing as a handle. RETURNS ARE NOT COUNTED, because a read is not a
+	// collapse anybody pays for: the engine returns the object and the scalar
+	// arms are ways of naming one on the way in. See CollapsedArgPositions for
+	// the deduplication, which follows what the generators EMIT rather than how
+	// many members reach it.
+	//
+	// A ROW BECAUSE THE COLLAPSE IS AN ACCEPTED COST AND NOT A SILENT ONE. It is
+	// FkLua's recorded design (canonicalUnion's header takes it in as many
+	// words) and both roads out of it are refused in collapseddoc.go -- so what
+	// is owed is that the number is visible and moves when the description
+	// changes shape. It is asserted non-zero rather than pinned to a value,
+	// since a pin would move on every description that adds a member taking a
+	// ForceID.
+	CollapsedUnionArgs int `json:"collapsed_union_arg_positions"`
 
 	TableConcepts int `json:"table_shaped_concepts"`
 	StringEnums   int `json:"pure_string_enum_concepts"`
@@ -407,6 +424,7 @@ func TakeCensus(a *API) (CensusData, error) {
 			c.GlobalFunctionsBound++
 		}
 	}
+	c.CollapsedUnionArgs = CollapsedArgPositions(r)
 	for k, v := range r.Reasons {
 		c.HostSkipsBy[k] = v
 	}
@@ -549,6 +567,7 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("index-assign members", old.IndexSetters, c.IndexSetters)
 	cmp("typed-arg members", old.TypedArgMembers, c.TypedArgMembers)
 	cmp("typed-arg bindings", old.TypedVariantBindings, c.TypedVariantBindings)
+	cmp("collapsed-union argument positions", old.CollapsedUnionArgs, c.CollapsedUnionArgs)
 	cmp("table-shaped concepts", old.TableConcepts, c.TableConcepts)
 	cmp("pure string-enum concepts", old.StringEnums, c.StringEnums)
 	cmp("host members bound", old.HostMembers, c.HostMembers)

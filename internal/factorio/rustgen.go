@@ -900,6 +900,13 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 	}
 
 	var in, res []field
+	// POSITIONAL ARGUMENTS WHOSE DECLARED UNION COLLAPSED TO A HANDLE, paired
+	// with the identifier the signature gives them -- gogen.go's twin.
+	type collapsedArg struct {
+		ident string
+		union CollapsedUnion
+	}
+	var collapsed []collapsedArg
 	for i, f := range args.Fields {
 		fl, why, okk := mk(f, argSpec, i, typeName+name0(m)+exportName(f.Name), rustName(f.Name))
 		if !okk {
@@ -907,6 +914,9 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 		}
 		if fl.ident == "" || fl.ident == "x" {
 			fl.ident = fmt.Sprintf("a%d", i)
+		}
+		if i < len(argSpec) && argSpec[i].Collapsed != nil {
+			collapsed = append(collapsed, collapsedArg{fl.ident, *argSpec[i].Collapsed})
 		}
 		in = append(in, fl)
 	}
@@ -1138,6 +1148,15 @@ func rustMemberVariant(g *rustStructs, typeName string, m Member, into, typed bo
 		// this listing is not a doctest.
 		w("    ///\n")
 		for _, l := range gl {
+			w("    /// %s\n", l)
+		}
+	}
+	// A UNION THAT COLLAPSED TO A HANDLE IN AN ARGUMENT POSITION -- gogen.go's
+	// twin, and WormholeBelts' item 4: the signature says `Object`, which every
+	// other handle in the crate satisfies.
+	for _, c := range collapsed {
+		w("    ///\n")
+		for _, l := range CollapsedUnionLines(c.ident, c.union, 72) {
 			w("    /// %s\n", l)
 		}
 	}

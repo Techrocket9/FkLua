@@ -1012,6 +1012,15 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 	// Optional arguments this layer cannot express, named in the doc comment so
 	// a caller who wonders where a parameter went can read why.
 	var omitted []string
+	// POSITIONAL ARGUMENTS WHOSE DECLARED UNION COLLAPSED TO A HANDLE, paired
+	// with the identifier the signature gives them. Collected here rather than
+	// recovered from `in` afterwards, because an argument this layer cannot
+	// express is skipped and the two lists stop lining up.
+	type collapsedArg struct {
+		ident string
+		union CollapsedUnion
+	}
+	var collapsed []collapsedArg
 	for i, f := range args.Fields {
 		// An optional is a POINTER, and nil means absent rather than zero.
 		// Factorio distinguishes the two throughout -- absent means leave it
@@ -1043,6 +1052,9 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 				continue
 			}
 			return "", "", goSig{}, why, false
+		}
+		if i < len(argSpec) && argSpec[i].Collapsed != nil {
+			collapsed = append(collapsed, collapsedArg{fl.ident, *argSpec[i].Collapsed})
 		}
 		in = append(in, fl)
 	}
@@ -1229,6 +1241,17 @@ func goMemberVariant(g *goStructs, typeName string, m Member, into, typed bool) 
 			w("// %s\n", goDocText(l))
 		}
 		for _, l := range gl {
+			w("// %s\n", goDocText(l))
+		}
+	}
+	// A UNION THAT COLLAPSED TO A HANDLE IN AN ARGUMENT POSITION, one line per
+	// such parameter. The signature says Object, which every other handle in the
+	// package satisfies: `create_space_platform` accepts a LuaPlanet at compile
+	// time and the engine refuses it at runtime. See collapseddoc.go, and
+	// WormholeBelts' item 4.
+	for _, c := range collapsed {
+		w("//\n")
+		for _, l := range CollapsedUnionLines(c.ident, c.union, 76) {
 			w("// %s\n", goDocText(l))
 		}
 	}
@@ -3226,6 +3249,12 @@ type goStructs struct {
 	// parameters are keys of `extra`, not fields here. See
 	// FieldSpec.Variants and variantdoc.go.
 	variants map[string]*VariantDoc
+	// collapsed maps "Parent.field" to the union a shape-B field was declared
+	// as, alongside note and for the same reason: the field crosses as a bare
+	// Object, so without a line saying which class and what the description
+	// offered instead, a reader has a handle that any other handle type-checks
+	// against. See FieldSpec.Collapsed and collapseddoc.go.
+	collapsed map[string]*CollapsedUnion
 	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
 	// attribute needs, keyed by type name and rendered once. At most eleven can
 	// exist -- one per fixed-width wire kind -- and they are registered on
@@ -3316,6 +3345,7 @@ func newGoStructs() *goStructs {
 		ctn:       map[string]goContainer{},
 		note:      map[string]string{},
 		variants:  map[string]*VariantDoc{},
+		collapsed: map[string]*CollapsedUnion{},
 		bulkOpts:  map[string]string{},
 	}
 }
@@ -3386,6 +3416,23 @@ func (g *goStructs) add(f FieldSpec, fallback string) (string, string, bool) {
 		// Placed does not carry it.
 		if sub.LazyPayload != "" {
 			g.note[name+"."+sub.Name] = sub.LazyPayload
+		}
+		// A UNION THAT COLLAPSED TO THIS FIELD'S HANDLE, recorded beside the
+		// note above and for the same reason: Placed does not carry it, and by
+		// emit time the field is an Object like every other.
+		//
+		// A COPY, because one field is added here: whether the member that owns
+		// this struct also has a PLAIN tier-2 form, which still takes the arm
+		// the collapse dropped. f.Variants is set on exactly the argument
+		// struct of a variant-group method's typed form, and those are exactly
+		// the members generated in two forms -- known HERE and nowhere
+		// downstream, since emit() has a struct name and no member. The spec's
+		// own CollapsedUnion is shared with the other backend and with every
+		// member that reaches this concept, so it is read and not written.
+		if sub.Collapsed != nil {
+			c := *sub.Collapsed
+			c.TierTwoTwin = f.Variants != nil
+			g.collapsed[name+"."+sub.Name] = &c
 		}
 		if sub.Kind == KindStruct {
 			child, why, ok := g.add(sub, name+exportName(sub.Name))
@@ -3527,6 +3574,15 @@ func (g *goStructs) emit(w func(string, ...any)) {
 				w("\t// It is valid ONLY during this dispatch. Retaining it gives a\n")
 				w("\t// live handle over a dead LuaObject, which the next call\n")
 				w("\t// reports as ErrInvalid.\n")
+			}
+			// WHICH HANDLE, AND WHAT THE DESCRIPTION OFFERED INSTEAD. A shape-B
+			// union resolves to its class arm, so this field is an Object where
+			// the API says SpaceLocationID -- and every other Object in the
+			// package type-checks against it. See collapseddoc.go.
+			if c := g.collapsed[name+"."+p.Name]; c != nil {
+				for _, l := range CollapsedUnionLines(exportName(p.Name), *c, 72) {
+					w("\t// %s\n", goDocText(l))
+				}
 			}
 			w("\t%s %s\n", exportName(p.Name), t)
 		}

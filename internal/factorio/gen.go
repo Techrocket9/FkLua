@@ -660,14 +660,38 @@ type typeMapper struct {
 	// number lands in a committed census.
 	omitted     map[string]OmittedField
 	omittedKeys []string
+	// underPrototypes is every class REACHABLE FROM THE `prototypes` GLOBAL,
+	// read off LuaPrototypes' own attribute list at this description's pin.
+	//
+	// It exists for one sentence of documentation -- "Find one under the
+	// prototypes global", which a collapse note appends when it can -- and it is
+	// derived rather than guessed because the obvious guess is wrong IN BOTH
+	// DIRECTIONS. A name test (`strings.HasSuffix(class, "Prototype")`) claims
+	// it of 45 classes at every committed pin and is right about 38 of them:
+	// LuaBurnerPrototype, LuaFluidBoxPrototype, LuaHeatBufferPrototype and the
+	// four energy-source prototypes (Electric, Fluid, Heat, Void) are reached
+	// through an entity prototype, never through `prototypes`, so the sentence
+	// would have sent a reader to a table with nothing of that name in it. The
+	// set `prototypes` really hands out is bigger than that intersection and is
+	// not the same size at every pin -- 42 classes at 2.0.77, 2.1.12 and 2.1.14
+	// and 43 from 2.1.16 -- and what it holds that the name rule would miss is
+	// LuaModData, the two noise classes (LuaNamedNoiseExpression,
+	// LuaNamedNoiseFunction) and the item-group classes: LuaGroup up to 2.1.14,
+	// split into LuaItemGroup and LuaItemSubGroup from 2.1.16. The derivation
+	// goes the other way and stays true by construction: whatever LuaPrototypes
+	// hands out is what is there. Every count above is re-derived per pin and
+	// logged rather than restated -- see
+	// TestThePrototypesHintIsDerivedFromLuaPrototypesAndNotFromTheName.
+	underPrototypes map[string]bool
 }
 
 func newTypeMapper(a *API) *typeMapper {
 	m := &typeMapper{
-		concepts: map[string]*Concept{},
-		classes:  map[string]bool{},
-		visiting: map[string]bool{},
-		omitted:  map[string]OmittedField{},
+		concepts:        map[string]*Concept{},
+		classes:         map[string]bool{},
+		visiting:        map[string]bool{},
+		omitted:         map[string]OmittedField{},
+		underPrototypes: map[string]bool{},
 	}
 	for i := range a.Concepts {
 		m.concepts[a.Concepts[i].Name] = &a.Concepts[i]
@@ -675,7 +699,52 @@ func newTypeMapper(a *API) *typeMapper {
 	for _, c := range a.Classes {
 		m.classes[c.Name] = true
 	}
+	for _, c := range a.Classes {
+		if c.Name != prototypesClass {
+			continue
+		}
+		for _, at := range c.Attributes {
+			for _, n := range prototypeTableClasses(at.ReadType) {
+				if m.classes[n] {
+					m.underPrototypes[n] = true
+				}
+			}
+		}
+	}
 	return m
+}
+
+// prototypesClass is the class the `prototypes` global is, which is the only
+// place this package names it.
+const prototypesClass = "LuaPrototypes"
+
+// prototypeTableClasses names the classes one LuaPrototypes attribute hands
+// out.
+//
+// Every one of them is a `LuaCustomTable` keyed by string today, so the value
+// type is the answer; a bare class-typed attribute would be one too, and both
+// are read rather than one being assumed. Anything else -- `object_name`, the
+// dozen `max_*` numbers -- names no class and contributes nothing.
+func prototypeTableClasses(t *Type) []string {
+	if t == nil {
+		return nil
+	}
+	for t.Complex == "type" && t.Value != nil {
+		t = t.Value
+	}
+	if t.IsNamed() {
+		return []string{t.Name}
+	}
+	if (t.Complex == "LuaCustomTable" || t.Complex == "dictionary") && t.Value != nil {
+		v := *t.Value
+		for v.Complex == "type" && v.Value != nil {
+			v = *v.Value
+		}
+		if v.IsNamed() {
+			return []string{v.Name}
+		}
+	}
+	return nil
 }
 
 // builtinKind maps the API's primitive names onto wire kinds.
@@ -798,6 +867,11 @@ func (m *typeMapper) mapType(t Type, depth int) (FieldSpec, error) {
 			return FieldSpec{Kind: KindString}, nil
 		}
 		if f, ok := m.canonicalUnion(t, depth); ok {
+			if f.Collapsed != nil {
+				// The WHOLE union, in the description's own spelling, which is
+				// what tells a reader which arms the collapse dropped.
+				f.Collapsed.Arms = t.String()
+			}
 			return f, nil
 		}
 		// Tier 2. A structural union has no fixed layout, so it crosses as a
@@ -962,6 +1036,46 @@ func collapsesToAHandle(m *typeMapper, t Type) bool {
 	return ok && f.Kind == KindHandle
 }
 
+// armHandleClass names the CLASS behind a union arm that mapped to a bare
+// handle, or "" for an arm this cannot resolve.
+//
+// THE ARM'S OWN SPELLING IS NOT ALWAYS A CLASS, and a note that names a
+// non-class is the exact confusion the note exists to prevent. Three shapes
+// reach `KindHandle` with no collapse to carry the answer, and all three are
+// resolved here: a class by name; the builtin `LuaObject`, which is a CONCEPT
+// in the description and the one non-class a handle can honestly be; and a
+// `LuaLazyLoadedValue<T>`, whose handle is a `LuaLazyLoadedValue`. A concept
+// that is a plain alias for any of those is followed through the same `type`
+// chain mapNamed follows.
+//
+// No committed description declares such an alias, which is why the caller
+// keeps `o.String()` as a last resort rather than emitting nothing -- and why
+// the whole-source check in collapseddoc_test.go, which requires every note to
+// name a class, is what would catch a fourth shape appearing.
+func (m *typeMapper) armHandleClass(t Type, depth int) string {
+	if depth > 24 {
+		return ""
+	}
+	if t.Complex == "LuaLazyLoadedValue" {
+		return "LuaLazyLoadedValue"
+	}
+	if !t.IsNamed() {
+		return ""
+	}
+	if t.Name == "LuaObject" || m.classes[t.Name] {
+		return t.Name
+	}
+	c, ok := m.concepts[t.Name]
+	if !ok {
+		return ""
+	}
+	a := c.Type
+	for a.Complex == "type" && a.Value != nil {
+		a = *a.Value
+	}
+	return m.armHandleClass(a, depth+1)
+}
+
 func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
 	var chosenStruct, chosenHandle *FieldSpec
 	nStruct, nHandle, nScalar, nShorthand, nDyn := 0, 0, 0, 0, 0
@@ -988,6 +1102,44 @@ func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
 		case KindHandle:
 			nHandle++
 			c := f
+			// THE CLASS ARM'S OWN NAME, which the FieldSpec drops: mapNamed
+			// answers a bare KindHandle for every class, so by the time the
+			// caller has the result there is nothing left saying which class it
+			// was. `o` is already unwrapped here, so String() is the
+			// description's spelling of the arm. See collapseddoc.go.
+			//
+			// ...UNLESS THE ARM IS ITSELF A SHAPE-B CONCEPT, in which case its
+			// own spelling is a CONCEPT NAME and not a class. `ban_player` takes
+			// `PlayerIdentification | string`, whose first arm is
+			// `uint32 | string | LuaPlayer` -- so the recursive mapType above
+			// already collapsed it and already knows the class is `LuaPlayer`,
+			// and overwriting that with `o.String()` produced the note "it takes
+			// the PlayerIdentification handle", naming a thing no guest can hold
+			// a handle to. The INNER answer wins, because a collapse of a
+			// collapse resolves to one class and that class is the one the
+			// engine will accept.
+			//
+			// A COLLAPSE IS NOT THE ONLY WAY AN ARM'S SPELLING STOPS BEING A
+			// CLASS, which is the same defect one shape over: a concept that is
+			// a plain ALIAS for a class, or for `LuaObject`, maps to a bare
+			// handle and carries no collapse to answer with, so `o.String()`
+			// would put the concept's name back in the sentence. armHandleClass
+			// resolves the arm to the class it really names first, and the
+			// inner collapse still wins over both.
+			cls := o.String()
+			if n := m.armHandleClass(o, depth); n != "" {
+				cls = n
+			}
+			if f.Collapsed != nil && f.Collapsed.Class != "" {
+				cls = f.Collapsed.Class
+			}
+			c.Collapsed = &CollapsedUnion{
+				Class: cls,
+				// Whether "Find one under the prototypes global" is TRUE of
+				// this class, asked of LuaPrototypes rather than of the name.
+				// See typeMapper.underPrototypes.
+				UnderPrototypes: m.underPrototypes[cls],
+			}
 			chosenHandle = &c
 		case KindDyn:
 			nDyn++
@@ -1129,6 +1281,18 @@ func (m *typeMapper) mapNamed(name string, depth int) (FieldSpec, error) {
 	// is a uint64 and a guest wants uint64, not a one-field wrapper.
 	if f.Kind == KindStruct {
 		f.TypeName = name
+	}
+	// AND A COLLAPSED UNION REMEMBERS THE CONCEPT IT WAS DECLARED AS, which is
+	// the name the author typed and the one they will look up: `planet` is
+	// declared `SpaceLocationID`, not `LuaSpaceLocationPrototype | string`.
+	//
+	// The OUTERMOST name wins, deliberately. An alias chain sets this at every
+	// hop on the way back out, and the last write is the name the position
+	// actually carries -- the inner one is an implementation detail of the
+	// concept, and a reader looking for it in the description would search for
+	// what the parameter says.
+	if f.Collapsed != nil {
+		f.Collapsed.Concept = name
 	}
 	return f, nil
 }

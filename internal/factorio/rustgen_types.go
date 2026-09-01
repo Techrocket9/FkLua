@@ -225,6 +225,11 @@ type rustStructs struct {
 	// struct's doc comment is a complete-looking picture of an incomplete
 	// parameter list. See FieldSpec::Variants and variantdoc.go.
 	variants map[string]*VariantDoc
+	// collapsed maps "Parent.field" to the union a shape-B field was declared
+	// as -- gogen.go's twin, alongside note and for the same reason: the field
+	// crosses as a bare Object and any other Object satisfies it. See
+	// FieldSpec::Collapsed and collapseddoc.go.
+	collapsed map[string]*CollapsedUnion
 	// bulkOpts holds the destination-element structs a bulk read of an OPTIONAL
 	// attribute needs, keyed by type name and rendered once. gogen_bulk.go's
 	// twin -- see rustgen_bulk.go.
@@ -257,6 +262,7 @@ func newRustStructs() *rustStructs {
 		ctn:       map[string]rustContainer{},
 		note:      map[string]string{},
 		variants:  map[string]*VariantDoc{},
+		collapsed: map[string]*CollapsedUnion{},
 		bulkOpts:  map[string]string{},
 	}
 }
@@ -324,6 +330,13 @@ func (g *rustStructs) add(f FieldSpec, fallback string) (string, string, bool) {
 		// Placed does not carry it.
 		if sub.LazyPayload != "" {
 			g.note[name+"."+sub.Name] = sub.LazyPayload
+		}
+		// A UNION THAT COLLAPSED TO THIS FIELD'S HANDLE -- gogen.go's twin,
+		// including the copy and the tier-2-twin flag it exists for.
+		if sub.Collapsed != nil {
+			c := *sub.Collapsed
+			c.TierTwoTwin = f.Variants != nil
+			g.collapsed[name+"."+sub.Name] = &c
 		}
 		if sub.Kind == KindStruct {
 			child, why, ok := g.add(sub, name+exportName(sub.Name))
@@ -465,6 +478,13 @@ func (g *rustStructs) emit(w func(string, ...any)) {
 				w("    /// It is valid ONLY during this dispatch. Retaining it gives a\n")
 				w("    /// live handle over a dead LuaObject, which the next call\n")
 				w("    /// reports as `Error::Invalid`.\n")
+			}
+			// WHICH HANDLE, AND WHAT THE DESCRIPTION OFFERED INSTEAD --
+			// gogen.go's twin. See collapseddoc.go.
+			if c := g.collapsed[name+"."+p.Name]; c != nil {
+				for _, l := range CollapsedUnionLines(rustName(p.Name), *c, 68) {
+					w("    /// %s\n", l)
+				}
 			}
 			w("    pub %s: %s,\n", rustName(p.Name), t)
 		}

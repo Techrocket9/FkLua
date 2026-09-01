@@ -253,6 +253,17 @@ type FieldSpec struct {
 	// variant-group method's typed form; nil everywhere else, and nothing
 	// downstream of LayoutStruct sees it. See variantdoc.go.
 	Variants *VariantDoc
+	// Collapsed is the union this field's declared type was, when
+	// canonicalUnion reduced it to its single class arm -- shape B, "one class
+	// plus scalar identifiers". Nil everywhere else.
+	//
+	// The THIRD member of this struct that is documentation rather than layout,
+	// and it is here for the reason the other two are: the layout says `handle`
+	// and cannot say WHICH handle or what the description offered instead, so a
+	// field typed `Object` where the API says `SpaceLocationID` reads as an
+	// arbitrary object -- and any object handle type-checks. See
+	// collapseddoc.go, and WormholeBelts' item 4.
+	Collapsed *CollapsedUnion
 	// Struct is the nested layout when Kind is KindStruct.
 	Struct []FieldSpec
 	// Elem is the element when Kind is KindArray, or the VALUE when KindDict.

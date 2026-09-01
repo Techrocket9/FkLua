@@ -28,6 +28,7 @@
   "typed_variant_bindings": 4,
   "bulk_read_members": 1791,
   "bulk_variant_bindings": 1791,
+  "collapsed_union_arg_positions": 274,
   "table_shaped_concepts": 345,
   "pure_string_enum_concepts": 46,
   "host_members_bound": 4848,
