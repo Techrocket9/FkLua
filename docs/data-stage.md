@@ -83,7 +83,7 @@ The result ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua` 
 
 ## The API
 
-Seven operations. Everything that is a failure raises at the stage, naming the stage and the path, because a broken data stage should stop the load rather than produce a mod that is quietly wrong.
+Eight operations. Everything that is a failure raises at the stage, naming the stage and the path, because a broken data stage should stop the load rather than produce a mod that is quietly wrong. That includes failures only your own code can detect: `Raise` stops the load with your message, stage-prefixed like every other, where a panic would surface as an opaque trap with your diagnostic lost.
 
 | Go | Rust | |
 |---|---|---|
@@ -99,6 +99,7 @@ Seven operations. Everything that is a failure raises at the stage, naming the s
 | `ModName() string` | `mod_name()` | this mod's own name, from the packager |
 | `DerivedTypes(base)`, `BaseType(derived)` | `derived_types(base)`, `base_type(derived)` | the engine's `defines.prototypes` map, both directions |
 | `Log(s string)` | `log(s)` | a line in `factorio-current.log` |
+| `Raise(msg string)` | `raise(msg) -> !` | stop the load with your own message; never returns |
 
 A **path** is strings and numbers rooted at `data.raw`, so a field two levels inside an array is reachable:
 

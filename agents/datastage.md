@@ -69,7 +69,7 @@ Six reps each, arms interleaved within every rep so session drift scales the gro
 
 ### As built: module sizes through the real pipeline
 
-`guest/{go,rust}/examples/datastage`, which reaches all seven imports:
+`guest/{go,rust}/examples/datastage`, which reaches all seven of the original imports (`raise` cannot appear in a happy-path example -- it ends the stage -- and is pinned by the shim's raising-cases test instead):
 
 | | wasm | generated Lua |
 |---|--:|--:|
@@ -134,7 +134,7 @@ Build tags were refused: they produce one binary that is two programs, which mea
 
 ### D2 -- the host ABI
 
-**Seven imports under a new module name `fkdata`, plus the existing `env.fk_log` and `env.fk_print.`** Every argument is a pointer to one tier-2 dynamic value, which is the shape `fk.subscribe(id, filterp, mask)` and `fk.remote_call(callp, retp)` already have.
+**Eight imports under a new module name `fkdata`, plus the existing `env.fk_log` and `env.fk_print`** (seven at the feature's shipping; `raise` is the 2026-08-31 addition, below). Every argument is a pointer to one tier-2 dynamic value, which is the shape `fk.subscribe(id, filterp, mask)` and `fk.remote_call(callp, retp)` already have.
 
 ```
 fkdata.stage()            -> u32      1 settings, 2 data, 3 data-updates, 4 data-final-fixes
@@ -145,6 +145,7 @@ fkdata.clone(pathp, dstp) -> status   deep-copy one data.raw entry to another na
 fkdata.keys(pathp, retp)  -> status   the keys at a path, SORTED
 fkdata.env(which, retp)   -> status   1 mods, 2 feature_flags, 3 settings.startup,
                                       4 the mod's own name, 5 defines.prototypes
+fkdata.raise(ptr, len)    -> never    the GUEST'S OWN failure, stage-prefixed
 ```
 
 **env(4) is the one arm whose answer comes from the PACKAGER rather than the engine.** The data-stage environment has no "current mod" anywhere -- `mods` is a flat all-mods dictionary with no self marker, `script.mod_name` is runtime-only -- so `fklua mod` writes the manifest's name into the generated stage file's `run(stage, name)` call and the shim hands it back. What it is for is NAMESPACING: settings and prototypes are global namespaces, and a same-type setting-name collision between two mods is silent last-writer-wins (measured, 2.1.17: two probe mods declaring one `bool-setting` name loaded with exit 0 and the second mod's `default_value` and `order` won), so a library that generates either derives its prefix from `ModName()`/`mod_name()` instead of taking it as a parameter that can drift. A stage file written by an older fklua passes no name and the arm answers nil; the shim and the stage files ship together, so the skew cannot actually occur, and the leniency is there so "cannot happen" does not become a load failure if it ever does. *Enforced by `TestTheModNameReachesTheGuestThroughEnv` and `TestAnAbsentModNameReadsAsNil` on the shim, the `run(%d, %q)` pins in the stage-file tests, and the `mod name is fkd-example` log line the end-to-end and mirror tests both require.*
@@ -153,11 +154,13 @@ fkdata.env(which, retp)   -> status   1 mods, 2 feature_flags, 3 settings.startu
 
 A **path** is a tier-2 array of strings and numbers rooted at `data.raw`: `["technology","logistics","unit","count"]`, `["transport-belt","my-belt","collision_box",1,1]`. `clone`'s `dstp` is a path too, so cloning across types needs no second primitive.
 
-**Not one generic import.** `fk.call` is one import because it fronts a 4,259-member table whose ids shift per Factorio version, so a removed member has to degrade to a status rather than break instantiation. `data.raw` is a plain Lua table with no version-skew surface and no id space, so that argument does not transfer. Seven purposeful imports is the same order as `fk`'s own seven and each one is greppable.
+**Not one generic import.** `fk.call` is one import because it fronts a 4,259-member table whose ids shift per Factorio version, so a removed member has to degrade to a status rather than break instantiation. `data.raw` is a plain Lua table with no version-skew surface and no id space, so that argument does not transfer. Eight purposeful imports is the same order as `fk`'s own and each one is greppable.
 
 **Paths, not handles.** A handle space into data-stage tables would mirror the LuaObject handle table and make deep repeated access cheap. Refused: the data stage is a one-shot batch making order-hundreds of calls, not a steady state, and a handle space is lifetime state a transient stage does not need. The number that reopens this is a port making tens of thousands of `set` calls in one stage; BBB's is about forty.
 
 **Errors RAISE, they do not return a status, and that is a deliberate deviation from the control ABI.** The three reasons `fk_abi.lua` never raises do not apply here: a data-stage failure has no lockstep simulation to keep consistent, the guest's state is discarded at the end of the stage anyway, and stopping the load loudly is Factorio's own convention and what a mod author wants at load time. So `fk_data.lua` raises with the STAGE NAME and the OFFENDING PATH in the message.
+
+**And the convention has a GUEST half since 2026-08-31: `fkdata.raise(ptr, len)`.** FkRecipes' dogfood report was the ask: a validating guest -- a cycle detector, a presence ladder -- had no way to put its own diagnostic where the player looks, because a guest panic surfaces as `fklua trap: unreachable` with the real message surviving only as a log line above it. `raise` routes the guest's message through the same `fail()` every host-detected failure uses, so it arrives verbatim with the stage prefixed, and the call never returns. Raw `(ptr, len)` rather than tier 2, deliberately: it is `fk_log`'s shape, allocates nothing and decodes nothing, and a raise path that could itself fail on an allocation would be a diagnostic that dies of the disease it reports. `Raise(msg)` in Go (documented as not returning, with a hard stop behind it), `raise(msg) -> !` in Rust. *Pinned by the "the guest's own raise" case of `TestAFailureRaisesNamingTheStageAndThePath`, red-proven against the seven-import shim.*
 
 The status return carries exactly one thing: **`get` of a missing key returns ABSENT (1) rather than raising**, because "is this prototype already defined" is a normal question -- it is what a mod adopting an uninstalled neighbour's entities asks on every load. `keys` of a missing path answers the same way with an empty array.
 

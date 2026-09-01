@@ -21,7 +21,7 @@
 -- stage it hooks, for a program the stage never calls.
 --
 -- ---------------------------------------------------------------------------
--- THE SEVEN IMPORTS
+-- THE EIGHT IMPORTS
 --
 --   fkdata.stage()            -> u32     1 settings, 2 data, 3 updates, 4 final-fixes
 --   fkdata.get(pathp, retp)   -> status  read data.raw at a path into one tier-2 slot
@@ -33,6 +33,9 @@
 --                                        3 settings.startup, 4 the mod's own
 --                                        name (packager-supplied; see run),
 --                                        5 defines.prototypes
+--   fkdata.raise(ptr, len)    -> never   the GUEST'S OWN failure, raised at
+--                                        the stage exactly as a host-detected
+--                                        one is; the call does not return
 --
 -- plus env.fk_log and env.fk_print, which every guest has.
 --
@@ -570,6 +573,28 @@ function M.run(stage, modname)
         end
         write_sorted(retp, out, 0, nil)
         return FKD_OK
+      end,
+
+      -- The guest's OWN raise: (ptr, len) of a message, and the call never
+      -- returns -- the error unwinds the whole stage, exactly as every
+      -- host-detected failure above does, with the stage name prefixed the
+      -- same way.
+      --
+      -- THE ASK CAME FROM A VALIDATION LIBRARY (FkRecipes' dogfood report).
+      -- fkdata's failures raise with the stage and the offending path, but a
+      -- guest that VALIDATES -- a cycle detector, a presence ladder -- had no
+      -- way to put its own diagnostic where the player looks: a guest panic
+      -- surfaces as "fklua trap: unreachable", with the carefully built
+      -- message surviving only as a log line above it. This is the missing
+      -- half of the errors-RAISE convention: the convention now applies to
+      -- what the guest can prove, not only to what the host can.
+      --
+      -- RAW (ptr, len) RATHER THAN A TIER-2 VALUE, deliberately: it is
+      -- fk_log's shape, it allocates nothing and decodes nothing, and a
+      -- raise path that could itself fail on an allocation would be a
+      -- diagnostic that dies of the disease it reports.
+      raise = function(ptr, len)
+        fail(guest_string(ptr, len))
       end,
     },
 

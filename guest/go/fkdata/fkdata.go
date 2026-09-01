@@ -87,6 +87,9 @@ func hostKeys(pathp, retp uint32) uint32
 //go:wasmimport fkdata env
 func hostEnv(which, retp uint32) uint32
 
+//go:wasmimport fkdata raise
+func hostRaise(ptr, length uint32)
+
 //go:wasmimport env fk_log
 func hostLog(ptr, length uint32)
 
@@ -135,6 +138,24 @@ func Stage() StageID { return StageID(hostStage()) }
 // The only output channel a data stage has: there is no console, because there
 // is no game yet.
 func Log(s string) { hostLog(ptrOf(s), uint32(len(s))) }
+
+// Raise stops the load with THIS GUEST'S OWN message, exactly as a
+// host-detected failure does: the stage name is prefixed, the error unwinds
+// the whole stage, and the call NEVER RETURNS.
+//
+// This is what a validating guest uses instead of panicking. A panic surfaces
+// in the player's game as "fklua trap: unreachable", with whatever diagnostic
+// was built surviving only as a log line above it; Raise puts the message
+// where the player looks. A cycle detector naming its path, a presence check
+// naming the missing prototype, a refused configuration naming the setting --
+// this is their exit.
+func Raise(msg string) {
+	hostRaise(ptrOf(msg), uint32(len(msg)))
+	// The host raise unwinds the Lua stage through this call, so execution
+	// never resumes here. Under a stand-in that failed to raise, stopping
+	// hard beats running on past a load that should have been refused.
+	panic("fkdata: raise returned")
+}
 
 // ---------------------------------------------------------------------------
 // The value model.

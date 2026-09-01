@@ -631,6 +631,19 @@ func TestAFailureRaisesNamingTheStageAndThePath(t *testing.T) {
 			want: []string{"data stage", "env was asked for 9"},
 		},
 		{
+			// The guest's OWN raise (FkRecipes' headline ask): the message
+			// arrives VERBATIM with the stage prefixed the same way every
+			// host-detected failure is -- where a guest panic would surface
+			// as "fklua trap: unreachable" with the diagnostic lost.
+			name: "the guest's own raise",
+			body: `
+  local msg = "the widget tree has a cycle: iron-widgetry -> steel-widgetry -> iron-widgetry"
+  local d = dyn(msg)
+  D.raise(FKD_MEMIO.ld32(d + 8), FKD_MEMIO.ld32(d + 12))`,
+			want: []string{"data stage",
+				"the widget tree has a cycle: iron-widgetry -> steel-widgetry -> iron-widgetry"},
+		},
+		{
 			name:  "keys of something that has none",
 			setup: `data:extend{ { type = "item", name = "i", stack_size = 1 } }`,
 			body:  `D.keys(dyn({"item", "i", "stack_size"}), slot())`,

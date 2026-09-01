@@ -89,6 +89,8 @@ extern "C" {
     fn fkd_keys(pathp: u32, retp: u32) -> u32;
     #[link_name = "env"]
     fn fkd_env(which: u32, retp: u32) -> u32;
+    #[link_name = "raise"]
+    fn fkd_raise(ptr: u32, len: u32);
 }
 
 /// Everything that is a FAILURE raises at the stage instead of arriving here,
@@ -133,6 +135,24 @@ pub fn stage() -> StageId {
 /// data stage has: there is no console, because there is no game yet.
 pub fn log(s: &str) {
     fk::log(s)
+}
+
+/// Stops the load with THIS GUEST'S OWN message, exactly as a host-detected
+/// failure does: the stage name is prefixed, the error unwinds the whole
+/// stage, and the call never returns.
+///
+/// This is what a validating guest uses instead of panicking. A panic
+/// surfaces in the player's game as `fklua trap: unreachable`, with whatever
+/// diagnostic was built surviving only as a log line above it; `raise` puts
+/// the message where the player looks. A cycle detector naming its path, a
+/// presence check naming the missing prototype, a refused configuration
+/// naming the setting: this is their exit.
+pub fn raise(msg: &str) -> ! {
+    unsafe { fkd_raise(msg.as_ptr() as u32, msg.len() as u32) };
+    // The host raise unwinds the Lua stage through this call, so execution
+    // never resumes here. Under a stand-in that failed to raise, stopping
+    // hard beats running on past a load that should have been refused.
+    unreachable!("fkdata: raise returned")
 }
 
 // ---------------------------------------------------------------------------
