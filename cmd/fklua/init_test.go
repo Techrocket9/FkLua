@@ -366,6 +366,73 @@ func TestAGitignoreCarriesAModNamesSpacesLiterally(t *testing.T) {
 	}
 }
 
+// THE SCAFFOLDED MANIFEST MUST NOT TELL A RUST AUTHOR THEY HAVE NO COLLECTOR.
+//
+// The `gc` comment block and init's printed next-steps are two halves of ONE
+// command, and they said opposite things for four rounds after guest/rust/fkgc
+// landed: the block called "leaking" the only option for Rust while the same
+// run described the collected Rust guest it had just scaffolded and named
+// --features fk/fkgc. The manifest is the first file a new author reads, so it
+// was telling them their scaffold was misconfigured when it was not.
+//
+// A TEXT PROPERTY OVER THE COMMENT, and it has to be: the value is right
+// either way -- `gc = "collected"` is what the key says in both arms -- so
+// nothing an author or a build could observe distinguishes the two states.
+// Comments are folded to one whitespace-collapsed string first, because the
+// claim this is about fell across a line break.
+//
+// No toolchain: it runs init and reads the file.
+func TestTheScaffoldedManifestDoesNotDenyRustACollector(t *testing.T) {
+	dir := t.TempDir()
+	back := chdir(t, dir)
+	defer back()
+
+	if err := runInit([]string{"gc-comment-mod", "--lang", "rust", "--no-guest"}); err != nil {
+		t.Fatalf("fklua init: %v", err)
+	}
+	raw, err := os.ReadFile(projectFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var comments []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if s := strings.TrimSpace(line); strings.HasPrefix(s, "#") {
+			comments = append(comments, strings.TrimSpace(strings.TrimPrefix(s, "#")))
+		}
+	}
+	prose := strings.Join(comments, " ")
+
+	// THE VACUITY GUARD, and it is not a formality: a manifest with no gc block
+	// at all would satisfy every refusal below. What must still be there is the
+	// key, the real wasip1 constraint, and the Rust half of "collected" -- which
+	// is also what makes the assertion a statement about the CURRENT text rather
+	// than about one phrase that happened to be wrong.
+	if !strings.Contains(string(raw), `gc = "collected"`) {
+		t.Fatalf("init wrote no gc key, so this test asserts nothing:\n%s", raw)
+	}
+	for _, want := range []string{"wasip1", "fk/fkgc"} {
+		if !strings.Contains(prose, want) {
+			t.Fatalf("the gc comment never mentions %q, so there is no claim about "+
+				"either language left to check:\n%s", want, raw)
+		}
+	}
+
+	for _, never := range []string{
+		"only option for Rust",
+		"no collector for Rust",
+		"Rust has no collector",
+		"not available for Rust",
+	} {
+		if strings.Contains(prose, never) {
+			t.Errorf("the scaffolded manifest says %q. guest/rust/fkgc is a "+
+				"collector, `fklua init` scaffolds a Rust project as gc = "+
+				"\"collected\", and init's own next-steps in the same run name "+
+				"--features fk/fkgc -- so this comment contradicts the command "+
+				"that wrote it:\n%s", never, raw)
+		}
+	}
+}
+
 // This is the backward-compatibility half and it needs no toolchain, which is
 // why it is a separate test: every fklua.toml written before this change has no
 // `gc` line, and if an absent key resolved to anything but "leave the command's

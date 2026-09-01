@@ -598,7 +598,7 @@ fklua mod my-mod.wasm              # --gc comes from fklua.toml
 
    **`guest/rust/target/` is gitignored, and that is what makes it misleading.** `git status` stays clean, a branch switch leaves it alone, and cargo keeps ONE artifact path per (package, profile) whatever features built it — so the tree can hold rlibs from the other arm of an A/B, or from a crate that no longer exists. Stale symbols out of it have already sent one investigation the wrong way. **`make clean-rust`** deletes it. The tests and `scripts/run-roundtrip.sh` set `CARGO_TARGET_DIR` per arm for exactly this reason and are unaffected; this is the copy a human's `cargo build` and `scripts/run-guest.sh` leave in the checkout.
 
-   `fklua init` writes `gc = "collected"` and scaffolds a guest that carries a collector in **either** language — `guest/` for Go, `guest-rs/` for Rust — so a new project IS collected rather than being told to be.
+   `fklua init` writes `gc = "collected"` and scaffolds a guest that carries a collector in **either** language — `guest/go/` for Go, `guest/rust/` for Rust, siblings since the R8 fix, which is the layout the bindings decide (see the paragraph above) — so a new project IS collected rather than being told to be.
 
    The Rust side needs no import because `guest/rust/fk` owns the single `#[global_allocator]` site and the feature chooses what backs it — the bump arena or `guest/rust/fkgc`. **Do not declare that feature in a guest's own `Cargo.toml`**: Cargo's v2 resolver unifies features across a workspace build, so it would turn the collector on for every other crate in the same invocation. Pass it on the command line. `TestNoRustExampleDeclaresTheCollectorFeature` holds that.
 

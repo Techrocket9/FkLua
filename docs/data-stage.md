@@ -53,11 +53,28 @@ pub extern "C" fn fk_data() {
 }
 ```
 
-Build it exactly as a control guest is built, and package the two together:
+### Building it
+
+A data module is compiled `--persist=none` and `-gc=leaking` whatever the control guest uses, so its build line is not the control guest's. Packaging refuses a data module that carries a collector, and names the fix.
+
+In Go, that is `-gc=leaking` and no `fkgc` import in the data guest's own package:
 
 ```sh
 tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 \
     -o dist/data.wasm ./datastage
+```
+
+In Rust, it is a release build of the data crate with no `--features fk/fkgc`, **in its own cargo invocation**:
+
+```sh
+cargo build --release --target wasm32-unknown-unknown -p my-mod-data
+```
+
+The separate invocation is the load-bearing part. Cargo's v2 resolver unifies features across every package built in one command, so a control guest built `--features fk/fkgc` in the same invocation turns the collector on for the data crate too, silently and only for that build. Two commands, one per module, keeps the two apart. There is no source difference between the two arms: the `fk` crate owns the single `#[global_allocator]` site and the feature chooses what backs it.
+
+Then package the two together:
+
+```sh
 fklua mod dist/control.wasm --data-module dist/data.wasm
 ```
 

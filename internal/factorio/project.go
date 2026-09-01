@@ -320,13 +320,25 @@ func (p Project) TOML() string {
 		// `tinygo -gc=leaking` there is a build error rather than a mod that
 		// quietly does not collect -- which is the right failure and is still
 		// a confusing one to meet without this comment in front of it.
+		//
+		// IT SAID RUST HAD NO COLLECTOR FOR FOUR ROUNDS AFTER guest/rust/fkgc
+		// LANDED, while init's own printed next-steps in the same command said
+		// the opposite and named the feature. The manifest is the first file a
+		// new author reads, and it was telling them their scaffold was
+		// misconfigured when it was not. Filed by WormholeBelts, which rewrote
+		// the comment in place. Both languages are named here now, so the two
+		// halves of one command cannot disagree again without this line
+		// changing too.
 		b.WriteString("\n# How the GUEST's own heap is managed, and it must match how the guest\n")
-		b.WriteString("# was BUILT: \"collected\" means `tinygo -gc=custom` plus an import of\n")
-		b.WriteString("# guest/go/fkgc (`fklua init` scaffolded both). `fklua mod` refuses\n")
-		b.WriteString("# \"collected\" for a module that exports no collector, so a mismatch is a\n")
-		b.WriteString("# build error and never a mod that silently fails to collect.\n")
+		b.WriteString("# was BUILT. \"collected\" means, in Go, `tinygo -gc=custom` plus an import\n")
+		b.WriteString("# of guest/go/fkgc (`fklua init` scaffolded both) and, in Rust,\n")
+		b.WriteString("# `cargo build --features fk/fkgc` with no import and no second flag,\n")
+		b.WriteString("# because the fk crate owns the single #[global_allocator] site.\n")
+		b.WriteString("# `fklua mod` refuses \"collected\" for a module that exports no collector,\n")
+		b.WriteString("# so a mismatch is a build error and never a mod that silently fails to\n")
+		b.WriteString("# collect.\n")
 		b.WriteString("# \"leaking\" is the expert path -- correct for an allocation-disciplined\n")
-		b.WriteString("# guest, and the only option for Rust and for wasip1.\n")
+		b.WriteString("# guest, and the only option for wasip1.\n")
 		b.WriteString("# See agents/guests.md, \"the guest heap budget\".\n")
 		fmt.Fprintf(&b, "gc = %q\n", p.GC)
 	}
