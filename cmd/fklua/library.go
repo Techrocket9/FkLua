@@ -70,7 +70,7 @@ func libraryPackageName(name string) string {
 // initLibrary is `fklua init --library NAME`: writes the scaffold into the
 // CURRENT directory, exactly as init-for-a-mod does, and refuses to overwrite
 // anything that exists.
-func initLibrary(name string, langs []string, guestModule string) error {
+func initLibrary(name string, langs []string, guestModule string, data bool) error {
 	if len(langs) != 1 {
 		return fmt.Errorf("--library scaffolds ONE language per directory; a " +
 			"two-language library is two sibling trees with a mirror test between " +
@@ -79,15 +79,27 @@ func initLibrary(name string, langs []string, guestModule string) error {
 	}
 	pkg := libraryPackageName(name)
 	var files []struct{ name, body string }
-	switch langs[0] {
-	case "go":
+	switch {
+	case langs[0] == "go" && data:
 		files = []struct{ name, body string }{
-			{"go.mod", libraryGoMod(name, guestModule)},
+			{"go.mod", libraryGoMod(name, guestModule, "fkdata")},
+			{pkg + ".go", libraryGoDataPure(name, pkg)},
+			{"guest.go", libraryGoDataGuest(pkg)},
+			{pkg + "_test.go", libraryGoDataTest(pkg)},
+		}
+	case langs[0] == "go":
+		files = []struct{ name, body string }{
+			{"go.mod", libraryGoMod(name, guestModule, "fk")},
 			{pkg + ".go", libraryGoPure(name, pkg)},
 			{"guest.go", libraryGoGuest(pkg)},
 			{pkg + "_test.go", libraryGoTest(pkg)},
 		}
-	case "rust":
+	case langs[0] == "rust" && data:
+		files = []struct{ name, body string }{
+			{"Cargo.toml", libraryCargoTomlData(pkg, guestModule)},
+			{filepath.Join("src", "lib.rs"), libraryRustDataLib(name)},
+		}
+	case langs[0] == "rust":
 		files = []struct{ name, body string }{
 			{"Cargo.toml", libraryCargoToml(pkg, guestModule)},
 			{filepath.Join("src", "lib.rs"), libraryRustLib(name)},
@@ -123,10 +135,14 @@ func initLibrary(name string, langs []string, guestModule string) error {
 	} else {
 		fmt.Printf("    cargo test\n")
 	}
+	if data {
+		fmt.Printf("\nDATA flavor: consumers call this from their own data guest's stage\n")
+		fmt.Printf("hooks (fk_data and friends); see docs/data-stage.md in the FkLua repo.\n")
+	}
 	return nil
 }
 
-func libraryGoMod(name, guestModule string) string {
+func libraryGoMod(name, guestModule, dep string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "// A guest library is its own Go module. The module path below is a\n")
 	fmt.Fprintf(&b, "// PLACEHOLDER: rename it to the path you will publish under, or your\n")
@@ -137,7 +153,7 @@ func libraryGoMod(name, guestModule string) string {
 	fmt.Fprintf(&b, "module %s\n\ngo 1.24\n", libraryPackageName(name))
 	if guestModule == "" {
 		fmt.Fprintf(&b, "\n// Run `go mod tidy` once to pin the FkLua guest substrate\n")
-		fmt.Fprintf(&b, "// (%s), which supplies fk.\n", GuestSubstrateModule)
+		fmt.Fprintf(&b, "// (%s), which supplies %s.\n", GuestSubstrateModule, dep)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "\n// --guest-module: built against a LOCAL FkLua checkout rather than the\n")
@@ -361,6 +377,232 @@ mod tests {
         let mut l = Lib::default();
         assert_eq!(l.on_tick(), 1);
         assert_eq!(l.on_tick(), 2);
+    }
+}
+`
+}
+
+// ---------------------------------------------------------------------------
+// The --data flavor: a DATA-STAGE library.
+//
+// FkRecipes' dogfood report: the control-flavored scaffold (fk dependency,
+// OnTick/OnEvent examples) misled a data library's build in both languages,
+// and both halves needed hand-rewriting. A data library's contract differs in
+// every load-bearing way -- fkdata not fk, NEVER fkapi (refused at package
+// time), the consumer's STAGE exports as the routing surface, the
+// plan-then-Emit split, Raise as the diagnostic exit, ModName as the prefix
+// source -- so it is a template of its own rather than a sentence bolted onto
+// the control one.
+// ---------------------------------------------------------------------------
+
+func libraryGoDataPure(name, pkg string) string {
+	return `// Package ` + pkg + ` is a FkLua DATA-STAGE guest library: a Go package a
+// mod's DATA guest imports, compiled into the consumer's data module by their
+// own ` + "`fklua mod`" + `.
+//
+// THE DATA-LIBRARY CONTRACT, in the order it bites:
+//
+//   - PLAN, THEN EMIT. Everything before Emit is ordinary values in
+//     DECLARATION ORDER, host-testable with plain ` + "`go test`" + ` -- the planner
+//     and its validation live here; Emit (guest.go) is the only
+//     fkdata-touching call. Never iterate a Go map to decide what to emit:
+//     the data stage crosses sorted, and a map walk is a per-client order.
+//   - ROUTE, NEVER OWN. The stage exports (fk_settings, fk_data,
+//     fk_data_updates, fk_data_final_fixes) are the CONSUMER's; their data
+//     guest calls into this library from its own hooks.
+//   - NEVER fkapi. There is no runtime API at these stages and ` + "`fklua mod`" + `
+//     REFUSES a data module that imports it -- which is also what keeps this
+//     library pin-transparent: no API version can break it.
+//   - PREFIX FROM ModName. Setting and prototype names are global namespaces
+//     and a same-type collision between two mods is silent last-writer-wins,
+//     so everything emitted derives its prefix from fkdata.ModName() rather
+//     than taking a parameter that can drift from the packaged mod.
+//   - DIAGNOSE WITH Raise. A guest panic surfaces in the player's game as an
+//     opaque trap with your message lost in the log; fkdata.Raise stops the
+//     load with YOUR diagnostic, stage-prefixed like every host failure.
+package ` + pkg + `
+
+// Plan collects what to emit, in declaration order. Pure, so every rule the
+// planner enforces is testable on the host.
+type Plan struct {
+	items []string
+}
+
+// Item queues one item prototype by its UNPREFIXED name; Emit derives the
+// prefix from the packaged mod.
+func (p *Plan) Item(name string) {
+	p.items = append(p.items, name)
+}
+
+// Items is the queued names, in declaration order.
+func (p *Plan) Items() []string {
+	return p.items
+}
+`
+}
+
+func libraryGoDataGuest(pkg string) string {
+	return `//go:build tinygo.wasm
+
+// The guest-only half: the ONLY file that touches fkdata, which is what keeps
+// the planner host-testable. To surface a validation failure from here, use
+// fkdata.Raise: your message arrives stage-prefixed where a panic would be an
+// opaque trap.
+package ` + pkg + `
+
+import "github.com/Techrocket9/fklua/guest/go/fkdata"
+
+// Emit lands the plan in data.raw. Call it from the consumer's own fk_data
+// export. The prefix comes from the packaged mod's name -- see the contract
+// in the package doc.
+func (p *Plan) Emit() {
+	prefix := fkdata.ModName() + "-"
+	for _, name := range p.items {
+		fkdata.Extend(fkdata.Obj(
+			fkdata.KVs("type", fkdata.Str("item")),
+			fkdata.KVs("name", fkdata.Str(prefix+name)),
+			fkdata.KVs("icon", fkdata.Str("__core__/graphics/empty.png")),
+			fkdata.KVs("icon_size", fkdata.Num(1)),
+			fkdata.KVs("stack_size", fkdata.Num(50)),
+		))
+	}
+}
+`
+}
+
+func libraryGoDataTest(pkg string) string {
+	return `package ` + pkg + `
+
+import "testing"
+
+// The planner runs on the host, which is the property the file split exists
+// to keep: emission order is declaration order, never a map walk.
+func TestItemsKeepDeclarationOrder(t *testing.T) {
+	var p Plan
+	p.Item("gear")
+	p.Item("axle")
+	got := p.Items()
+	if len(got) != 2 || got[0] != "gear" || got[1] != "axle" {
+		t.Fatalf("declaration order was not kept: %v", got)
+	}
+}
+`
+}
+
+func libraryCargoTomlData(pkg, guestModule string) string {
+	dep := `fkdata = { git = "` + RustSubstrateGit + `" }`
+	note := `# The fkdata dependency resolves from the FkLua repository. ONE SOURCE
+# RULE: if your consumer uses a vendored FkLua checkout (path dependencies),
+# they must [patch] this git source onto their path -- two copies of the
+# substrate crates in one build is a duplicate-symbol link error.`
+	if guestModule != "" {
+		if d := rustSubstrateDir(guestModule); d != "" {
+			dep = `fkdata = { path = "` + filepath.ToSlash(filepath.Join(d, "fkdata")) + `" }`
+			note = `# --guest-module: fkdata resolves from a LOCAL FkLua checkout. Before
+# publishing, switch this to the git source; a path into your machine
+# travels to nobody.`
+		}
+	}
+	return `[package]
+name = "` + pkg + `"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+` + note + `
+#
+# WASM-GATED, so the planner tests on the host with no wasm toolchain
+# installed (cargo still fetches a git source once to resolve the graph).
+# NEVER add fkapi here: there is no runtime API at the data stages and
+# fklua mod refuses a data module that imports it.
+[target.'cfg(target_family = "wasm")'.dependencies]
+` + dep + `
+`
+}
+
+func libraryRustDataLib(string) string {
+	return `//! A FkLua DATA-STAGE guest library: a crate a mod's DATA guest imports,
+//! compiled into the consumer's data module by their own ` + "`fklua mod`" + `.
+//!
+//! THE DATA-LIBRARY CONTRACT, in the order it bites:
+//!
+//! - PLAN, THEN EMIT. Everything before ` + "`emit`" + ` is ordinary values in
+//!   DECLARATION ORDER, host-testable under plain ` + "`cargo test`" + `; the emit
+//!   impl below is the only fkdata-touching code. Never iterate a HashMap to
+//!   decide what to emit: the data stage crosses sorted, and a map walk is a
+//!   per-client order.
+//! - ROUTE, NEVER OWN. The stage exports (` + "`fk_settings`" + `, ` + "`fk_data`" + `, ...)
+//!   are the CONSUMER's; their data guest calls into this library.
+//! - NEVER fkapi. There is no runtime API at these stages and ` + "`fklua mod`" + `
+//!   REFUSES a data module that imports it -- which is also what keeps this
+//!   library pin-transparent.
+//! - PREFIX FROM mod_name. Setting and prototype names are global namespaces
+//!   and a same-type collision is silent last-writer-wins, so everything
+//!   emitted derives its prefix from ` + "`fkdata::mod_name()`" + `.
+//! - DIAGNOSE WITH raise. A panic surfaces as an opaque trap with your
+//!   message lost in the log; ` + "`fkdata::raise`" + ` stops the load with YOUR
+//!   diagnostic, stage-prefixed like every host failure. It never returns.
+
+// no_std in the consumer's wasm, std under ` + "`cargo test`" + `.
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+/// Collects what to emit, in declaration order. Pure, so every rule the
+/// planner enforces is testable on the host.
+#[derive(Default)]
+pub struct Plan {
+    items: Vec<String>,
+}
+
+impl Plan {
+    /// Queues one item prototype by its UNPREFIXED name; emit derives the
+    /// prefix from the packaged mod.
+    pub fn item(&mut self, name: &str) {
+        self.items.push(String::from(name));
+    }
+
+    /// The queued names, in declaration order.
+    pub fn items(&self) -> &[String] {
+        &self.items
+    }
+}
+
+/// The only fkdata-touching code; host builds never see it. Call from the
+/// consumer's own fk_data export.
+#[cfg(target_family = "wasm")]
+impl Plan {
+    pub fn emit(&self) {
+        let prefix = fkdata::mod_name();
+        for name in &self.items {
+            let full = alloc::format!("{prefix}-{name}");
+            fkdata::extend(&[fkdata::obj(&[
+                ("type", fkdata::str_("item")),
+                ("name", fkdata::str_(&full)),
+                ("icon", fkdata::str_("__core__/graphics/empty.png")),
+                ("icon_size", fkdata::num(1.0)),
+                ("stack_size", fkdata::num(50.0)),
+            ])]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod data_tests {
+    use super::*;
+
+    /// Emission order is declaration order, never a map walk.
+    #[test]
+    fn items_keep_declaration_order() {
+        let mut p = Plan::default();
+        p.item("gear");
+        p.item("axle");
+        assert_eq!(p.items(), ["gear", "axle"]);
     }
 }
 `

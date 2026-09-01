@@ -69,11 +69,13 @@ Usage:
                         or the scan could not see everything, 2 the check could
                         not be run. --json writes one verdict object to stdout
   fklua init <mod-name> [--lang go,rust] [--api VERSION]
-  fklua init --library <name> [--lang go|rust] [--guest-module PATH]
+  fklua init --library <name> [--data] [--lang go|rust] [--guest-module PATH]
                         scaffold a guest LIBRARY (a package a consumer's guest
                         imports), with the composition contract in its comments.
                         One language per directory; no fklua.toml, because a
-                        library is not a mod
+                        library is not a mod. --data picks the DATA-STAGE
+                        flavor: fkdata instead of fk, the stage contract, and
+                        Raise as the diagnostic exit
   fklua lock [--check]
   fklua meta --json     one JSON document describing this project, for tools.
                         Top-level keys: fklua (this version), manifest (the

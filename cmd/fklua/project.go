@@ -42,12 +42,18 @@ func runInit(args []string) error {
 	noGuest := false
 	// --library scaffolds a guest LIBRARY rather than a mod -- see library.go.
 	// It shares init's name, --lang and --guest-module and nothing else.
+	// --data picks the DATA-STAGE flavor (fkdata, the stage contract), from
+	// FkRecipes' dogfood report: the control flavor misled a data library's
+	// build in both languages.
 	library := false
+	dataFlavor := false
 	apiTyped := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--library":
 			library = true
+		case args[i] == "--data":
+			dataFlavor = true
 		case isLangArg(args[i]):
 			// Both spellings, for the reason in langArg (main.go).
 			v, next, err := langArg(args, i)
@@ -99,6 +105,11 @@ func runInit(args []string) error {
 			"[--guest-module PATH] [--no-guest], or fklua init --library <name> " +
 			"[--lang go|rust] [--guest-module PATH]")
 	}
+	if !library && dataFlavor {
+		return fmt.Errorf("--data is --library's flavor flag: a MOD's data stage " +
+			"is declared with [fklua] data_module or --data-module on fklua mod, " +
+			"not at init")
+	}
 	if library {
 		// A library has no manifest, no pin and no gc key, so the mod-only
 		// flags are refused rather than ignored -- the same rule runMod applies
@@ -112,7 +123,7 @@ func runInit(args []string) error {
 			return fmt.Errorf("--library and --no-guest contradict: the library " +
 				"IS the guest source")
 		}
-		return initLibrary(p.Name, p.Langs, guestModule)
+		return initLibrary(p.Name, p.Langs, guestModule, dataFlavor)
 	}
 	if p.Title == "" {
 		p.Title = p.Name
