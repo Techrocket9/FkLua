@@ -1,6 +1,7 @@
 package luagen
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -130,6 +131,37 @@ func TestFormatDiagnostics(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output should mention %q:\n%s", want, out)
 		}
+	}
+	// A small list is never collapsed: at or under the cap the output stays
+	// byte for byte what it always was, so a build log does not move.
+	if strings.Contains(out, "more of the same class") {
+		t.Errorf("one finding was collapsed:\n%s", out)
+	}
+}
+
+// A long list collapses into its head plus a count. FkRecipes' dogfood
+// report: a library's 22 internals printed in every consumer's packaging
+// output, unactionable there -- the actionable content is that the class
+// exists and that --nan=exact removes it, not the roll call.
+func TestALongDiagnosticListCollapses(t *testing.T) {
+	var ds []Diagnostic
+	for i := 0; i < diagListCap+14; i++ {
+		ds = append(ds, Diagnostic{
+			Func: fmt.Sprintf("internal%02d", i), Op: "f64.min", Count: 1,
+		})
+	}
+	out := FormatDiagnostics(ds)
+	if !strings.Contains(out, fmt.Sprintf("%d NaN-sensitive", diagListCap+14)) {
+		t.Errorf("the total count is not stated:\n%s", out)
+	}
+	if !strings.Contains(out, "... and 14 more of the same class") {
+		t.Errorf("the tail is not collapsed to a count:\n%s", out)
+	}
+	if strings.Contains(out, fmt.Sprintf("internal%02d", diagListCap)) {
+		t.Errorf("an entry past the cap is still listed by name:\n%s", out)
+	}
+	if !strings.Contains(out, "--nan=exact") {
+		t.Errorf("the remedy is gone:\n%s", out)
 	}
 }
 

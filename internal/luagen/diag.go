@@ -474,8 +474,22 @@ func Diagnose(m *ir.Module, opts Options) []Diagnostic {
 	return out
 }
 
+// diagListCap is how many findings are listed by name before the rest become
+// a count.
+//
+// FROM FkRecipes' DOGFOOD REPORT: a library's 22 NaN-sensitive internals
+// printed in every CONSUMER's packaging output, provably harmless there and
+// unactionable -- the entries name functions the consumer did not write and
+// cannot change. The actionable content was never the list: it is that the
+// class exists, roughly where it lives, and that --nan=exact removes all of
+// it, which the first few entries plus a count still say. At or under the cap
+// the output is byte for byte what it always was, so a small mod's build log
+// does not move.
+const diagListCap = 8
+
 // FormatDiagnostics renders diagnostics for a terminal, collapsing the repeated
-// remedy into one closing line rather than restating it per finding.
+// remedy into one closing line rather than restating it per finding, and
+// collapsing a long list into its head plus a count (see diagListCap).
 func FormatDiagnostics(ds []Diagnostic) string {
 	if len(ds) == 0 {
 		return ""
@@ -483,8 +497,15 @@ func FormatDiagnostics(ds []Diagnostic) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d NaN-sensitive operation(s); results differ from the spec only\n", len(ds))
 	b.WriteString("for NaN sign bits and payloads:\n")
-	for _, d := range ds {
+	listed := ds
+	if len(ds) > diagListCap {
+		listed = ds[:diagListCap]
+	}
+	for _, d := range listed {
 		fmt.Fprintf(&b, "  %s\n", d)
+	}
+	if n := len(ds) - len(listed); n > 0 {
+		fmt.Fprintf(&b, "  ... and %d more of the same class\n", n)
 	}
 	b.WriteString("\nMost programs never observe this. If yours does, recompile with\n")
 	b.WriteString("--nan=exact, which preserves NaN bits at a substantial speed cost.\n")
