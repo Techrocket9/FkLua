@@ -97,6 +97,28 @@ func majorMinor(version string) string {
 // requires it by this name, so the two have to agree.
 const GeneratedModuleFile = "fk_module.lua"
 
+// MapFile is the debug map that sits beside the generated module, naming which
+// guest function each of its line ranges came from. Nothing in the mod reads
+// it: Factorio never loads a .json it was not told about, and the runtime does
+// not know it exists. It is there for tooling outside the game.
+const MapFile = "fk_module.map.json"
+
+// DataMapFile is MapFile for the data-stage module.
+const DataMapFile = "fk_data_module.map.json"
+
+// ChunkLineOffset is how many lines wrapChunk prepends, and so what separates a
+// line number in the emitted chunk from the same line in the packaged file.
+//
+// A CONSTANT WITH A TEST UNDER IT rather than a comment: the wrapper's header
+// is prose, prose gets edited, and an off-by-one here does not fail anything --
+// it silently attributes every function to its neighbour. TestTheWrapperOffsets
+// derives both numbers from the wrappers themselves.
+const ChunkLineOffset = 5
+
+// DataChunkLineOffset is ChunkLineOffset for wrapDataChunk, whose header runs
+// one line longer.
+const DataChunkLineOffset = 6
+
 // ABIFile is the hand-written handle table and dispatcher, copied in verbatim.
 const ABIFile = "fk_abi.lua"
 
@@ -140,6 +162,16 @@ type Package struct {
 	// not a degenerate case -- so a package with no control stage ships no
 	// control.lua, no fk_module.lua and no fk_api_gen.lua. See Files().
 	Chunk string
+	// MapJSON is the debug map for Chunk, already rendered -- see
+	// internal/debugmap, which builds it from the emitter's line spans and the
+	// guest's DWARF.
+	//
+	// EMPTY IS "no map", which is how `fklua mod --no-map` reaches here and why
+	// every packaging in this package's own tests still produces the file list
+	// it always did. The packager does not build the document because building
+	// it means reading the wasm, and a packager that decoded modules would be a
+	// different thing.
+	MapJSON string
 	// Exports names the guest's exported functions, used only to report which
 	// event hooks were recognised.
 	Exports []string
@@ -169,6 +201,8 @@ type Package struct {
 	// module and no [stages], Files() returns exactly the five entries it always
 	// did, byte for byte.
 	DataChunk string
+	// DataMapJSON is MapJSON for the data-stage module, on the same terms.
+	DataMapJSON string
 	// DataExports names the data module's exported functions, which is what
 	// decides WHICH stage files are generated. A mod with only a data stage must
 	// not get an empty settings.lua.
@@ -329,11 +363,19 @@ func (p *Package) Files() (map[string]string, error) {
 		files["control.lua"] = luart.ModGlue()
 		files[APIFile] = api
 		files[GeneratedModuleFile] = wrapChunk(p.Chunk)
+		// Beside the module it describes, and gated on the SAME condition, so a
+		// map can never outlive the file its line numbers refer to.
+		if p.MapJSON != "" {
+			files[MapFile] = p.MapJSON
+		}
 	}
 	// THE DATA STAGE, and everything about it is gated on there being one.
 	if p.DataChunk != "" {
 		files[DataStageFile] = luart.DataStage()
 		files[DataModuleFile] = wrapDataChunk(p.DataChunk)
+		if p.DataMapJSON != "" {
+			files[DataMapFile] = p.DataMapJSON
+		}
 	}
 	// fk_abi.lua IS NOT A CONTROL-STAGE FILE, and reading it as one produces a
 	// mod that will not load. fk_data.lua opens with `require("fk_abi")` -- it

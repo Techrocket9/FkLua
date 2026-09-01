@@ -60,6 +60,7 @@ Derived, never hand-edited. `fklua lock` records the API version, a hash of the 
 - The collector is a cargo feature on the `fk` crate, passed on the command line (`cargo build --features fk/fkgc`) rather than declared in the guest's `Cargo.toml`. Cargo's v2 resolver unifies declared features across every crate built in one invocation, so a declared feature would silently turn the collector on for other crates in the same build. There is no import to add and no second flag; `fk` owns the single `#[global_allocator]` site and the feature chooses what backs it. [Why a Rust guest has a garbage collector at all](memory.md) is its own section.
 - `src/lib.rs` is yours, on the same terms as the Go `main.go`.
 - The release profile ships with `panic = "abort"` (nothing can unwind across the wasm boundary), `opt-level = "s"` and `lto = true` (module size is game load time, and LTO is what lets event-id constants reach `fk.subscribe` so the packaged event table can be pruned). They are requirements, not preferences.
+- The same profile carries `debug = "line-tables-only"`, which is what puts your source file and line into the debug map described below. It costs wasm size and no generated Lua at all: rustc emits the same code section either way, and the debug information rides in custom sections the compiler reads and discards. Measured on the scaffolded guest: 24,599 bytes without the key, 82,959 with it (3.37x), and the emitted `fk_module.lua` identical to the byte. `debug = true` instead covers every function rather than most of them, at 531,423 bytes (21.6x); set it if you want the fuller coverage and do not mind the build artifact.
 
 ## .gitignore
 
@@ -88,18 +89,44 @@ Changing `api` in the manifest is the whole of a pin move: `fklua gen-bindings &
 | `info.json` | rendered from `[mod]` in the manifest |
 | `control.lua` | the runtime: dispatch, persistence, the collector's pacing driver, the hook wiring |
 | `fk_module.lua` | your guest, compiled to Lua and wrapped as a factory |
+| `fk_module.map.json` | the debug map: which guest function each range of `fk_module.lua` lines came from. Left out by `fklua mod --no-map` |
 | `fk_abi.lua` | the handle table and marshalling layer the runtime requires |
 | `fk_api_gen.lua` | the member and event tables, pruned to the ids your guest provably calls |
 
-A mod whose settings and data stages are also a guest ships two more files, plus one per stage hook. None of them appears without `data_module`:
+A mod whose settings and data stages are also a guest ships three more files, plus one per stage hook. None of them appears without `data_module`:
 
 | File | What it is |
 |---|---|
 | `fk_data.lua` | the settings and data stage shim, hand-written and copied in verbatim like `fk_abi.lua` |
 | `fk_data_module.lua` | your data guest, compiled to Lua and wrapped as a factory |
+| `fk_data_module.map.json` | the debug map for the data module, in the same format and on the same terms |
 | `settings.lua`, `data.lua`, `data-updates.lua`, `data-final-fixes.lua` | one per stage hook the data module exports, and none for a hook it does not |
 
 A mod that declares `[scenarios]` ships one more file per scenario, `scenarios/<name>/control.lua`, and none at all without the key.
+
+### The debug map
+
+Your program is not in the Lua state, so a Factorio stack frame or an error location names generated Lua and nothing else. `fk_module.map.json` is what reads that back: a format-versioned JSON document listing every function in the module, with the range of `fk_module.lua` lines it occupies, its wasm function index, its name, and where in your source it was defined.
+
+```json
+{
+  "fklua_map": 1,
+  "module": "fk_module.lua",
+  "functions": [
+    { "lua": [9929, 10997], "wasm": 44, "name": "main.onTick", "src": "main.go", "line": 77 }
+  ]
+}
+```
+
+`functions` is sorted ascending by the first line of each range, the ranges are 1-based, inclusive and non-overlapping, and there is one entry per function the guest defines. So a consumer holding `fk_module.lua:10004` binary-searches the list and gets `main.onTick`, defined at `main.go:77`. That is what it is for: external tooling such as a debug-adapter proxy annotating stack frames, or a log filter turning generated-Lua line numbers into function names. Nothing inside the game reads the file, and Factorio never loads a JSON it was not told about.
+
+Read one field before anything else and ignore fields you do not know: `fklua_map` is the format version, and it moves only when the meaning of an existing field changes.
+
+`name` comes from the wasm name section. Rust symbols are demangled where the scheme allows it, and an entry whose name was rewritten carries the raw symbol in an extra `mangled` field so a linker map or a profile can still be grepped. A function the binary carries no name for is spelled `func[N]` after its wasm index.
+
+`src` and `line` come from the guest's DWARF and appear together or not at all. A Go guest built with the flags the scaffold documents ships DWARF already. A Rust guest ships it because the scaffolded release profile sets `debug = "line-tables-only"`. A guest built without debug information still gets a map, with names and line ranges and no source positions, which is the guaranteed baseline: reading debug information is best effort and never fails a packaging.
+
+The file is a few percent of the module it sits beside (12,429 bytes against 373,295 on the scaffolded Go guest, and the share falls as a guest grows, since an entry costs a couple of hundred bytes however large the function is) and the same input produces the same bytes, so a `--zip` archive stays reproducible. `fklua mod --no-map` leaves it out, along with the data module's `fk_data_module.map.json`; nothing else about the package changes.
 
 ### A mod with no control stage
 
@@ -109,13 +136,13 @@ Factorio requires `info.json` and nothing else, so a mod that is only prototypes
 fklua mod --data-module dist/data.wasm --name my-shim --version 1.0.0 --author me
 ```
 
-or, with `data_module` in the manifest, `fklua mod` on its own. Such a package ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua`, one file per stage hook, and whatever `--include` carries. `control.lua`, `fk_module.lua` and `fk_api_gen.lua` are the three files that describe a running program, and none of them appears. `fk_abi.lua` does, because `fk_data.lua` requires it for the codec that carries a prototype table across the boundary.
+or, with `data_module` in the manifest, `fklua mod` on its own. Such a package ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua`, `fk_data_module.map.json`, one file per stage hook, and whatever `--include` carries. `control.lua`, `fk_module.lua` and `fk_api_gen.lua` are the three files that describe a running program, and none of them appears; neither does `fk_module.map.json`, which is a map of a file that is not there. `fk_abi.lua` does appear, because `fk_data.lua` requires it for the codec that carries a prototype table across the boundary.
 
 `--persist`, `--gc` and `--fuel` describe how a control guest is compiled, so passing one here is refused rather than ignored: a data module is always compiled `--persist=none` and `-gc=leaking`, because it runs once and dies with the Lua state that built it. The refusal is on the flag alone. A `gc` key in the manifest is a statement about the mod that manifest describes, so one project can still package a data-only mod from the command line beside a collected one.
 
 Giving neither a control module nor a data module is an error: the command needs something to package.
 
-The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
+The build output states what it did: the size of the Lua it wrote, the modes it used, each guest export it wired to a Factorio hook, the debug map it wrote and how many of its entries carry a source position (`debug map: fk_module.map.json (43 function(s), 41 with source lines)`), and the pruning result (`API 2.0.77: 1 members, pruned from 4259`). An id the scan cannot prove constant ships the full table instead, which is a bigger mod but never a broken one, and the output says so.
 
 A mod with a hand-written data stage ships it through `data = "DIR"` under `[mod]` (or `fklua mod --include DIR`); the directory's contents are merged into the package, and a name collision with a generated file is an error at package time rather than a mod that is silently wrong in game. A mod whose data stage is a guest declares `data_module` under `[fklua]` instead, and can run both at once while it moves from one to the other: see [`docs/data-stage.md`](data-stage.md). The packaged output itself is disposable: edit the guest or the manifest and run `fklua mod` again.
 

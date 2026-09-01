@@ -194,9 +194,43 @@ func EmitModule(m *ir.Module) (string, error) {
 	return EmitModuleWith(m, Options{})
 }
 
+// FuncSpan is where one wasm function's Lua text sits in the emitted chunk:
+// the banner comment line through the line that closes the body, 1-based and
+// inclusive, in the chunk's own coordinates.
+//
+// ONE WASM FUNCTION IS ALWAYS EXACTLY ONE LUA FUNCTION, which is what makes a
+// line range meaningful at all. The jump relay rewrites a body in place and
+// never splits one, and nothing prunes a function from the emitted chunk, so
+// the spans cover every defined function, in wasm index order, without
+// overlapping. The wrapper a packaged module gets adds a constant to both ends
+// and changes nothing else -- see internal/factorio, ChunkLineOffset.
+type FuncSpan struct {
+	// Name is the function's name-section name, or FkLua's synthetic func[N]
+	// when the binary carries none. It is the raw name: demangling belongs to
+	// the consumer, which is what keeps this a fact about the chunk.
+	Name string
+	// Index is the canonical wasm function index, counting imports first.
+	Index uint32
+	// Start and End are 1-based inclusive line numbers in the chunk.
+	Start, End int
+}
+
 // EmitModuleWith renders a whole module as a standalone Lua chunk that returns
 // a table of its exports.
 func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
+	src, _, err := EmitModuleSpans(m, opts)
+	return src, err
+}
+
+// EmitModuleSpans is EmitModuleWith plus where each function landed.
+//
+// The chunk is identical either way: the spans are a byproduct of the jump
+// check the emitter already performs, measured after the relay has finished
+// rewriting, so nothing about the emitted text turns on which entry point was
+// called. It is a second entry point rather than a wider signature because
+// EmitModuleWith has some seventy call sites and almost none of them wants an
+// answer to this question.
+func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 	b := &builder{opts: opts, opt: opts.Opt, plans: map[uint32]*analysis.Spill{}}
 	for _, f := range m.Funcs {
 		if f.Unsupported != nil {
@@ -206,7 +240,7 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 			b.plans[f.Index] = sp
 			b.spilled = true
 		} else if f.NumSlots+1 > ir.MaxSlots {
-			return "", &ir.TooManySlotsError{
+			return "", nil, &ir.TooManySlotsError{
 				Func: f.Name, Needed: f.NumSlots, Max: ir.MaxSlots,
 				Params: len(f.Params), Locals: len(f.Locals), MaxStack: f.MaxStack,
 			}
@@ -236,7 +270,7 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	emitFrameStack(b)
 	emitImports(b, m)
 	if err := emitModuleState(b, m); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	emitBranchTables(b, m)
 	emitUpvalueDecls(b, m)
@@ -250,15 +284,16 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	// rather than per FUNCTION is measured.
 	type emitted struct {
 		name       string
+		index      uint32
 		start, end int
 	}
 	spans := make([]emitted, 0, len(m.Funcs))
 	for _, f := range m.Funcs {
 		start := b.sb.Len()
 		if err := emitFunc(b, f); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		spans = append(spans, emitted{name: f.Name, start: start, end: b.sb.Len()})
+		spans = append(spans, emitted{name: f.Name, index: f.Index, start: start, end: b.sb.Len()})
 		b.blank()
 	}
 
@@ -350,7 +385,7 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 
 	src := b.sb.String()
 	if err := checkChunkLocals(src, m); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// Each function is measured against Lua's sBx limit, and one that is over it
 	// has its jump RELAYED through a ladder of trampolines before anything is
@@ -359,20 +394,45 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 	// function's text in place, so every span after it shifts by whatever was
 	// inserted; nothing outside that function moves, and no local is added, so
 	// checkChunkLocals above stays valid.
+	//
+	// The line ranges are taken HERE, inside the same walk, because this is the
+	// only place the spans and the final text are both in hand: a range measured
+	// before the relay would be wrong for every function after a rewritten one,
+	// by however many trampoline lines were inserted. The newline count rides a
+	// cursor that only ever moves forward -- spans are ascending and disjoint,
+	// and a rewrite touches only bytes the cursor has not reached yet -- so the
+	// whole map costs one pass over the chunk.
+	out := make([]FuncSpan, 0, len(spans))
 	delta := 0
+	cursor, line := 0, 1
+	advance := func(to int) int {
+		for cursor < to {
+			if src[cursor] == '\n' {
+				line++
+			}
+			cursor++
+		}
+		return line
+	}
 	for _, e := range spans {
 		start, end := e.start+delta, e.end+delta
 		body := src[start:end]
 		fixed, err := relayOrRefuse(e.name, body)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if fixed != body {
 			src = src[:start] + fixed + src[end:]
 			delta += len(fixed) - len(body)
+			end = start + len(fixed)
 		}
+		first := advance(start)
+		// end-1 rather than end: a span stops just past the newline that
+		// terminates its closing line, and it is that line the range names.
+		last := advance(end - 1)
+		out = append(out, FuncSpan{Name: e.name, Index: e.index, Start: first, End: last})
 	}
-	return src, nil
+	return src, out, nil
 }
 
 // maxChunkLocals is Lua's per-function local limit, which a chunk is subject to

@@ -241,8 +241,11 @@ func TestModPackagesADataStageOnlyMod(t *testing.T) {
 		t.Fatal(err)
 	}
 	have := modFiles(t, filepath.Join(out, "stand-in_1.0.0"))
+	// The debug map is written beside the data module it describes, which is
+	// why the list is six rather than the five files this mod's Lua consists
+	// of. Nothing in the game reads it; --no-map leaves it out.
 	want := []string{"info.json", factorio.ABIFile, factorio.DataStageFile,
-		factorio.DataModuleFile, "data.lua"}
+		factorio.DataModuleFile, factorio.DataMapFile, "data.lua"}
 	for _, w := range want {
 		if !have[w] {
 			t.Errorf("a data-stage-only mod has no %s", w)
@@ -357,19 +360,31 @@ func TestControlOnlyFlagsAreRefusedWithoutAControlModule(t *testing.T) {
 	}
 }
 
-// A mod with no data module ships exactly what it always shipped. The
-// packager's own byte-identity gate is in internal/factorio; this is the same
-// property through the command, because that is where a default could be
-// introduced by accident.
-func TestModWithoutADataModuleShipsFiveFiles(t *testing.T) {
+// A mod with no data module ships exactly what it always shipped, plus the
+// debug map that sits beside the generated module. The packager's own
+// byte-identity gate is in internal/factorio; this is the same property through
+// the command, because that is where a default could be introduced by accident.
+//
+// --no-map is the arm that still ships five, which is what makes the map an
+// addition rather than a change to the mod: the five Lua files are untouched
+// either way, and TestNoMapSubtractsOnlyTheMap compares them byte for byte.
+func TestModWithoutADataModuleShipsFiveFilesAndAMap(t *testing.T) {
 	out := t.TempDir()
 	if err := runMod([]string{tinyGuest(t), "--name", "a-mod", "--version", "0.1.0",
 		"--author", "someone", "-o", out}); err != nil {
 		t.Fatal(err)
 	}
 	have := modFiles(t, filepath.Join(out, "a-mod_0.1.0"))
-	if len(have) != 5 {
+	if len(have) != 6 || !have[factorio.MapFile] {
 		t.Errorf("a mod with no data module ships %d files: %v", len(have), have)
+	}
+	bare := t.TempDir()
+	if err := runMod([]string{tinyGuest(t), "--name", "a-mod", "--version", "0.1.0",
+		"--author", "someone", "--no-map", "-o", bare}); err != nil {
+		t.Fatal(err)
+	}
+	if got := modFiles(t, filepath.Join(bare, "a-mod_0.1.0")); len(got) != 5 {
+		t.Errorf("--no-map ships %d files: %v", len(got), got)
 	}
 	for _, unwanted := range []string{factorio.DataStageFile, factorio.DataModuleFile,
 		"settings.lua", "data.lua", "data-updates.lua", "data-final-fixes.lua"} {

@@ -11,8 +11,17 @@ members = ["fk", "fkgc", "fkapi", "fkipc", "fkdata", "fklog", "examples/hello", 
 # boundary -- FkLua compiles a trap, and a Factorio mod that unwinds mid-tick
 # has nowhere to unwind to. opt-level="s" and lto because the generated Lua is
 # parsed by the game at load, so module size is load time.
+#
+# debug = "line-tables-only" is what puts a source file and line into
+# fk_module.map.json, so a Lua stack frame can be read back to the Rust it came
+# from. It costs wasm size and NOT ONE BYTE of generated Lua: rustc emits the
+# same code section either way, and the debug info rides in custom sections the
+# compiler reads and drops. debug = true covers every function instead of most
+# of them, for a much larger wasm. The scaffold cmd/fklua/scaffold.go writes
+# carries the same four lines and the same key; the two are meant to match.
 [profile.release]
 opt-level = "s"
 lto = true
 panic = "abort"
 codegen-units = 1
+debug = "line-tables-only"

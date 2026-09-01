@@ -1,6 +1,6 @@
 # Debugging a guest
 
-There is no debugger for a running FkLua mod, and there is not going to be one: your program is not in the Lua state, so Factorio's own instrument mode has nothing to attach to. What there is instead is four ways to make the guest say what it is doing, and a loop that turns a question into an answer in about a minute.
+There is no debugger for a running FkLua mod: your program is not in the Lua state, so Factorio's own instrument mode has nothing to attach to. What there is instead is four ways to make the guest say what it is doing, a loop that turns a question into an answer in about a minute, and a map that says which of your functions a line of generated Lua belongs to.
 
 ## The four instruments
 
@@ -50,6 +50,22 @@ In Rust the same functions are `fklog::start`, `fklog::u`, `fklog::s`, `fklog::e
 
 Two things to know about it. A line longer than the buffer is **truncated rather than grown**, which is what keeps the appenders one memcpy each. And **you may not make a host call between `Start` and `End`**: there is one buffer, and an event Factorio raises synchronously from inside a call you made would build its own line over the top of yours.
 
+## Reading a generated-Lua line back to your own code
+
+A traceback or an error from a running mod points at `fk_module.lua` and a line number, which is true and tells you nothing. `fklua mod` writes `fk_module.map.json` beside the module to close that gap: it lists every function in the module with the range of Lua lines it occupies, its name, and, when the guest carries debug information, the source file and line it was defined at. Look up the line, get the function.
+
+```json
+{ "lua": [9929, 10997], "wasm": 44, "name": "main.onTick", "src": "main.go", "line": 77 }
+```
+
+So `fk_module.lua:10004` is somewhere inside `main.onTick`, written at `main.go:77`. The format is described in [generated-files.md](generated-files.md); the short version is that `functions` is sorted by first line and the ranges do not overlap, so a lookup is a binary search. It is meant to be read by tooling as much as by a person: a debug-adapter proxy annotating stack frames, or a filter over log output that rewrites `fk_module.lua:N` into a function name.
+
+What it gives you is attribution and nothing more. There are no breakpoints, no stepping and no variables, and the map does not change where execution happens: the Lua location stays the real location, and the map only says whose code that is. It is function granularity, not statement granularity, so it will not tell you which line of `onTick` you were on.
+
+A Go guest built with the flags the scaffold documents already carries the debug information the source positions come from. A Rust guest carries it because the scaffolded release profile sets `debug = "line-tables-only"`, which covers most functions and costs no generated Lua at all. Setting `debug = true` instead covers every function, at a much larger wasm (measured on the scaffolded guest: 82,959 bytes at line tables, 531,423 with full debug information, against 24,599 with neither). A guest built with no debug information still gets a map, with names and line ranges and no source positions.
+
+`fklua mod --no-map` leaves the file out.
+
 ## The loop
 
 Most questions are answered without launching the game at all. `bin/lua52f` is a Lua 5.2.1 built to match Factorio's sandbox, and a packaged mod is ordinary Lua, so it can be driven directly with stand-ins for the game globals:
@@ -95,3 +111,5 @@ Read `factorio-current.log` in your Factorio user directory. Three failures acco
 ## What is out of scope, and why
 
 Factorio's instrument mode injects Lua into a mod's own state to debug it. An FkLua guest's program is not in its Lua state, so there is nothing there for it to reach: the debugger for a guest is a Go or Rust debugger, run against the same source with the host calls stubbed.
+
+The debug map does not change that. It names the function a Lua line belongs to, which is enough to read a traceback and to label a stack frame, and it is not a source-level debugger: stepping, breakpoints and variable inspection would all need the guest's state to be visible from Lua, and it is not.

@@ -21,6 +21,7 @@ import (
 
 	"github.com/Techrocket9/fklua/internal/analysis"
 	"github.com/Techrocket9/fklua/internal/bench"
+	"github.com/Techrocket9/fklua/internal/debugmap"
 	"github.com/Techrocket9/fklua/internal/factorio"
 	"github.com/Techrocket9/fklua/internal/ir"
 	"github.com/Techrocket9/fklua/internal/luagen"
@@ -44,8 +45,15 @@ Usage:
             [--gc=leaking|collected] [--api=VERSION] [--factorio-version X.Y]
             [--data-module DATA.wasm] [--stage KEY=a,@guest,b]...
             [--name NAME] [--version X.Y.Z] [--title T] [--author A]
-            [--description D] [--dependency DEP]... [--report FILE]
+            [--description D] [--dependency DEP]... [--report FILE] [--no-map]
                                      (identity defaults to fklua.toml's [mod])
+      --no-map          do not write fk_module.map.json beside the generated
+                        module (and fk_data_module.map.json beside a data one).
+                        The map says which guest function each range of Lua
+                        lines came from, and where in your source it was
+                        defined when the guest carries debug info; nothing in
+                        the game reads it, and it is a few percent of the
+                        module's size
       --report FILE     write one JSON document a tool can drive on: the
                         pruning verdicts, the pin and signature outcomes, the
                         wired hooks and the outputs. Written on success AND on
@@ -865,7 +873,10 @@ func runCompile(args []string) error {
 		return err
 	}
 	opts := luagen.Options{NaN: nan, Opt: opt, Persist: persist, GC: gc}
-	src, err := emitWithDiagnostics(im, opts)
+	// `compile` writes the bare chunk, at no offset and beside nothing, so
+	// there is no packaged file for a map to be a map OF. The spans are
+	// discarded here on purpose.
+	src, _, err := emitWithDiagnostics(im, opts)
 	if err != nil {
 		return err
 	}
@@ -1339,10 +1350,14 @@ func decodeModule(path string, raw []byte) (*ir.Module, error) {
 
 // emitWithDiagnostics renders a module and writes everything the emitted code
 // cannot reproduce exactly to stderr.
-func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, error) {
-	src, err := luagen.EmitModuleWith(im, opts)
+//
+// The line spans come back with the source because they are a byproduct of the
+// jump check the emitter already performs, and because the only way to get them
+// afterwards would be to re-derive function boundaries from the text.
+func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, []luagen.FuncSpan, error) {
+	src, spans, err := luagen.EmitModuleSpans(im, opts)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Functions the compiler could not handle at all are reported first: they
@@ -1363,7 +1378,13 @@ func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, error) {
 	if ds := luagen.Diagnose(im, opts); len(ds) > 0 {
 		fmt.Fprint(os.Stderr, luagen.FormatDiagnostics(ds))
 	}
-	return src, nil
+	return src, spans, nil
+}
+
+// mapNote is one map's half of the line the packager prints about them.
+func mapNote(name string, m debugmap.Map) string {
+	return fmt.Sprintf("%s (%d function(s), %d with source lines)",
+		name, len(m.Functions), m.WithSource())
 }
 
 // runMod compiles a module and packages it as a mod Factorio will load.
@@ -1391,6 +1412,13 @@ func runModWith(args []string, rep *modReport) error {
 	var in, outDir string
 	var include []string
 	zip := false
+	// WHETHER THE DEBUG MAP IS SUPPRESSED. It is emitted by default: it is a
+	// few percent of the module it sits beside (measured 12,429 bytes against
+	// 373,295 on the Go scaffold, and the ratio falls as a guest grows because
+	// an entry is a constant ~200 bytes), nothing in the game reads it, and a
+	// debugging aid nobody remembered to ask for is a debugging aid nobody has
+	// when they need it.
+	noMap := false
 	info := factorio.Info{FactorioVersion: factorio.DefaultFactorioVersion}
 	nan := luagen.NaNCanonical
 	opt := analysis.DefaultLevel
@@ -1499,6 +1527,12 @@ func runModWith(args []string, rep *modReport) error {
 			}
 		case args[i] == "--zip":
 			zip = true
+		case args[i] == "--no-map":
+			// NEGATIVE, because the map is emitted by default and a flag that
+			// turned it on would leave the common case unnamed. --no-guest is
+			// the precedent. A typo is a hard error rather than a silent
+			// no-map, through the unknown-flag arm at the bottom of this switch.
+			noMap = true
 		case args[i] == "--include":
 			var dir string
 			if err = str(&i, "--include", &dir); err == nil {
@@ -1792,6 +1826,10 @@ func runModWith(args []string, rep *modReport) error {
 	// from a module that by design carries none.
 	var im *ir.Module
 	var src string
+	// What the one map line at the end of this command says, one entry per map
+	// written. Collected as it goes because the two modules are packaged
+	// hundreds of lines apart and the output belongs together.
+	var mapNotes []string
 	pkg := &factorio.Package{Info: info, Stages: stages, Scenarios: scenarios}
 	if in != "" {
 		// BELOW the pin resolution above, and it has to be: the build stamp is a
@@ -1822,12 +1860,28 @@ func runModWith(args []string, rep *modReport) error {
 		}
 		rep.Build.GC = gc.String()
 		rep.Build.Persist = persist.String()
-		src, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
+		var spans []luagen.FuncSpan
+		src, spans, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
 			GC: gc, Fuel: fuel, Roots: hookNames()})
 		if err != nil {
 			return refuse("emit", err)
 		}
 		pkg.Chunk = src
+		if !noMap {
+			// A REFUSAL HERE WOULD BE THE WRONG TRADE. The map is a sidecar
+			// nothing loads; the only way this fails is a JSON encoder that
+			// cannot render its own struct, and refusing to package a working
+			// mod over it would be worse than shipping without it.
+			dm := debugmap.Build(factorio.GeneratedModuleFile, spans,
+				factorio.ChunkLineOffset, im.Source)
+			b, err := dm.JSON()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: no %s: %v\n", factorio.MapFile, err)
+			} else {
+				pkg.MapJSON = string(b)
+				mapNotes = append(mapNotes, mapNote(factorio.MapFile, dm))
+			}
+		}
 		for _, e := range im.Exports {
 			pkg.Exports = append(pkg.Exports, e.Name)
 		}
@@ -1862,7 +1916,7 @@ func runModWith(args []string, rep *modReport) error {
 		if err := factorio.CheckDataModule(imports, exports); err != nil {
 			return refuse("data_module", fmt.Errorf("%s: %w", dataModule, err))
 		}
-		dsrc, err := emitWithDiagnostics(dim, luagen.Options{
+		dsrc, dspans, err := emitWithDiagnostics(dim, luagen.Options{
 			NaN: nan, Opt: opt, Persist: luagen.PersistNone, GC: luagen.GCLeaking,
 			Roots: factorio.StageExportNames(),
 		})
@@ -1870,6 +1924,21 @@ func runModWith(args []string, rep *modReport) error {
 			return refuse("emit", err)
 		}
 		pkg.DataChunk = dsrc
+		// THE DATA MODULE IS COVERED TOO, at its own wrapper offset. It is a
+		// second wasm module through the same pipeline, and a prototype loop
+		// that raises at the data stage lands in generated Lua exactly the way
+		// a control-stage one does.
+		if !noMap {
+			dm := debugmap.Build(factorio.DataModuleFile, dspans,
+				factorio.DataChunkLineOffset, dim.Source)
+			b, err := dm.JSON()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: no %s: %v\n", factorio.DataMapFile, err)
+			} else {
+				pkg.DataMapJSON = string(b)
+				mapNotes = append(mapNotes, mapNote(factorio.DataMapFile, dm))
+			}
+		}
 		pkg.DataExports = exports
 		dataModuleSize = len(dsrc)
 	}
@@ -1943,6 +2012,15 @@ func runModWith(args []string, rep *modReport) error {
 	}
 	if dataModule != "" {
 		fmt.Printf("  data module %s (%d bytes of Lua)\n", dataModule, dataModuleSize)
+	}
+	// ONE LINE, BELOW THE `wrote` LINE, and the `wrote` line itself is untouched
+	// to the byte -- it is what every build in and outside this repo greps, and
+	// a sidecar is not a reason to move it. Which files, how many functions each
+	// names, and how many of those carry a source position, because that last
+	// number is the one an author can act on: a guest built without debug info
+	// says 0 here and the remedy is a build flag.
+	if len(mapNotes) > 0 {
+		fmt.Printf("  debug map: %s\n", strings.Join(mapNotes, ", "))
 	}
 	// HAND-WRITTEN LUA, NAMED WHERE IT IS CARRIED PAST THE COMPILER. A mod's own
 	// state is the guest's heap and the heap is migrated by fk_migrate;

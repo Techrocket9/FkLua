@@ -804,6 +804,52 @@ type Module struct {
 	// still compiles, it simply never runs, so a guest that initialises there
 	// starts up with everything unset.
 	Start int
+
+	// Custom holds the binary's custom sections other than "name", in the order
+	// they appeared. Nothing in the compiler reads them: they carry the guest's
+	// DWARF, which the debug map resolves into source file and line, and a
+	// decoder that dropped them would leave that information unreachable
+	// without a second pass over the file.
+	//
+	// Nil for a module decoded from text -- WAT carries no custom sections.
+	Custom []CustomSection
+
+	// CodeSpans is where each DEFINED function's body sits in the binary,
+	// parallel to Funcs and in the same order. Offsets are relative to the CODE
+	// SECTION PAYLOAD, which is the coordinate system DWARF's DW_AT_low_pc uses
+	// for a wasm target: measured on both toolchains, low_pc equals the body's
+	// payload offset exactly, and equals nothing at all when read as a file
+	// offset.
+	//
+	// Nil for a module decoded from text, and nil rather than partial when the
+	// code section cannot be walked -- the join it feeds is best effort, and a
+	// wrong offset would attribute one function's source line to another.
+	CodeSpans []CodeSpan
+}
+
+// CustomSection is one custom section preserved from the binary. Payload is the
+// bytes after the section's name field, uninterpreted.
+type CustomSection struct {
+	Name    string
+	Payload []byte
+}
+
+// CodeSpan is one function body's byte range within the code section payload.
+// Lo is the first byte of the body (the local declarations), Hi one past its
+// last.
+type CodeSpan struct {
+	Lo, Hi uint32
+}
+
+// CustomSectionByName returns a custom section's payload, and whether the
+// module carries one by that name.
+func (m *Module) CustomSectionByName(name string) ([]byte, bool) {
+	for i := range m.Custom {
+		if m.Custom[i].Name == name {
+			return m.Custom[i].Payload, true
+		}
+	}
+	return nil, false
 }
 
 // NumFuncs is the size of the function index space: imports plus definitions.
@@ -940,7 +986,18 @@ func Decode(b []byte) (*Module, error) {
 	if err := watgo.ValidateModule(wm); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
-	return convert(wm)
+	m, err := convert(wm)
+	if err != nil {
+		return nil, err
+	}
+	// The body offsets, which only the raw bytes carry -- see codespans.go. A
+	// count that disagrees with the decoded function list means the walk and
+	// the decoder read different things, so the whole answer is dropped rather
+	// than half-trusted.
+	if spans := codeSpans(b); len(spans) == len(m.Funcs) {
+		m.CodeSpans = spans
+	}
+	return m, nil
 }
 
 // DecodeWAT compiles WebAssembly text and decodes it. Used by tests, which are
@@ -955,6 +1012,13 @@ func DecodeWAT(src string) (*Module, error) {
 
 func convert(wm *wasmir.Module) (*Module, error) {
 	m := &Module{Start: -1}
+
+	// Custom sections ride through untouched. watgo already handles "name"
+	// separately and never puts it here, which is what we want: the names are
+	// on Func, and what is left is the DWARF the debug map reads.
+	for _, cs := range wm.CustomSections {
+		m.Custom = append(m.Custom, CustomSection{Name: cs.Name, Payload: cs.Payload})
+	}
 
 	for i, td := range wm.Types {
 		if td.Kind != wasmir.TypeDefKindFunc {

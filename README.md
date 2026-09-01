@@ -99,7 +99,7 @@ fklua gen-bindings && fklua lock
 fklua mod guest/rust/target/wasm32-unknown-unknown/release/my_mod_guest.wasm
 ```
 
-`init` scaffolds `guest/rust/` as a two-member cargo workspace, the generated `fkapi` crate beside your guest, with `panic=abort`, `lto` and `opt-level="s"` already set. `--features fk/fkgc` is the collector: no import and no second flag, because the `fk` crate owns the single `#[global_allocator]` site. Yes, a Rust project with a garbage collector; [`docs/memory.md`](docs/memory.md) explains why. If a crate reaches a wasm feature FkLua does not compile (`multivalue`, `reference-types`), `fklua compile` names it; the recipe for turning those off is in [`agents/guests.md`](agents/guests.md).
+`init` scaffolds `guest/rust/` as a two-member cargo workspace, the generated `fkapi` crate beside your guest, with `panic=abort`, `lto`, `opt-level="s"` and `debug="line-tables-only"` already set. `--features fk/fkgc` is the collector: no import and no second flag, because the `fk` crate owns the single `#[global_allocator]` site. Yes, a Rust project with a garbage collector; [`docs/memory.md`](docs/memory.md) explains why. If a crate reaches a wasm feature FkLua does not compile (`multivalue`, `reference-types`), `fklua compile` names it; the recipe for turning those off is in [`agents/guests.md`](agents/guests.md).
 
 ---
 

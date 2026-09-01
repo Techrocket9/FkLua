@@ -531,7 +531,14 @@ func rustWorkspaceCargo(modName, guestModule string) string {
 	fmt.Fprintf(&b, "# parsed by the game at load, so module size is load time. lto is also what\n")
 	fmt.Fprintf(&b, "# lets the event-id constants reach fk.subscribe, which is what prunes the\n")
 	fmt.Fprintf(&b, "# whole event descriptor table down to the ones this guest uses.\n")
-	fmt.Fprintf(&b, "[profile.release]\nopt-level = \"s\"\nlto = true\npanic = \"abort\"\ncodegen-units = 1\n")
+	fmt.Fprintf(&b, "#\n")
+	fmt.Fprintf(&b, "# debug = \"line-tables-only\" is what puts your source file and line into\n")
+	fmt.Fprintf(&b, "# fk_module.map.json, so a Lua stack frame can be read back to the Rust it\n")
+	fmt.Fprintf(&b, "# came from. It costs wasm size and NOT ONE BYTE of generated Lua: rustc\n")
+	fmt.Fprintf(&b, "# emits the same code section either way, and the debug info rides in\n")
+	fmt.Fprintf(&b, "# custom sections the compiler reads and drops. debug = true covers every\n")
+	fmt.Fprintf(&b, "# function instead of most of them, for a much larger wasm.\n")
+	fmt.Fprintf(&b, "[profile.release]\nopt-level = \"s\"\nlto = true\npanic = \"abort\"\ncodegen-units = 1\ndebug = \"line-tables-only\"\n")
 	return b.String()
 }
 
