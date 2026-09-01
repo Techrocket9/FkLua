@@ -89,6 +89,24 @@ func onInit() {
 		fk.Log(out)
 	}
 
+	// 3b. THE SAME STRUCT SHAPE ARRIVING AS AN ARRAY. `Vector` is declared
+	//     `table{x,y} | tuple[float,float]` and the description says outright
+	//     which one the engine sends: "The game will always provide the array
+	//     format". The MapPositions above are the KEYED form of the same shape,
+	//     so the two lines together say the host reads either -- and until the
+	//     descriptor carried pos=, this one printed (0.00,0.00) with status OK
+	//     and nothing logged, which is what WormholeBelts measured off
+	//     inserter_drop_position (item 8).
+	drop, err := fkapi.LuaEntityPrototype{Object: first}.InserterDropPosition()
+	if err != nil {
+		fk.Log("inserter_drop_position failed: " + err.Error())
+	} else if drop == nil {
+		fk.Log("shorthand struct: absent")
+	} else {
+		fk.Log("shorthand struct: (" + strconv.FormatFloat(float64(drop.X), 'f', 2, 32) +
+			"," + strconv.FormatFloat(float64(drop.Y), 'f', 2, 32) + ")")
+	}
+
 	// 4. A DICTIONARY, which is the same walk over key/value pairs -- the pair
 	//    is a two-field block, so the value's offset is the key's padded size
 	//    rather than the key's width.

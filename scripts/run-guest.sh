@@ -34,6 +34,11 @@ OPT="${OPT:-}"
 # real game.
 LANG_="${LANG_:-go}"
 GUEST="${GUEST:-hello}"
+# Lines whose VALUE this guest must log, as opposed to a pattern that only says
+# the guest spoke at all. ONE EXTENDED REGEX PER LINE, all of which have to
+# match; empty for every guest that has none. See the check after the run, which
+# is where the reason it exists is written down.
+MUST_RE=""
 case "$GUEST" in
   hello) MODNAME=fk-hello; INIT_RE="hello from (Go|Rust)|fnv64"; RUN_RE="(tick [0-9]+ seen=)" ;;
   goroutine) MODNAME=fk-gor; INIT_RE="goroutines:|pipeline sum:"
@@ -48,7 +53,46 @@ case "$GUEST" in
          # this pattern because a line nobody prints is a line nobody checks:
          # both ran green in game for two milestones' worth of runs before
          # anyone looked in the raw log to find out.
-         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|bulk: |index-assign|last-error|global-fn|multi-return)" ;;
+         # `shorthand struct` is the one leg here no stub can stand in for: a
+         # `table | tuple` concept is sent by the ENGINE in whichever form it
+         # chooses, and Vector's own description says it always chooses the
+         # array. A stub returns whatever it was written to return, so this is
+         # where the descriptor's pos= flag is checked against a real Factorio.
+         # It read 0.00,0.00 with status OK before that flag existed.
+         #
+         # `inserter_drop_position` is in the pattern BESIDE it because only
+         # TWO of the leg's branches say `shorthand struct`. Counted in the
+         # source rather than remembered: the leg has SIX branches, an if/else-if
+         # chain in guest/go/examples/api/main.go and the same six arms written
+         # as a nested match in guest/rust/examples/api/src/lib.rs. Two of them
+         # say `shorthand struct` (the value and the absent case); the member's
+         # own failure branch logs `inserter_drop_position failed:`, which
+         # without this token would vanish from the output entirely rather than
+         # reporting; and the THREE branches above that one name
+         # `prototypes.entity` instead. `entity\.position` is in the pattern for
+         # the SAME reason one member over: the second read's success line says
+         # `keyed struct:` and matches no other alternative, and its failure
+         # branch logs `entity.position failed:`, so without the token the whole
+         # keyed half would be missing from the determinism comparison instead of
+         # reported. Those three are covered by MUST_RE below
+         # rather than here -- a line that is simply GONE is what a presence grep
+         # cannot see.
+         RUN_RE="(game\\.speed|game\\.tick|event: on_tick #|no string crossed|reused buffer|surfaces= |chunk operator|inventory operators|shorthand struct|inserter_drop_position|entity\\.position|bulk: |index-assign|last-error|global-fn|multi-return)"
+         # THE TWO VALUES IN THIS SCRIPT THAT ARE ASSERTED RATHER THAN READ,
+         # and they are one measurement in two halves. Base's own inserter drops
+         # at (0, 1.2) and the chest the guest builds stands at (8.5, 8.5), and
+         # the whole point of the leg is the NUMBERS: a positional read that
+         # regressed would print a perfectly well-formed 0.00,0.00.
+         #
+         # The second line is the OTHER FORM of the same shape. Vector and
+         # MapPosition are both `table | tuple` concepts and both carry pos=,
+         # and the engine sends the first as an array and the second keyed --
+         # which is the per-member choice this whole change rests on. Asserting
+         # both is what makes the run a measurement of it rather than a
+         # transcription: the array form has to keep reading through the
+         # fallback, and the keyed form has to keep reading without it.
+         MUST_RE="shorthand struct: inserter_drop_position = 0\\.00,1\\.20
+keyed struct: entity\\.position = 8\\.50,8\\.50" ;;
   # The collected guest. Its job here is the one thing no host-side test can
   # do: prove a mod whose guest COLLECTS ITS OWN HEAP loads and runs in the
   # real game. It logs `intact=32/32` alongside the tick counter, so a
@@ -210,6 +254,37 @@ if ! grep -E "$RUN_RE" "$TMPDIR/guest-run.log"; then
   echo "the guest logged nothing; see $TMPDIR/guest-run.log" >&2
   tail -40 "$TMPDIR/guest-run.log" >&2
   exit 1
+fi
+
+# A PRESENCE GREP OVER AN ALTERNATION CANNOT SEE ONE MISSING LINE, and neither
+# can the determinism check below, which only counts what did appear. So a leg
+# that vanished, or that logged a well-formed WRONG NUMBER, passes both: with
+# fk_abi.lua's positional fallback deleted this script printed `shorthand
+# struct: inserter_drop_position = 0.00,0.00`, reported "all guest lines
+# identical", and exited 0 -- which is exactly the defect that leg exists to
+# catch. Writing the expected value down is what closes that.
+#
+# If a future base version moves the inserter's drop position, this fails and
+# names the number it wanted. That is the right outcome for a figure the ABI's
+# own documentation quotes: it is a fact about the engine, and a fact about the
+# engine changing is worth a red run.
+#
+# ONE REGEX PER LINE and every one of them has to match. A single alternation
+# would be the weaker check by exactly the defect above: two halves joined by |
+# are satisfied by either half, so the leg that vanished would take the other
+# one's match and pass.
+if [ -n "$MUST_RE" ]; then
+  while IFS= read -r must; do
+    [ -n "$must" ] || continue
+    if ! grep -qE "$must" "$TMPDIR/guest-run.log"; then
+      echo "the guest did not log the expected value: /$must/" >&2
+      echo "see $TMPDIR/guest-run.log" >&2
+      exit 1
+    fi
+    echo "    value check: /$must/"
+  done <<MUSTEOF
+$MUST_RE
+MUSTEOF
 fi
 
 if [ "$RUNS" -gt 1 ]; then

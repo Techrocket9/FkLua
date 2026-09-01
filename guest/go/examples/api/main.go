@@ -185,6 +185,35 @@ func onTick(tick uint32) {
 	doubled, _ := fkapi.Game.Speed()
 	fk.Log("game.speed doubled = " + strconv.FormatFloat(float64(doubled), 'f', 2, 32))
 
+	// A `table | tuple` CONCEPT, READ OFF A REAL ENGINE, WHICH IS THE ONLY
+	// PLACE THE ARRAY FORM IS OBSERVED. `Vector` is declared as a keyed table
+	// plus an array shorthand and the description says which one the game picks:
+	// "The game will always provide the array format". No stub can prove that --
+	// a stub returns whatever it was written to return -- so the descriptor's
+	// pos= flag is checked against Factorio here and nowhere else. Before it
+	// existed this read 0.00,0.00 with status OK and nothing logged, which is
+	// how WormholeBelts found it (item 8).
+	//
+	// EntityRaw rather than Entity: the handle route reads one prototype where
+	// the materialising form would build every entity prototype in the game.
+	if raw, err := fkapi.Prototypes.EntityRaw(); err != nil {
+		fk.Log("prototypes.entity as a handle failed: " + err.Error())
+	} else if v, err := (fkapi.LuaCustomTable{Object: raw}).
+		Get(fkapi.OfString("inserter")); err != nil {
+		fk.Log("prototypes.entity[inserter] failed: " + err.Error())
+	} else if proto, ok := v.AsObj(); !ok {
+		fk.Log("prototypes.entity[inserter] is not an object")
+	} else if drop, err := (fkapi.LuaEntityPrototype{Object: proto}).
+		InserterDropPosition(); err != nil {
+		fk.Log("inserter_drop_position failed: " + err.Error())
+	} else if drop == nil {
+		fk.Log("shorthand struct: inserter_drop_position absent")
+	} else {
+		fk.Log("shorthand struct: inserter_drop_position = " +
+			strconv.FormatFloat(float64(drop.X), 'f', 2, 32) + "," +
+			strconv.FormatFloat(float64(drop.Y), 'f', 2, 32))
+	}
+
 	// A HOST-SIDE STRING PREDICATE. `surface.name` is a string, and asking
 	// whether it EQUALS one never brings the string across: the comparison
 	// happens in Lua and a bool comes back, so the guest keeps nothing. Under
@@ -244,17 +273,35 @@ func onTick(tick uint32) {
 		))
 		if err != nil || chest == nil {
 			fk.Log("create_entity(iron-chest) did not produce one")
-		} else if inv, err := (fkapi.LuaEntity{Object: *chest}).
-			GetInventory(fkapi.DefinesInventoryChest()); err == nil && inv != nil {
-			box := fkapi.LuaInventory{Object: *inv}
-			n, lerr := box.Length()
-			slot, ierr := box.Get(1)
-			if lerr != nil || ierr != nil {
-				fk.Log("inventory operators failed")
+		} else {
+			// THE OTHER HALF OF THE PER-MEMBER PAIR, MEASURED IN THE SAME RUN
+			// AND OFF AN ENTITY THAT IS ALREADY HERE. `LuaEntity::position` is
+			// a MapPosition: the same table-plus-shorthand shape as the Vector
+			// above, flagged pos= by the same rule -- and the engine sends it
+			// KEYED. So the two lines together are the per-member choice
+			// OBSERVED rather than transcribed: one shape arriving in each of
+			// its two forms, in one run, through one host. The claim was
+			// asserted in six places in this repository and measured in none
+			// of them until this read; it costs one host call.
+			if p, err := (fkapi.LuaEntity{Object: *chest}).Position(); err != nil {
+				fk.Log("entity.position failed: " + err.Error())
 			} else {
-				fk.Log("inventory operators: #inv = " +
-					strconv.FormatUint(uint64(n), 10) + ", inv[1] valid " +
-					strconv.FormatBool(slot.Valid()))
+				fk.Log("keyed struct: entity.position = " +
+					strconv.FormatFloat(p.X, 'f', 2, 64) + "," +
+					strconv.FormatFloat(p.Y, 'f', 2, 64))
+			}
+			if inv, err := (fkapi.LuaEntity{Object: *chest}).
+				GetInventory(fkapi.DefinesInventoryChest()); err == nil && inv != nil {
+				box := fkapi.LuaInventory{Object: *inv}
+				n, lerr := box.Length()
+				slot, ierr := box.Get(1)
+				if lerr != nil || ierr != nil {
+					fk.Log("inventory operators failed")
+				} else {
+					fk.Log("inventory operators: #inv = " +
+						strconv.FormatUint(uint64(n), 10) + ", inv[1] valid " +
+						strconv.FormatBool(slot.Valid()))
+				}
 			}
 		}
 

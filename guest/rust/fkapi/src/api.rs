@@ -1274,7 +1274,7 @@ pub extern "C" fn fk_api_pin_2_0_77() {}
 // the same pin. Language-independent: a Go guest generated from this
 // description carries the same name.
 #[no_mangle]
-pub extern "C" fn fk_api_sig_a130c3ec9c74() {}
+pub extern "C" fn fk_api_sig_03170c04bf2e() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are
 // free functions here for that reason. fk_call's handle operand is

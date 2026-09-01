@@ -214,6 +214,46 @@ type CensusData struct {
 	TableConcepts int `json:"table_shaped_concepts"`
 	StringEnums   int `json:"pure_string_enum_concepts"`
 
+	// PositionalStructs is how many struct POSITIONS in the packaged tables are
+	// marked pos=true -- canonicalUnion's shape A, a concept the description
+	// declares as a keyed table AND an array shorthand, which the engine may
+	// hand over in either form. Counted over every block LuaSourceWith renders:
+	// each member's argument, return and typed-argument blocks, every event
+	// payload and the configuration-changed payload, recursing through nested
+	// structs, array elements and dictionary keys and values.
+	//
+	// POSITIONS AND NOT CONCEPTS, deliberately: ten concepts have the shape at
+	// every committed pin and that number is stable and dull, while a mapper
+	// change that stopped setting the flag on a nested element would leave the
+	// concept count untouched and move this one.
+	//
+	// IT COUNTS POSITIONS THAT CARRY THE FLAG, WHICH IS NOT THE SAME AS
+	// POSITIONS WHERE IT IS READ, and the two differ by about half. An `args=`
+	// block is only ever READ by the host -- decode_args and call_typed both
+	// reach it through read_struct, which produces the keyed form and ignores
+	// `pos` by construction -- so every flag inside one is inert. At 2.0.77 the
+	// 568 is 278 argument positions plus 1 typed-argument position, which no
+	// reader consults, against 225 returns and 64 event-payload positions, which
+	// write_value does; at 2.1.17 the 834 is 282 + 1 against 482 + 69. That is
+	// roughly 2.5 KB of `,pos=true` in argument descriptors nothing reads.
+	//
+	// THE FLAG IS STILL RENDERED ON EVERY KindStruct POSITION, and that is a
+	// decision rather than an oversight: the descriptor is one statement about
+	// the SHAPE of a value, not about a direction, so making it direction-aware
+	// would mean two renderings of the same block and a rule with a side to get
+	// wrong. The day a host path starts writing from an argument descriptor, the
+	// silent answer would be a pair of zeros again -- which is the defect this
+	// row exists for.
+	//
+	// A ROW BECAUSE THE ZERO WAS THE DEFECT. Every one of these read back as
+	// (0, 0) with the presence byte set and status OK for as long as the ABI has
+	// existed, and nothing anywhere counted the population it was silently wrong
+	// about -- which is this file's own standing lesson (see OperatorsBound).
+	// Filed by WormholeBelts (item 8). It is asserted non-zero at every
+	// committed description, because a rule that stopped firing would otherwise
+	// look exactly like a description that stopped carrying the shape.
+	PositionalStructs int `json:"positional_struct_positions"`
+
 	// What the generators made of it.
 	HostMembers int            `json:"host_members_bound"`
 	HostSkipped int            `json:"host_members_skipped"`
@@ -438,6 +478,7 @@ func TakeCensus(a *API) (CensusData, error) {
 	}
 	c.HostEvents, c.EventScratch = len(ev.Events), ev.MaxSize
 	c.HookPayloadFields = len(ev.ConfChanged)
+	c.PositionalStructs = countPositional(r, ev)
 
 	g, err := GenerateGoWith(a, r, ev, "fkapi")
 	if err != nil {
@@ -494,6 +535,60 @@ func TakeCensus(a *API) (CensusData, error) {
 		c.RustDeferBy[k] = v
 	}
 	return c, nil
+}
+
+// countPositional counts the pos=true struct positions in everything
+// LuaSourceWith renders: every member's argument, return and typed-argument
+// block, every event payload, and the configuration-changed payload.
+//
+// It walks the PLACED blocks rather than the FieldSpecs, which is the same thing
+// the descriptor text is rendered from -- so a flag that failed to survive
+// placement is counted as absent here, which is what it would be on the wire.
+// A block whose layout does not compute contributes nothing: LuaSourceWith would
+// refuse to render it, so there is no packaged position to count.
+func countPositional(r Report, ev EventReport) int {
+	n := 0
+	for _, m := range r.Members {
+		if args, rets, err := m.blocks(); err == nil {
+			n += positionalIn(args.Fields) + positionalIn(rets.Fields)
+		}
+		if len(m.TypedArgs) > 0 {
+			if targs, _, err := m.typedBlock(); err == nil {
+				n += positionalIn(targs.Fields)
+			}
+		}
+	}
+	for _, e := range ev.Events {
+		if blk, err := LayoutStruct(e.Fields); err == nil {
+			n += positionalIn(blk.Fields)
+		}
+	}
+	if ev.ConfChanged != nil {
+		if blk, err := LayoutStruct(ev.ConfChanged); err == nil {
+			n += positionalIn(blk.Fields)
+		}
+	}
+	return n
+}
+
+// positionalIn counts flagged struct positions in one placed field list,
+// recursing exactly where placedList does: nested fields, an array's element,
+// and a dictionary's key and value.
+func positionalIn(fs []Placed) int {
+	n := 0
+	for _, f := range fs {
+		if f.Positional {
+			n++
+		}
+		n += positionalIn(f.Fields)
+		if f.Elem != nil {
+			n += positionalIn([]Placed{*f.Elem})
+		}
+		if f.Key != nil {
+			n += positionalIn([]Placed{*f.Key})
+		}
+	}
+	return n
 }
 
 // JSON renders the census the way it is committed: indented, newline-terminated,
@@ -568,6 +663,7 @@ func (c CensusData) Diff(old CensusData) []string {
 	cmp("typed-arg members", old.TypedArgMembers, c.TypedArgMembers)
 	cmp("typed-arg bindings", old.TypedVariantBindings, c.TypedVariantBindings)
 	cmp("collapsed-union argument positions", old.CollapsedUnionArgs, c.CollapsedUnionArgs)
+	cmp("positional struct positions", old.PositionalStructs, c.PositionalStructs)
 	cmp("table-shaped concepts", old.TableConcepts, c.TableConcepts)
 	cmp("pure string-enum concepts", old.StringEnums, c.StringEnums)
 	cmp("host members bound", old.HostMembers, c.HostMembers)

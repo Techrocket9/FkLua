@@ -952,8 +952,24 @@ func (m *typeMapper) mapType(t Type, depth int) (FieldSpec, error) {
 //	ForceID      = string | uint8      | LuaForce
 //
 //	A. ONE TABLE PLUS ARRAY SHORTHANDS. The table is the canonical form: it is
-//	   what a read returns, and a write accepts either. Carrying only the table
-//	   costs a guest nothing.
+//	   the layout a guest sees, and a write accepts either. Carrying only the
+//	   table costs a guest nothing.
+//
+//	   ...BUT THE HOST HAS TO KNOW, which "what a read returns" used to say and
+//	   was wrong about. The description declares both forms because the ENGINE
+//	   sends either, and `Vector` says outright which one it picks: "The game
+//	   will always provide the array format". So the chosen struct carries
+//	   FieldSpec.Positional out of here, the descriptor renders pos=true, and
+//	   write_struct falls back from t[f.name] to t[i]. Ten concepts have this
+//	   shape at every committed pin -- BoundingBox, ChunkPosition, Color,
+//	   ColorModifier, EquipmentPosition, GuiLocation, MapPosition, TilePosition,
+//	   Vector, Vector3D -- and MapPosition happens to arrive keyed today while
+//	   Vector never does, which is why the defect could sit under MapPosition's
+//	   152 description references at 2.0.77 and surface at Vector's 58. (16
+//	   attributes READABLE as it against 7 is the same contrast in the other
+//	   unit; the two must not be crossed. READABLE and not declared: one
+//	   MapPosition attribute is write-only, so declared is 17 against 7 and
+//	   only one side moves.) Filed by WormholeBelts (item 8).
 //
 //	B. ONE CLASS PLUS SCALAR IDENTIFIERS. "A force, or its name, or its index."
 //	   A read returns the object, so the handle is the form that must work.
@@ -1149,7 +1165,12 @@ func (m *typeMapper) canonicalUnion(t Type, depth int) (FieldSpec, bool) {
 	}
 
 	if nStruct == 1 && nShorthand > 0 && nHandle == 0 && nScalar == 0 && nDyn == 0 {
-		return *chosenStruct, true
+		// SHAPE A, and the shorthand is the whole reason this flag exists: the
+		// engine may hand the host either form of the same value. See section A
+		// above and FieldSpec.Positional.
+		f := *chosenStruct
+		f.Positional = true
+		return f, true
 	}
 	if nHandle == 1 && nScalar > 0 && nStruct == 0 && nShorthand == 0 && nDyn == 0 {
 		return *chosenHandle, true

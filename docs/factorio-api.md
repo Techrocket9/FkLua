@@ -92,6 +92,26 @@ The write replaces the whole `ModSetting` table, which is why the value is a map
 
 Writing an absent value to a `LuaFluidBox` clears it, which is Factorio's own behaviour for `fluidbox[n] = nil`. New fluid boxes cannot be added or removed this way and the index must be in bounds.
 
+## Positions, colors and the tables Factorio also writes as arrays
+
+Ten of Factorio's concepts are declared two ways at once: a table with named members, and an array shorthand over the same members in the same order. `MapPosition`, `Vector`, `Color`, `BoundingBox`, `ChunkPosition`, `ColorModifier`, `EquipmentPosition`, `GuiLocation`, `TilePosition` and `Vector3D` are all of that shape.
+
+The generated binding is one struct with named fields, and it reads either form. Which one arrives is Factorio's choice and it varies by member: `Vector`'s own documentation says the game always provides the array format, while a `MapPosition` usually comes back keyed. Nothing in the API description says which members do which, so the bindings do not ask you to know.
+
+```go
+drop, err := fkapi.LuaEntityPrototype{Object: proto}.InserterDropPosition()
+if err == nil && drop != nil {
+    // 0, 1.2 for the basic inserter, whichever form the engine sent.
+    use(drop.X, drop.Y)
+}
+```
+
+Nesting works the same way at every level, so a `BoundingBox` reads whether it arrives as `{left_top = {x = -2, y = -3}, right_bottom = {x = 5, y = 8}}`, as `{{-2, -3}, {5, 8}}`, or mixed. An optional member the shorthand does not carry, such as a bounding box's `orientation`, arrives absent rather than zero.
+
+Going the other way, a value you pass to Factorio is written with its names, which the engine accepts for every one of these concepts.
+
+This applies to the typed path, where the binding knows the layout. One of these concepts reaching you as a tier-2 `Value` instead, which is what a union the bindings cannot give a fixed layout, a `remote.call` result or an `Any`-typed read gives you, is classified by the shape of the table it arrived in: a `MapPosition` sent as `{2.19, 0}` is an array of two numbers there, and the same position sent keyed is a map with `x` and `y`. Read it with `At(0)` and `At(1)` or with `Get("x")` and `Get("y")` accordingly, or handle both if the member can send either.
+
 ## Tier-2 values, and reading one back
 
 Where the API's type is a union, a `LocalisedString`, or anything else with no fixed layout, the bindings use one self-describing type: `Value` in Go, `Value` in Rust. Seven constructors build one (`OfString`, `OfNumber`, `OfBool`, `OfObject`, `OfArray`, `OfMap`, `OfNil`; `Value::Str` and its siblings in Rust), and a matching set of accessors reads one back.

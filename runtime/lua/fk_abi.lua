@@ -1007,7 +1007,33 @@ function read_struct(fields, base)
 end
 
 -- Write a Lua table into a named-field block.
-function write_struct(fields, base, t)
+--
+-- `pos` IS THE DESCRIPTOR'S pos=true, and it says the engine may hand this
+-- block over in EITHER of two forms. A `table | tuple` concept -- MapPosition,
+-- Vector, Color, BoundingBox and six more -- is declared with named members and
+-- an array shorthand, and the engine chooses: Vector's own description says "The
+-- game will always provide the array format", so `{2.19, 0}` arrives where the
+-- keyed lookup below expects `{x = 2.19, y = 0}`. Before the flag existed that
+-- read t.x and t.y as nil and wrote a pair of ZEROS with the presence byte set:
+-- a plausible number, status OK, nothing logged. Measured on 2.0.77 as
+-- inserter_drop_position reading 0 tiles off the six inserter prototypes a base
+-- plus Space Age game defines, against 2.19 tiles for the same reach measured
+-- off LIVE entities through LuaEntity::drop_position -- which is a MapPosition
+-- rather than a Vector, and arrives keyed. The half that worked is the concept
+-- the engine sends keyed; the half that wrote zeros is the one it never does.
+-- Filed by WormholeBelts (item 8).
+--
+-- THE INDEX IS THE FIELD'S PLACED POSITION, which is the tuple's order by
+-- construction: the generator places in the description's `order` and the array
+-- shorthand is an ordering of the same members. An optional member with no
+-- element opposite it -- BoundingBox's `orientation` under the two-element
+-- shorthand -- reads nil from t[i] and stays ABSENT, which is the same answer
+-- the keyed form gives.
+--
+-- THE NAME IS TRIED FIRST AND THE FALLBACK IS ONLY FOR A nil, so a table that
+-- carries both spellings (Factorio hands MapPosition over keyed today) reads
+-- exactly as it always did, and nothing without pos= changes at all.
+function write_struct(fields, base, t, pos)
   for i = 1, #fields do
     local f = fields[i]
     -- A MASKED FIELD IS WRITTEN AS EMPTY, NEVER SKIPPED. The buffer this lands
@@ -1027,6 +1053,7 @@ function write_struct(fields, base, t)
       end
     else
       local v = t and t[f.name]
+      if v == nil and pos and t ~= nil then v = t[i] end
       -- An absent optional is left alone: the presence byte already said so,
       -- and writing a default would cost time to say it twice. A mandatory
       -- field has no presence byte and is always written, because the guest
@@ -1098,7 +1125,10 @@ end
 
 function write_value(f, base, v)
   local k = f.kind
-  if k == M.K_STRUCT then return write_struct(f.fields, base + f.at, v) end
+  -- f.pos rides along so a NESTED shape-A struct keeps its own answer:
+  -- BoundingBox is positional and each of its two MapPositions is positional
+  -- too, which is what makes `{{1, 2}, {3, 4}}` read right at both levels.
+  if k == M.K_STRUCT then return write_struct(f.fields, base + f.at, v, f.pos) end
   if k == M.K_ARRAY or k == M.K_DICT then return write_array(f, base + f.at, v) end
   if k == M.K_DYN then return write_dyn(base + f.at, v) end
   return write_field(k, base + f.at, v)

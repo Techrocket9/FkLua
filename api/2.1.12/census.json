@@ -31,6 +31,7 @@
   "collapsed_union_arg_positions": 274,
   "table_shaped_concepts": 345,
   "pure_string_enum_concepts": 46,
+  "positional_struct_positions": 831,
   "host_members_bound": 4848,
   "host_members_skipped": 4,
   "host_skips_by_reason": {

@@ -136,6 +136,13 @@ func checkArrayGuest(t *testing.T, wasmPath string) {
 		// of FTS1 rather than two independent claims.
 		"LOG optional array: absent",
 		"LOG structs: 3 (1.5,-2.5) (10.0,20.0) (0.0,0.0)",
+		// THE SAME STRUCT SHAPE IN THE OTHER FORM. The line above is a
+		// `table | tuple` concept arriving KEYED; this one is the identical
+		// shape arriving as the ARRAY the description says the engine always
+		// sends for a Vector, and the host reads it because the descriptor is
+		// marked pos=. Without the flag it read (0.00,0.00) with status OK and
+		// nothing logged. Filed by WormholeBelts (item 8).
+		"LOG shorthand struct: (2.19,0.00)",
 		"LOG dict: 3 water=250.0 steam=0.0",
 		// The guest's two writes, echoed by the stub. The second is the empty
 		// case: nil must arrive as a zero-length table, not as two categories
@@ -243,6 +250,15 @@ thing = {
   autopilot_destinations = {
     { x = 1.5, y = -2.5 }, { x = 10.0, y = 20.0 }, { x = 0.0, y = 0.0 },
   },
+  -- THE SAME STRUCT SHAPE AS A TWO-ELEMENT ARRAY, which is how a real Factorio
+  -- hands a Vector over: the concept declares table{x,y} | tuple[float,float]
+  -- and the description says the game always provides the array format. Written
+  -- with the two components DIFFERENT and the FIRST one non-zero, so a fallback
+  -- that read the elements in the wrong order prints (0.00,2.19) instead of
+  -- passing on a symmetric pair. (The real engine's answer for this member is
+  -- 0.00,1.20 and examples/api reads it there; a stub cannot prove which form
+  -- Factorio chooses, which is why that leg exists as well as this one.)
+  inserter_drop_position = { 2.19, 0 },
   -- A dictionary, and a method rather than an attribute. steam is present and
   -- ZERO: the guest looks keys up by name, so a decoder that dropped a falsy
   -- value would read the same 0.0 -- which is why the COUNT is checked too.

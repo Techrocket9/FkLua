@@ -86,6 +86,20 @@ pub extern "C" fn fk_on_init() {
         Err(e) => fk::log(&format!("autopilot_destinations failed: {}", e.as_str())),
     }
 
+    // 3b. THE SAME STRUCT SHAPE ARRIVING AS AN ARRAY. `Vector` is declared
+    //     `table{x,y} | tuple[float,float]` and the description says outright
+    //     which one the engine sends: "The game will always provide the array
+    //     format". The MapPositions above are the KEYED form of the same shape,
+    //     so the two lines together say the host reads either -- and until the
+    //     descriptor carried pos=, this one printed (0.00,0.00) with status OK
+    //     and nothing logged, which is what WormholeBelts measured off
+    //     inserter_drop_position (item 8).
+    match LuaEntityPrototype(first).inserter_drop_position() {
+        Err(e) => fk::log(&format!("inserter_drop_position failed: {}", e.as_str())),
+        Ok(None) => fk::log("shorthand struct: absent"),
+        Ok(Some(d)) => fk::log(&format!("shorthand struct: ({:.2},{:.2})", d.x, d.y)),
+    }
+
     // 4. A DICTIONARY -- the same walk over key/value pairs. Looked up by name
     //    rather than iterated, matching the Go side, which cannot iterate a map
     //    in a defined order. (A BTreeMap could, which is the difference the

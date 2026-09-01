@@ -131,6 +131,27 @@ func GuestPins(m *ir.Module) []string {
 // digests where the thing that has to match is one. This is exactly the pairing:
 // what the guest's baked-in ids mean, and what the host will make them mean.
 //
+// ...AND IT IS THE RENDERED DESCRIPTOR TEXT, NOT AN ABSTRACT LAYOUT. What goes
+// into the hash is Placed.LuaTable() verbatim, so ANY change to how a block
+// renders moves the signature even when no id, offset or size moved. That has
+// happened once and deliberately: `,pos=true` was added to the KindStruct
+// descriptor and nothing else about the rendering changed, which is measurable
+// rather than asserted -- delete placedList's `if f.Positional` block, all three
+// lines of it, and this function reproduces the PREVIOUS signature exactly,
+// a130c3ec9c74 at the default pin, so no id, offset or size moved and the
+// signature moved anyway. Which is right: the flag is how the HOST reads the
+// wire, so a guest packaged against a table that lacks it silently gets the old
+// behaviour back, and this digest is the only signal that would say so.
+//
+// THE WARNING'S WORDING IS GENERIC, AND FOR A RENDERING-ONLY CHANGE IT IS WIDER
+// THAN THE TRUTH. It says a guest can call DIFFERENT MEMBERS, which is the id
+// case; for the pos= change the ids are all correct and what differs is the
+// host's reading of a block. Wording it per case would mean the digest
+// classifying its own diff, which is exactly what a whole-table digest cannot do
+// -- it is conservative in the wrong direction by design, see below. The message
+// names the worst case and prescribes a regenerate-and-rebuild, which is the
+// repair for every case alike.
+//
 // LANGUAGE-INDEPENDENT BY CONSTRUCTION, so a Go guest and a Rust guest generated
 // from one description carry the SAME stamp, and a project with both cannot have
 // half of it stale. One function, three callers -- both generators and the
@@ -166,6 +187,11 @@ func SigExport(sig string) string { return SigExportPrefix + sig }
 // APISignature digests the ID ASSIGNMENT AND LAYOUT one description plus this
 // generator produce: the pairing a guest's baked-in ids are only meaningful
 // against.
+//
+// LAYOUT MEANS THE DESCRIPTOR AS RENDERED -- Placed.LuaTable(), verbatim -- so a
+// change that only affects the rendering moves this digest with no id, offset or
+// size having moved. See the header: that is the correct behaviour, because the
+// descriptor text is what the host reads the wire with.
 //
 // TRUNCATED TO 12 HEX CHARACTERS, which is 48 bits. The failure this guards is a
 // stale pair rather than an adversary, so what matters is that an unrelated

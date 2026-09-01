@@ -1377,7 +1377,7 @@ func fkAPIPin() {}
 // Language-independent: a Rust guest generated from this description
 // carries the same name.
 //
-//go:wasmexport fk_api_sig_a130c3ec9c74
+//go:wasmexport fk_api_sig_03170c04bf2e
 func fkAPISig() {}
 
 // Factorio's three GLOBAL FUNCTIONS, which belong to no class and are

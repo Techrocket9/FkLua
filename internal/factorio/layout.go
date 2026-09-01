@@ -270,6 +270,36 @@ type FieldSpec struct {
 	Elem *FieldSpec
 	// Key is the key type when Kind is KindDict.
 	Key *FieldSpec
+	// Positional marks a KindStruct whose concept declares BOTH a keyed table
+	// and an array shorthand -- canonicalUnion's shape A. It is set there and
+	// nowhere else.
+	//
+	// IT IS NOT A LAYOUT PROPERTY, which is why it is a flag rather than a
+	// second shape: the block is placed identically either way. What it records
+	// is that the HOST may be handed either form of the same value, because the
+	// description says the engine may send either -- and `Vector`'s own text
+	// says which one it does send ("The game will always provide the array
+	// format"). Without it write_struct looked up t[f.name] on `{2.19, 0}`,
+	// found nil in both slots, and wrote a pair of zeros with the presence byte
+	// set: a plausible number, status OK, nothing logged. Filed by WormholeBelts
+	// (item 8) after LuaEntityPrototype::inserter_drop_position read 0 tiles off
+	// the six inserter prototypes a base plus Space Age game defines, against
+	// 2.19 tiles for the same reach measured off live entities -- which reads
+	// LuaEntity::drop_position, a MapPosition rather than a Vector, and arrives
+	// keyed. Different concepts, which is what makes the pair evidence for the
+	// engine choosing PER MEMBER -- and examples/api measures that pair here
+	// rather than quoting it, reading a Vector off a prototype and a
+	// MapPosition off a chest in one real run, where the first needs the flag
+	// and the second never has.
+	//
+	// THE FIELD ORDER IS THE TUPLE ORDER BY CONSTRUCTION: LayoutStruct places in
+	// the description's `order`, which is exactly what the array shorthand is an
+	// ordering of. BoundingBox is the case that proves it rather than assuming
+	// it -- its parameters arrive in the JSON as left_top, orientation,
+	// right_bottom and its `order` is left_top, right_bottom, orientation, which
+	// is the shorthand {{-2,-3},{5,8}} with the optional third member left off
+	// the end.
+	Positional bool
 }
 
 // Placed is one field with its offset resolved.
@@ -291,6 +321,10 @@ type Placed struct {
 	Elem   *Placed
 	Key    *Placed
 	Stride int
+	// Positional carries FieldSpec.Positional through placement, so a nested
+	// shape-A struct keeps its own flag and `{{1,2},{3,4}}` reads right at every
+	// level. See FieldSpec.Positional.
+	Positional bool
 }
 
 // StructBlock is a laid-out named-field block.
@@ -349,6 +383,7 @@ func LayoutStruct(specs []FieldSpec) (StructBlock, error) {
 				return StructBlock{}, fmt.Errorf("%s: %w", f.Name, err)
 			}
 			p.Fields, p.Size, p.Align = nested.Fields, nested.Size, nested.Align
+			p.Positional = f.Positional
 			p.Offset = place(nested.Align, nested.Size)
 
 		case KindArray, KindDict:
@@ -416,6 +451,11 @@ func placedList(fs []Placed) string {
 		}
 		switch f.Kind {
 		case KindStruct:
+			// pos= is emitted only when true, so every struct descriptor the
+			// description does not call positional is byte for byte what it was.
+			if f.Positional {
+				s += ",pos=true"
+			}
 			s += ",fields=" + placedList(f.Fields)
 		case KindArray:
 			s += fmt.Sprintf(",stride=%d,elem=%s", f.Stride, placedOne(*f.Elem))

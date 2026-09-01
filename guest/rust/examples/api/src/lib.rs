@@ -18,11 +18,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use fkapi::{
     defines_direction_east, defines_inventory_chest, lua_entity_health_bulk,
     lua_entity_valid_bulk, read_on_player_created, read_on_tick, BulkOptF32,
-    LuaChunkIterator, LuaCustomTable, LuaEntity, LuaInventory, LuaProfiler, LuaStr, LuaSurface,
+    LuaChunkIterator, LuaCustomTable, LuaEntity, LuaEntityPrototype, LuaInventory, LuaProfiler,
+    LuaStr, LuaSurface,
     Object, Value, EVENT_CUSTOMINPUTEVENT, EVENT_ON_BUILT_ENTITY, EVENT_ON_PLAYER_CREATED,
     EVENT_ON_PLAYER_MINED_ENTITY,
-    EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, HELPERS, SCRIPT,
-    SETTINGS, SKIP_ON_BUILT_ENTITY_TAGS,
+    EVENT_ON_ROBOT_BUILT_ENTITY, EVENT_ON_ROBOT_MINED_ENTITY, EVENT_ON_TICK, GAME, HELPERS,
+    PROTOTYPES, SCRIPT, SETTINGS, SKIP_ON_BUILT_ENTITY_TAGS,
 };
 
 static TICKS_SEEN: AtomicU32 = AtomicU32::new(0);
@@ -193,6 +194,38 @@ pub extern "C" fn fk_on_tick(tick: u32) {
         fk::log(&format!("game.speed doubled = {:.2}", d));
     }
 
+    // A `table | tuple` CONCEPT, READ OFF A REAL ENGINE, WHICH IS THE ONLY
+    // PLACE THE ARRAY FORM IS OBSERVED. `Vector` is declared as a keyed table
+    // plus an array shorthand and the description says which one the game picks:
+    // "The game will always provide the array format". No stub can prove that --
+    // a stub returns whatever it was written to return -- so the descriptor's
+    // pos= flag is checked against Factorio here and nowhere else. Before it
+    // existed this read 0.00,0.00 with status OK and nothing logged, which is
+    // how WormholeBelts found it (item 8).
+    //
+    // entity_raw rather than entity: the handle route reads one prototype where
+    // the materialising form would build every entity prototype in the game.
+    match PROTOTYPES.entity_raw() {
+        Err(e) => fk::log(&format!(
+            "prototypes.entity as a handle failed: {}",
+            e.as_str()
+        )),
+        Ok(raw) => match LuaCustomTable(raw).get(&Value::Str(LuaStr::from("inserter"))) {
+            Err(e) => fk::log(&format!("prototypes.entity[inserter] failed: {}", e.as_str())),
+            Ok(v) => match v.as_obj() {
+                None => fk::log("prototypes.entity[inserter] is not an object"),
+                Some(proto) => match LuaEntityPrototype(proto).inserter_drop_position() {
+                    Err(e) => fk::log(&format!("inserter_drop_position failed: {}", e.as_str())),
+                    Ok(None) => fk::log("shorthand struct: inserter_drop_position absent"),
+                    Ok(Some(drop)) => fk::log(&format!(
+                        "shorthand struct: inserter_drop_position = {:.2},{:.2}",
+                        drop.x, drop.y
+                    )),
+                },
+            },
+        },
+    }
+
     // A DICTIONARY RETURN KEYED BY A UNION, which is `game.surfaces` and which
     // this backend emitted NOTHING for until 2026-08-03: the key is
     // `uint32 | string`, so it is tier 2, so it is neither Ord nor Hash and
@@ -278,20 +311,39 @@ pub extern "C" fn fk_on_tick(tick: u32) {
             ),
         ]));
         match chest {
-            Ok(Some(c)) => match LuaEntity(c).get_inventory(defines_inventory_chest()) {
-                Ok(Some(inv)) => {
-                    let b = LuaInventory(inv);
-                    match (b.length(), b.get(1)) {
-                        (Ok(n), Ok(slot)) => fk::log(&format!(
-                            "inventory operators: #inv = {}, inv[1] valid {}",
-                            n,
-                            slot.is_valid()
-                        )),
-                        _ => fk::log("inventory operators failed"),
-                    }
+            Ok(Some(c)) => {
+                // THE OTHER HALF OF THE PER-MEMBER PAIR, MEASURED IN THE SAME
+                // RUN AND OFF AN ENTITY THAT IS ALREADY HERE.
+                // `LuaEntity::position` is a MapPosition: the same
+                // table-plus-shorthand shape as the Vector above, flagged pos=
+                // by the same rule -- and the engine sends it KEYED. So the two
+                // lines together are the per-member choice OBSERVED rather than
+                // transcribed: one shape arriving in each of its two forms, in
+                // one run, through one host. The claim was asserted in six
+                // places in this repository and measured in none of them until
+                // this read; it costs one host call.
+                match LuaEntity(c).position() {
+                    Err(e) => fk::log(&format!("entity.position failed: {}", e.as_str())),
+                    Ok(p) => fk::log(&format!(
+                        "keyed struct: entity.position = {:.2},{:.2}",
+                        p.x, p.y
+                    )),
                 }
-                _ => fk::log("the chest had no chest inventory"),
-            },
+                match LuaEntity(c).get_inventory(defines_inventory_chest()) {
+                    Ok(Some(inv)) => {
+                        let b = LuaInventory(inv);
+                        match (b.length(), b.get(1)) {
+                            (Ok(n), Ok(slot)) => fk::log(&format!(
+                                "inventory operators: #inv = {}, inv[1] valid {}",
+                                n,
+                                slot.is_valid()
+                            )),
+                            _ => fk::log("inventory operators failed"),
+                        }
+                    }
+                    _ => fk::log("the chest had no chest inventory"),
+                }
+            }
             _ => fk::log("create_entity(iron-chest) did not produce one"),
         }
 
