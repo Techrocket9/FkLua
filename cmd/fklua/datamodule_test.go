@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/Techrocket9/fklua/internal/factorio"
+	luart "github.com/Techrocket9/fklua/runtime"
 )
 
 // A data module, as small as one can be: a memory (the codec needs one) and the
@@ -390,6 +392,77 @@ func TestModWithoutADataModuleShipsFiveFilesAndAMap(t *testing.T) {
 		"settings.lua", "data.lua", "data-updates.lua", "data-final-fixes.lua"} {
 		if have[unwanted] {
 			t.Errorf("a mod with no data module ships %s", unwanted)
+		}
+	}
+}
+
+// ONE LINE BUILDS THE RAISE PREFIX AND FIVE PLACES QUOTE IT.
+//
+// The line that runs is fail() in the data-stage shim:
+//
+//	error("fklua: at the " .. sname .. " stage, " .. what, 0)
+//
+// and a guest's own fkdata.raise arrives through it verbatim, so the text a
+// player reads in front of a library's diagnostic is that literal and nothing
+// else. Five surfaces say so to the author who has to write a message that
+// does not repeat the stage: the Go doc comment on Raise, the Rust doc comment
+// on raise, docs/data-stage.md, and the two `init --library --data` scaffolds.
+//
+// A quotation that drifts from the shim is not a stale comment. It is a
+// document that lies about what the player reads, and the weaker version of
+// this contract has already been paid for once: FkRecipes' adoption read "the
+// stage name is prefixed" as a fact rather than a text, and read
+// "fklua: at the data stage, fkrecipes: at the data stage, ..." end to end
+// through the real shim with nothing failing. That is this repo's recorded
+// shape of two places disagreeing about one key, and this test guards it
+// before it happens again.
+//
+// The prefix is READ OUT OF the shim rather than restated here, so the test
+// cannot itself become a sixth copy that drifts.
+func TestEveryStatementOfTheRaisePrefixIsTheShimsOwn(t *testing.T) {
+	built := regexp.MustCompile(`error\("(fklua: at the )" \.\. sname \.\. "( stage, )" \.\. what, 0\)`)
+	m := built.FindStringSubmatch(luart.DataStage())
+	if m == nil {
+		t.Fatalf("fail() no longer builds the prefix the way this test reads it "+
+			"(%s). Five places quote that literal -- the Go doc comment on "+
+			"fkdata.Raise, the Rust doc comment on fkdata::raise, "+
+			"docs/data-stage.md, and the two `init --library --data` scaffolds "+
+			"libraryGoDataPure and libraryRustDataLib -- and they and this test "+
+			"move together, or the docs start lying about what the player reads",
+			built)
+	}
+	// Joined around the placeholder the docs use, and around "data" for the
+	// worked example every doc surface shows.
+	documented := m[1] + "<stage>" + m[2]
+	example := m[1] + "data" + m[2]
+
+	root := moduleRoot(t)
+	for _, f := range []string{
+		filepath.Join("guest", "go", "fkdata", "fkdata.go"),
+		filepath.Join("guest", "rust", "fkdata", "src", "lib.rs"),
+		filepath.Join("docs", "data-stage.md"),
+	} {
+		b, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(b)
+		if !strings.Contains(text, documented) {
+			t.Errorf("%s does not state the prefix as the shim builds it, %q", f, documented)
+		}
+		if !strings.Contains(text, example) {
+			t.Errorf("%s does not show the worked line beginning %q", f, example)
+		}
+	}
+
+	// The scaffolds are checked IN PROCESS rather than by reading library.go,
+	// because what a library author reads is the generated file.
+	for _, s := range []struct{ name, text string }{
+		{"the --library --data Go scaffold (libraryGoDataPure)", libraryGoDataPure("x", "x")},
+		{"the --library --data Rust scaffold (libraryRustDataLib)", libraryRustDataLib("")},
+	} {
+		if !strings.Contains(s.text, documented) {
+			t.Errorf("%s does not state the prefix as the shim builds it, %q", s.name, documented)
 		}
 	}
 }

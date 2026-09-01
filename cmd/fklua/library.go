@@ -420,6 +420,8 @@ func libraryGoDataPure(name, pkg string) string {
 //   - DIAGNOSE WITH Raise. A guest panic surfaces in the player's game as an
 //     opaque trap with your message lost in the log; fkdata.Raise stops the
 //     load with YOUR diagnostic, stage-prefixed like every host failure.
+//     Because the host adds the stage ("fklua: at the <stage> stage, " goes
+//     in front of your text verbatim), a refusal built here carries none.
 package ` + pkg + `
 
 // Plan collects what to emit, in declaration order. Pure, so every rule the
@@ -544,6 +546,8 @@ func libraryRustDataLib(string) string {
 //! - DIAGNOSE WITH raise. A panic surfaces as an opaque trap with your
 //!   message lost in the log; ` + "`fkdata::raise`" + ` stops the load with YOUR
 //!   diagnostic, stage-prefixed like every host failure. It never returns.
+//!   Because the host adds the stage ("fklua: at the <stage> stage, " goes
+//!   in front of your text verbatim), a refusal built here carries none.
 
 // no_std in the consumer's wasm, std under ` + "`cargo test`" + `.
 #![cfg_attr(not(test), no_std)]

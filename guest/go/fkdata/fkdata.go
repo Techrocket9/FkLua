@@ -143,6 +143,13 @@ func Log(s string) { hostLog(ptrOf(s), uint32(len(s))) }
 // host-detected failure does: the stage name is prefixed, the error unwinds
 // the whole stage, and the call NEVER RETURNS.
 //
+// The host puts "fklua: at the <stage> stage, " in front of the message,
+// verbatim, and nothing else -- so a message must NOT name the stage itself,
+// or the player reads it twice. Raise("two technologies share the name
+// hardened-tips") at the data stage reads, in the player's game:
+//
+//	fklua: at the data stage, two technologies share the name hardened-tips
+//
 // This is what a validating guest uses instead of panicking. A panic surfaces
 // in the player's game as "fklua trap: unreachable", with whatever diagnostic
 // was built surviving only as a log line above it; Raise puts the message

@@ -35,7 +35,10 @@
 --                                        5 defines.prototypes
 --   fkdata.raise(ptr, len)    -> never   the GUEST'S OWN failure, raised at
 --                                        the stage exactly as a host-detected
---                                        one is; the call does not return
+--                                        one is: the message lands verbatim
+--                                        behind fail()'s stage prefix, so it
+--                                        carries no stage of its own; the
+--                                        call does not return
 --
 -- plus env.fk_log and env.fk_print, which every guest has.
 --

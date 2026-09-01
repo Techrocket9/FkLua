@@ -148,6 +148,7 @@ func TestInitLibraryDataGoTestsOnTheHost(t *testing.T) {
 	for _, w := range []string{
 		"PLAN, THEN EMIT", "ROUTE, NEVER OWN", "NEVER fkapi",
 		"PREFIX FROM ModName", "DIAGNOSE WITH Raise",
+		"a refusal built here carries none",
 	} {
 		if !strings.Contains(string(pure), w) {
 			t.Errorf("the data pure file does not carry %q", w)
@@ -188,6 +189,7 @@ func TestInitLibraryDataRustTestsOnTheHost(t *testing.T) {
 	for _, w := range []string{
 		"PLAN, THEN EMIT", "NEVER fkapi", "mod_name", "raise",
 		"#![cfg_attr(not(test), no_std)]",
+		"a refusal built here carries none",
 	} {
 		if !strings.Contains(string(lib), w) {
 			t.Errorf("the data lib.rs does not carry %q", w)

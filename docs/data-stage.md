@@ -118,6 +118,14 @@ if _, taken := fkdata.Get("item", "my-item"); !taken {
 
 `Set` with `Nil()` **deletes** the key rather than writing `false`. That matters for the common shape of stripping a cloned prototype, where a dozen fields have to be absent rather than present-and-false.
 
+`Raise` hands your message to the host, and the host puts `fklua: at the <stage> stage, ` in front of it, verbatim and nothing else, so the message must not name the stage itself or the player reads it twice. `fkdata.Raise("two technologies share the name hardened-tips")` at the data stage reads:
+
+```
+fklua: at the data stage, two technologies share the name hardened-tips
+```
+
+Rust's `raise` reads the same.
+
 ## Cloning a prototype
 
 `Clone` is the engine's own `util.table.deepcopy`, made on the guest's instruction. Patch the copy afterwards with `Set`:
