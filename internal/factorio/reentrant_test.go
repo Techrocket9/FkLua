@@ -30,6 +30,18 @@ import (
 // The guest here is the smallest thing that can tell: it records what its event
 // buffer says before and after a host call, and the host call raises the event
 // the guest is subscribed to.
+//
+// THE HANDLE HALF IS ALSO WHERE THE DOCUMENTED RULE IS PINNED. Both generated
+// preambles and docs/factorio-api.md say the transient counter restarts WHEN
+// THE OUTERMOST DISPATCH RETURNS, which is a claim about the nesting and not
+// only about the space -- so the stub asks two questions after the inner
+// dispatch, not one: whether the outer handle still resolves to the SAME object
+// (a clear would have dropped it), and whether the NEXT transient number is
+// still fresh rather than the one the outer dispatch already holds (a clear
+// would have restarted the counter onto it). Identity rather than
+// non-nil-ness, because a restart that happened to reallocate would answer
+// non-nil with somebody else's object, which is the whole failure this
+// milestone documented.
 func TestANestedDispatchLeavesTheOuterOneIntact(t *testing.T) {
 	h, err := luahost.Find()
 	if err != nil {
@@ -138,13 +150,19 @@ script = {
 
 local H = require("fk_abi")
 local held, survived, raised = nil, "not asked", false
+local counter = "not asked"
+local outer = { object_name = "LuaEntity", tag = "outer" }
 game = {
   reload_script = function()
     if raised then return end        -- the inner dispatch must not recurse
     raised = true
-    held = H.transient({ object_name = "LuaEntity" })
+    held = H.transient(outer)
     handlers[1]({ tick = 99 })       -- Factorio, re-entering the handler
-    survived = H.get(held) ~= nil and "yes" or "no"
+    survived = H.get(held) == outer and "yes" or "no"
+    -- The counter did not restart, so the next number is a NEW one rather than
+    -- the one the outer dispatch is still holding.
+    counter = H.transient({ object_name = "LuaEntity", tag = "after" }) ~= held
+      and "fresh" or "restarted"
   end,
 }
 
@@ -155,6 +173,7 @@ handlers[1]({ tick = 7 })
 print("before " .. tostring(storage.fk_mem[1][513]))
 print("after " .. tostring(storage.fk_mem[1][514]))
 print("handle " .. survived)
+print("counter " .. counter)
 `, filepath.Join(dir, "?.lua")))
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -162,9 +181,12 @@ print("handle " .. survived)
 
 	// before proves the tick field is where the guest thinks it is, so `after`
 	// is a real comparison rather than two reads of the same wrong offset.
-	want := "before 7\nafter 7\nhandle yes"
+	want := "before 7\nafter 7\nhandle yes\ncounter fresh"
 	if got := strings.TrimSpace(out); got != want {
 		t.Errorf("got:\n%s\nwant:\n%s\n(the inner dispatch encoded over the outer "+
-			"one's buffer, or released the handles it was still using)", got, want)
+			"one's buffer, released the handles it was still using, or restarted "+
+			"the transient counter. The last one is what both generated preambles "+
+			"and docs/factorio-api.md say happens only when the OUTERMOST dispatch "+
+			"returns)", got, want)
 	}
 }

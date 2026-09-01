@@ -612,16 +612,158 @@ func (s Status) Error() string {
 // promotes one that has to outlive the event.
 type Object struct{ h uint32 }
 
+// The handle spaces, split by number.
+//
+// FirstDynamicHandle is the lowest handle the host ALLOCATES: below it sit the
+// nine fixed globals, which are bound at load and are neither allocated nor
+// freed. TransientHandleBase is the split between the persistent space and the
+// transient one.
+//
+// Both numbers are fk_abi.lua's, and a host-side test reads them out of that
+// file rather than trusting this copy of them.
+const (
+	FirstDynamicHandle  uint32 = 10
+	TransientHandleBase uint32 = 0x40000000
+)
+
 // Retain makes a handle survive past the current event. Release it when done.
+//
+// THE RELEASE IS YOURS ON EVERY PATH, and that is what a Go guest has to carry
+// itself: there is no RAII here, so the idiom is a deferred release beside the
+// retain, and a retain whose release sits at the bottom of a long function is
+// the shape that leaks. The first Rust mod to hold handles across events leaked
+// on three such paths -- a build that had retained three handles before a
+// fourth create failed, an early return past the release, and a helper that
+// returned a null handle its caller went on holding -- and none of those is
+// Rust-specific.
+//
+//	o := ev.Entity.Retain()
+//	defer o.Release()
+//
+// WHAT IT DOES DEPENDS ON THE SPACE. Retaining a TRANSIENT handle mints a NEW
+// persistent slot, every time: two retains of one transient handle are two
+// slots onto one object, each owed its own release. Retaining a handle that is
+// ALREADY PERSISTENT AND STILL OCCUPIED, or a global the game has bound, hands
+// the same number straight back without allocating -- so a second retain there
+// buys no ownership, and a second release of it frees the first owner's slot.
+// Release exactly once.
+//
+// A RETAIN CAN ALSO FAIL, IN ANY OF THE THREE SPACES, and the sentence above
+// is the case where it does not. It hands back the NULL handle with
+// StatusBadHandle for a persistent number whose slot is NOT occupied -- one
+// already released, or one built with ObjectAt and never retained -- for a
+// global the game has not bound, and for a transient number this dispatch never
+// handed out; and StatusNoSpace when the persistent space is exhausted. Each of
+// those is measured against fk_abi.lua's M.retain. Retain hands back a bare
+// Object and no status, so the ONLY way to learn the retain missed is Valid()
+// on what comes back. The deferred Release of a null handle is a discarded
+// StatusBadHandle, so nothing is corrupted: the guest simply goes on holding a
+// handle over nothing.
+//
+// RETAIN INSIDE THE DISPATCH THAT PRODUCED THE HANDLE. The transient counter
+// restarts when the OUTERMOST dispatch returns, so a number carried over from
+// an earlier event names whatever THIS dispatch put at that index and retains
+// successfully onto it. A NESTED dispatch restarts nothing, so a handle held
+// across create_entity{raise_built=true} or entity.die() is unharmed by the
+// event that call raises. See Transient.
+//
+// NEVER FROM fk_after_load, and that applies to Release too. script.on_load
+// runs on the peer that LOADS the state, which on a running server is the
+// joining client and nobody else, while the host's persistent table is aliased
+// into storage. A retain or a release there is a peer-local write to replicated
+// state, which is a desync rather than a leak. See docs/rules.md, "No
+// peer-local signal may change guest state".
+//
+// The Rust binding has an Object::retained guard that releases on Drop. Go gets
+// no equivalent because the language has no destructor: defer is the whole of
+// what it can offer, and a wrapper type would only hide the same defer.
 func (o Object) Retain() Object { return Object{hostRetain(o.h)} }
 
-// Release frees a retained handle. Releasing a transient one is harmless.
+// Release frees a retained handle. Release it exactly once: twice is not safe.
+//
+// Releasing a TRANSIENT handle does nothing and is not an error, since the
+// whole space goes when the outermost dispatch returns. Releasing a persistent
+// slot a SECOND time is a defect the host cannot catch: fk_abi.lua checks that
+// the slot is OCCUPIED, not by whom, and the free list is LIFO, so the very
+// next retain takes that slot back. A stale release then frees somebody else's
+// object and answers StatusOK, leaving two live owners naming one slot, one of
+// them reading an object it never retained, with no status anywhere to notice.
 func (o Object) Release() { hostRelease(o.h) }
 
 // Valid reports a handle that is not the null one. It does not ask the game
 // whether the object behind it still exists -- a call does that, and reports
 // StatusInvalid.
 func (o Object) Valid() bool { return o.h != 0 }
+
+// Global reports a number in the GLOBAL range: one of the nine fixed globals,
+// game, script, prototypes and the rest.
+//
+// A RANGE TEST like the other two, and what it says is about the NUMBER rather
+// than about the object: 1..9 are never allocated and never freed, so a global
+// number is never reused for something else, which is the one thing the other
+// two ranges do not give you, since a persistent slot is freed and handed out
+// again and the transient counter restarts when the outermost dispatch returns.
+//
+// IT DOES NOT SAY THE HANDLE IS LIVE. The host resolves a global by NAME out of
+// the game's own environment on every access, and game does not exist while
+// control.lua is loading -- which is where a guest's package initialisers run --
+// nor inside Factorio's own on_load. A global there answers StatusBadHandle and
+// its retain comes back 0. Once the game has bound them they live for the
+// session: retaining one hands the same number back, and RELEASING one is
+// StatusBadHandle, because a guest does not own them.
+func (o Object) Global() bool { return o.h != 0 && o.h < FirstDynamicHandle }
+
+// Persistent reports a number that NAMES A SLOT in the persistent space: not a
+// global and not transient.
+//
+// A RANGE TEST, NOT AN OWNERSHIP FACT. It is one compare on the number and no
+// host call, so it cannot say whether this guest retained the slot, whether the
+// slot is still occupied, or whether the object behind it is alive. A handle
+// already RELEASED answers true, and so does a number a guest built with
+// ObjectAt and never retained. The only way to learn a handle is dead is to
+// make a call and read StatusBadHandle. Ownership is the retain and the defer
+// beside it, and nothing here can check that they are paired.
+//
+// THE NINE GLOBALS ANSWER FALSE HERE, which is a deliberate reading, and it
+// stands on the range alone: a global is in NEITHER dynamic space. 1..9 sit
+// below FirstDynamicHandle and are never allocated or freed, so the three
+// predicates partition every handle exactly the way fk_abi.lua's own table
+// does, and the null handle answers false to all three. Folding the globals in
+// because they also outlive the dispatch would put them in a range they are not
+// in. Ask Transient (or its negation on a live handle) for the
+// outlives-the-dispatch question.
+func (o Object) Persistent() bool {
+	return o.h >= FirstDynamicHandle && o.h < TransientHandleBase
+}
+
+// Transient reports a number in the TRANSIENT range: the host discards it when
+// the OUTERMOST dispatch returns, and everything the API hands back starts
+// here.
+//
+// A range test like the two above, and it CANNOT TELL A LIVE TRANSIENT HANDLE
+// FROM A STALE ONE. A number in this range that the host never handed out names
+// nothing and answers StatusBadHandle. One LEFT OVER FROM AN EARLIER DISPATCH
+// is worse than that: the host restarts the counter WHEN THE OUTERMOST DISPATCH
+// RETURNS (fk_mod.lua's dispatch_done, which is what reaches fk_abi.lua's
+// M.clear_transient), so that same number has been handed out AGAIN and names
+// whatever THIS dispatch put at that index -- a DIFFERENT object, resolving
+// with StatusOK and retaining successfully into a slot over it. It answers
+// StatusBadHandle only when this dispatch has not allocated that far yet.
+// Nothing on this side can see the difference, because all three predicates are
+// compares on the number.
+//
+// A NESTED DISPATCH RESTARTS NOTHING, and that is deliberate: Factorio raises
+// some events from inside the API call that caused them --
+// create_entity{raise_built=true} and entity.die() are the everyday ones -- so
+// fk_mod.lua counts the depth and does the end-of-dispatch work only at depth
+// 0. A handle an outer handler is holding still names its own object across
+// such a call.
+//
+// So the rule is the caller's: RETAIN WITHIN THE DISPATCH THAT PRODUCED THE
+// HANDLE, and hold what Retain hands back rather than the raw number. A
+// transient number kept across events is neither a leak nor a dead handle: in a
+// lockstep game it is a desync.
+func (o Object) Transient() bool { return o.h >= TransientHandleBase }
 
 // ObjectAt wraps a raw handle. Needed for the fixed globals; a guest should
 // otherwise get its handles by calling something.

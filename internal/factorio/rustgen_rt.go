@@ -115,6 +115,18 @@ fn galloc(n: u32) -> u32 {
 pub struct Object(pub u32);
 
 impl Object {
+    /// The lowest handle the host ALLOCATES. Below it sit the nine fixed
+    /// globals, which are bound at load and are neither allocated nor freed.
+    pub const FIRST_DYNAMIC: u32 = 10;
+
+    /// The split point between the persistent space and the transient one. A
+    /// handle at or above this is discarded when the OUTERMOST dispatch
+    /// returns.
+    ///
+    /// Both numbers are fk_abi.lua's, and a host-side test reads them out of
+    /// that file rather than trusting this copy of them.
+    pub const TRANSIENT_BASE: u32 = 0x4000_0000;
+
     /// Makes a handle survive past the current event. Release it when done.
     ///
     /// Handles the host produces are TRANSIENT: they stop working when the
@@ -122,12 +134,106 @@ impl Object {
     /// dominant leak shape free -- take a handle, use it, drop it, and nothing
     /// accumulates -- and this is the opt-out for one that has to outlive the
     /// event, which is what any guest keeping state across ticks needs.
+    ///
+    /// WHAT IT DOES DEPENDS ON THE SPACE, and that difference is what the guard
+    /// below is built on. Retaining a TRANSIENT handle mints a NEW persistent
+    /// slot, every time: two retains of one transient handle are two slots onto
+    /// one object, each owed its own release. Retaining a handle that is ALREADY
+    /// PERSISTENT AND STILL OCCUPIED, or a global the game has bound, hands the
+    /// same number straight back without allocating -- so a second retain there
+    /// buys no ownership, and a second release of it frees the first owner's
+    /// slot.
+    ///
+    /// A RETAIN CAN ALSO FAIL, IN ANY OF THE THREE SPACES, and the two clauses
+    /// above are the cases where it does not. It hands back the NULL handle
+    /// with Status::BAD_HANDLE for a persistent number whose slot is NOT
+    /// occupied -- one already released, or one built with Object(n) and never
+    /// retained -- for a global the game has not bound, and for a transient
+    /// number this dispatch never handed out; and Status::NO_SPACE when the
+    /// persistent space is exhausted. Each of those is measured against
+    /// fk_abi.lua's M.retain. This raw form hands back a bare Object and no
+    /// status, so CHECK is_valid() ON WHAT COMES BACK: a guest that does not is
+    /// left holding a handle over nothing, and its release is a discarded
+    /// Status::BAD_HANDLE that says so to nobody.
+    ///
+    /// Prefer Object::retained, which hands back a guard that releases itself
+    /// and refuses the shapes it cannot own. This is the raw form and the escape
+    /// hatch: taking it means owning the pair by hand, on every path, and
+    /// releasing EXACTLY ONCE -- see Object::release, where twice is NOT safe.
+    /// Neither this nor release may be called from fk_after_load; that rule is
+    /// on Retained, and it is about the retain rather than about the guard.
     #[inline]
     pub fn retain(self) -> Object {
         Object(unsafe { fk_retain(self.0) })
     }
 
-    /// Frees a retained handle. Releasing a transient one is harmless.
+    /// Retains a TRANSIENT handle and wraps the new slot in a guard that
+    /// releases on Drop. None when this handle is not one a guard can own.
+    ///
+    /// The ownership shape, and the reason it exists: retain and release are a
+    /// pair a guest has to keep balanced on EVERY path, and the first Rust mod
+    /// to hold handles across events leaked on three -- a build that had
+    /// retained three handles before a fourth create failed, an early return
+    /// past the release, and a helper that returned a null handle its caller
+    /// went on holding.
+    ///
+    /// A GUARD IS BORN AT THE PROMOTION AND NOWHERE ELSE, which is what makes
+    /// two guards over one slot unrepresentable rather than merely discouraged.
+    /// The host's retain mints a FRESH persistent slot for every TRANSIENT
+    /// handle it is handed -- fk_abi.lua's M.retain pops the free list, or takes
+    /// the next unused number -- so every guard that exists came from its own
+    /// promotion and names a slot nothing else names. None is the answer to
+    /// every other case:
+    ///
+    /// * an ALREADY PERSISTENT handle. The number names a slot in the
+    ///   persistent space, and retain is idempotent there: it hands the same
+    ///   number back and mints nothing, so a guard over it could not be the
+    ///   slot's only owner. Whoever does own that slot, if anyone, owns it by
+    ///   hand or through another guard, and both owners would release it -- the
+    ///   free list is LIFO, so the second release frees whatever the next
+    ///   retain took. The honest verb for that case is adopt rather than
+    ///   retain, and this binding does not offer one.
+    /// * a GLOBAL. The nine are bound at load and owned by nobody, so a guard
+    ///   over one owns nothing and its Drop is a discarded Status::BAD_HANDLE.
+    /// * the NULL handle.
+    /// * a retain that FAILED and came back 0 -- Status::NO_SPACE, or a
+    ///   transient number the host never handed out. A guard over nothing is
+    ///   the third leak above rebuilt inside the new API: the caller holds a
+    ///   guard and never learns the retain missed.
+    ///
+    /// WHAT IT CANNOT REFUSE IS A STALE TRANSIENT HANDLE, and no predicate
+    /// could. The host restarts the transient counter WHEN THE OUTERMOST
+    /// DISPATCH RETURNS, so a number kept from an EARLIER event has been handed
+    /// out again and names whatever THIS dispatch put at that index: the retain
+    /// SUCCEEDS, and the guard that comes back owns a real slot over somebody
+    /// else's object, with no status anywhere. A NESTED dispatch restarts
+    /// nothing, so a guard taken before create_entity{raise_built=true} or
+    /// entity.die() is unharmed by the event that call raises. This gate is
+    /// over the SPACE; the dispatch rule is the caller's, and it is on
+    /// is_transient. Retain within the dispatch that produced the handle.
+    #[inline]
+    pub fn retained(self) -> Option<Retained> {
+        if !self.is_transient() {
+            return None;
+        }
+        let slot = self.retain();
+        if !slot.is_valid() {
+            return None;
+        }
+        Some(Retained(slot))
+    }
+
+    /// Frees a retained handle. Release it EXACTLY ONCE: twice is not safe.
+    ///
+    /// Releasing a TRANSIENT handle does nothing and is not an error -- the
+    /// whole space goes when the outermost dispatch returns. Releasing a
+    /// persistent slot a SECOND time is a defect the host cannot catch:
+    /// fk_abi.lua checks that the slot is OCCUPIED, not by whom, and the free
+    /// list is LIFO, so the very next retain takes that slot back. A stale
+    /// release then frees somebody else's object and answers Status::OK,
+    /// leaving two live owners naming one slot -- one of them reading an object
+    /// it never retained -- with no status anywhere to notice. Hold the handle
+    /// in a Retained and this stops being a question the caller has to answer.
     #[inline]
     pub fn release(self) {
         unsafe {
@@ -141,6 +247,177 @@ impl Object {
     #[inline]
     pub fn is_valid(self) -> bool {
         self.0 != 0
+    }
+
+    /// The number is in the GLOBAL range: one of the nine fixed globals --
+    /// game, script, prototypes and the rest.
+    ///
+    /// A RANGE TEST like the other two, and what it says is about the NUMBER
+    /// rather than about the object: 1..9 are never allocated and never freed,
+    /// so a global number is never reused for something else -- which is the one
+    /// thing the other two ranges do not give you, since a persistent slot is
+    /// freed and handed out again and the transient counter restarts when the
+    /// outermost dispatch returns.
+    ///
+    /// IT DOES NOT SAY THE HANDLE IS LIVE. The host resolves a global by NAME
+    /// out of the game's own environment on every access, and game does not
+    /// exist while control.lua is loading -- which is where a guest's package
+    /// initialisers run -- nor inside Factorio's own on_load. A global there
+    /// answers Status::BAD_HANDLE and its retain comes back 0. Once the game has
+    /// bound them they live for the session: retaining one hands the same number
+    /// back, and RELEASING one is Status::BAD_HANDLE, because a guest does not
+    /// own them.
+    #[inline]
+    pub fn is_global(self) -> bool {
+        self.0 != 0 && self.0 < Self::FIRST_DYNAMIC
+    }
+
+    /// The number NAMES A SLOT IN THE PERSISTENT SPACE: not a global, not
+    /// transient.
+    ///
+    /// A RANGE TEST, NOT AN OWNERSHIP FACT. It is one compare on the number and
+    /// no host call, so it cannot say whether this guest retained the slot,
+    /// whether the slot is still occupied, or whether the object behind it is
+    /// alive. A handle already RELEASED answers true, and so does a number a
+    /// guest built with Object(n) and never retained. The only way to learn a
+    /// handle is dead is to make a call and read Status::BAD_HANDLE.
+    ///
+    /// FOR OWNERSHIP, HOLD A Retained. A guard is the only thing that says a
+    /// slot is owed a release, because it is the only thing that was there when
+    /// the slot was minted. These three predicates answer the SPACE question;
+    /// the guard answers the OWNERSHIP one.
+    ///
+    /// THE NINE GLOBALS ANSWER FALSE HERE, which is a deliberate reading, and
+    /// it stands on the range alone: a global is in NEITHER dynamic space. 1..9
+    /// sit below FIRST_DYNAMIC and are never allocated or freed, so the three
+    /// predicates partition every handle exactly the way fk_abi.lua's own table
+    /// does, and the null handle answers false to all three. Folding the globals
+    /// in because they also outlive the dispatch would put them in a range they
+    /// are not in. Ask is_transient (or its negation on a live handle) for the
+    /// outlives-the-dispatch question.
+    #[inline]
+    pub fn is_persistent(self) -> bool {
+        self.0 >= Self::FIRST_DYNAMIC && self.0 < Self::TRANSIENT_BASE
+    }
+
+    /// The number is in the TRANSIENT range: the host discards it when the
+    /// OUTERMOST dispatch returns. Everything the API hands back starts here.
+    ///
+    /// A range test like the two above, and it CANNOT TELL A LIVE TRANSIENT
+    /// HANDLE FROM A STALE ONE. A number in this range that the host never
+    /// handed out names nothing and answers Status::BAD_HANDLE. One LEFT OVER
+    /// FROM AN EARLIER DISPATCH is worse than that: the host restarts the
+    /// counter WHEN THE OUTERMOST DISPATCH RETURNS (fk_mod.lua's dispatch_done,
+    /// which is what reaches fk_abi.lua's M.clear_transient), so that same
+    /// number has been handed out AGAIN and names whatever THIS dispatch put at
+    /// that index -- a DIFFERENT object, resolving with Status::OK and
+    /// retaining successfully into a slot over it. It answers BAD_HANDLE only
+    /// when this dispatch has not allocated that far yet. Nothing on this side
+    /// can see the difference, because all three predicates are compares on the
+    /// number.
+    ///
+    /// A NESTED DISPATCH RESTARTS NOTHING, and that is deliberate: Factorio
+    /// raises some events from inside the API call that caused them --
+    /// create_entity{raise_built=true} and entity.die() are the everyday ones --
+    /// so fk_mod.lua counts the depth and does the end-of-dispatch work only at
+    /// depth 0. A handle an outer handler is holding still names its own object
+    /// across such a call.
+    ///
+    /// So the rule is the caller's: RETAIN WITHIN THE DISPATCH THAT PRODUCED
+    /// THE HANDLE -- Object::retained here, Retain in Go -- and keep the guard
+    /// rather than the number. A transient number kept across events is
+    /// neither a leak nor a dead handle: in a lockstep game it is a desync.
+    #[inline]
+    pub fn is_transient(self) -> bool {
+        self.0 >= Self::TRANSIENT_BASE
+    }
+}
+
+/// A retained handle that releases itself.
+///
+/// WHAT IT IS FOR. Every path out of a scope releases, including the ones an
+/// author did not think about: an early return, a ? on a failing host call, a
+/// loop that breaks. Deref makes it stand in for the Object everywhere, so a
+/// generated class type wraps it as LuaEntity(*guard) and every method is
+/// reachable through it.
+///
+/// ONE SLOT, ONE GUARD, BY CONSTRUCTION. The only way to make one is
+/// Object::retained -- or Retained::new, the same thing spelled as a
+/// constructor -- and it accepts ONLY a transient handle, for which the host
+/// mints a fresh persistent slot on every retain. So no two guards can name one
+/// slot: the double-owner shape is unrepresentable rather than forbidden by a
+/// comment. Not Copy and not Clone for the same reason.
+///
+/// A COPY TAKEN THROUGH Deref IS A BORROW. *guard is an Object naming the
+/// guard's slot, and it is exactly what to pass to a call or wrap in a class
+/// type. It must NOT outlive the guard, must NOT be released by hand, and must
+/// NOT be stored anywhere the guard's scope does not cover. It cannot be turned
+/// into a second guard, because retained() answers None for a handle already in
+/// the persistent space.
+///
+/// ACROSS A SAVE. It lives in the guest's own state, and under --persist=table
+/// or packed the guest heap is what Factorio serializes -- so a guard parked in
+/// a static map comes back after a load still naming the slot it named, because
+/// the host's persistent handle table came back with it. On a REBUILT guest the
+/// heap is discarded and the persistent table is discarded under the same gate
+/// (agents/abi.md), so the guards die with the numbers they were holding and
+/// nothing is left pinned.
+///
+/// DROP IS DETERMINISTIC because it is guest-driven: it runs where the scope
+/// ends, on every peer THAT RUNS THAT SCOPE, in the same order. It is not a
+/// finalizer and there is no collector deciding when. Note that panic = "abort"
+/// is mandatory for a guest, so NO Drop ever runs during a panic -- a trap takes
+/// the mod down without unwinding, and the whole handle table goes with the
+/// session.
+///
+/// NEVER FROM fk_after_load, and that qualifier on the paragraph above is the
+/// one rule this type cannot enforce for you. script.on_load runs on the peer
+/// that LOADS the state, which on a running server is the joining client and
+/// nobody else, while the host's persistent table is aliased into storage and
+/// the guard itself lives in storage.fk_mem -- both of them checksummed. So a
+/// retain, a release, a Retained constructed or a Retained dropped under
+/// fk_after_load (or under anything it computes) is a peer-local write to
+/// replicated state, which is a desync rather than a leak. Rebuild caches there
+/// and nothing else. See docs/rules.md, "No peer-local signal may change guest
+/// state".
+#[derive(Debug)]
+pub struct Retained(Object);
+
+impl Retained {
+    /// Retains a transient handle and takes ownership of the release.
+    ///
+    /// The same thing as Object::retained, spelled the way a constructor is,
+    /// with the same refusals: None for a handle that is already persistent,
+    /// for a global, for the null handle, and for a retain that failed.
+    #[inline]
+    pub fn new(o: Object) -> Option<Retained> {
+        o.retained()
+    }
+
+    /// Hands the handle back WITHOUT releasing it, for a caller that means to
+    /// manage the pair itself. After this the slot is HAND-MANAGED: nothing
+    /// will free it but an Object::release, exactly once, and no new guard can
+    /// be made over it, because retained() refuses a persistent handle.
+    #[inline]
+    pub fn into_object(self) -> Object {
+        let o = self.0;
+        core::mem::forget(self);
+        o
+    }
+}
+
+impl core::ops::Deref for Retained {
+    type Target = Object;
+    #[inline]
+    fn deref(&self) -> &Object {
+        &self.0
+    }
+}
+
+impl Drop for Retained {
+    #[inline]
+    fn drop(&mut self) {
+        self.0.release();
     }
 }
 

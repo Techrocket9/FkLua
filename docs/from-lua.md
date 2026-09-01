@@ -82,7 +82,7 @@ Retain the handle if you want the same generator next tick, or create one per us
 
 Factorio's own advice is that a `LuaEntity` reference is not something to keep. In FkLua the split is explicit, and the persistent half is a normal thing to use rather than a last resort.
 
-Everything the host returns is **transient**: it stops working when the event that produced it returns, which is what makes the dominant case free (take a handle, use it, drop it, nothing accumulates). `Retain()` promotes one into the **persistent** space, which lives in `storage` alongside the guest's memory and survives saves and multiplayer joins; `Release()` gives it back.
+Everything the host returns is **transient**: the host discards the whole space when the event that produced it returns, which is what makes the dominant case free (take a handle, use it, drop it, nothing accumulates). The numbers start again on the next event, so a transient handle kept past its own event does not stop working, it names a different object, and it answers `ERR_BAD_HANDLE` only where the event you are now in has not allocated that far: promote it inside the event that produced it. `Retain()` promotes one into the **persistent** space, which lives in `storage` alongside the guest's memory and survives saves and multiplayer joins; `Release()` gives it back.
 
 ```go
 e := fkapi.LuaEntity{Object: ev.Entity.Retain()}
@@ -92,6 +92,12 @@ name, err := e.Name()            // ERR_INVALID if the entity has since died
 ```
 
 A retained handle is not a promise that the object still exists. Ask, or make a call and read the status.
+
+**The release is yours on every path, and a slot takes exactly one.** In Go that means `defer o.Release()` next to the retain; in Rust, `ev.entity.retained()` hands back a guard that releases when it goes out of scope, on the early returns too, and it answers `None` for any handle a guard cannot own. Releasing one slot twice is not harmless: the host checks that the slot is occupied, not by whom, and the next retain has already taken it, so the second release frees somebody else's object and reports success.
+
+**Nothing is retained or released from a load hook.** That hook runs on the joining client and on no other peer, and the handle table is part of what the game checksums, so a retain there is a desync rather than a leak. Rebuild caches from it and change nothing. See [the rules a guest has to follow](rules.md).
+
+If you are unsure which space a handle is in, ask: `Persistent()`, `Transient()` and `Global()` (`is_persistent`, `is_transient`, `is_global` in Rust) answer with no host call. They are range tests: `Persistent()` says the number names a slot in the persistent space, not that the slot is live or that you own it, and a global answers false because it is in neither dynamic range. See [the API guide](factorio-api.md#handles).
 
 **Re-finding everything from the world on load is a valid design and it is not the required one.** The first mod built on FkLua rebuilds its whole registry by scanning surfaces at load, and that is an architectural choice it made for reasons of its own; later ports retain handles and keep them across saves. Newcomers read the exemplar and assume the scan is a rule. It is not.
 

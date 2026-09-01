@@ -18,9 +18,77 @@ A mod ships the members it calls, not the API. `fklua mod` scans the compiled gu
 
 ## Handles
 
-Everything the host returns is a handle, and handles come in two spaces split at `0x40000000`. Transient handles are released when the event that produced them returns, which is why storing one across events is an error rather than a leak. `Retain()` promotes a handle into the persistent space, which lives in `storage` and survives saves; `Release()` gives one back when it is no longer needed. The `retain` example shows the round trip across a save.
+Everything the host returns is a handle, and a handle is a number in one of three ranges. 1 to 9 are the fixed globals (`game`, `script`, `prototypes` and the rest), bound at load and never allocated or freed. 10 up to `0x3FFFFFFF` is the **persistent** space: a slot your guest asked for, which lives in `storage` and survives saves. `0x40000000` and above is the **transient** space, released wholesale when the event that produced it returns.
 
-Handles are why the bindings can offer host-side predicates such as `surface.NameIs("nauvis")`: the question is asked where the string already is, instead of copying it into guest memory to compare.
+**A transient number is reused, so keeping one past its dispatch is worse than keeping a dead handle.** The host restarts the transient counter when the outermost dispatch returns, so the number your guest held from an earlier event has been handed out again and names whatever the dispatch you are in put at that index. It resolves, the status is `OK`, and a retain of it succeeds and mints a real slot over an object you did not mean to name; it answers `ERR_BAD_HANDLE` only when this dispatch has not allocated that far. A nested dispatch restarts nothing: Factorio raises some events from inside the API call that caused them, `create_entity{raise_built=true}` and `entity.die()` among them, and a handle you were holding before such a call still names its own object after it. No predicate on either side can tell the difference, because all three below are compares on the number. Retain inside the dispatch that produced the handle and keep what the retain gave you. In a lockstep game a stale transient handle is a desync rather than an error.
+
+`Retain()` promotes a handle into the persistent space and `Release()` gives one back. What the retain does depends on the space it is given. A **transient** handle is promoted into a **new** slot on every call, so two retains of one transient handle are two slots onto one object, each owed its own release. A handle that is already persistent **and still occupied**, or a global the game has bound, comes straight back as the same number with nothing allocated, so a second retain there buys no ownership. Releasing a global is `ERR_BAD_HANDLE`: you do not own them.
+
+**A retain can also fail, and it says so only in what it hands back.** The null handle with `ERR_BAD_HANDLE` comes back for a persistent number whose slot is not occupied (one you already released, or one you built yourself and never retained), for a global the game has not bound, and for a transient number this dispatch never handed out; `ERR_NO_SPACE` comes back when the persistent space is exhausted. `Retain()` returns a bare handle and no status, so check `Valid()` (`is_valid()` in Rust) on the result. Without that check a guest holds a handle over nothing and its release is a discarded `ERR_BAD_HANDLE`, which is the shape of a leak that reports nothing. In Rust, `retained()` makes the check for you and answers `None`.
+
+**Release a slot exactly once. A second release is not safe, and the host cannot catch it.** Releasing a transient handle does nothing and is not an error, since the whole space goes when the outermost dispatch returns. A persistent slot is different: the host checks that the slot is occupied, not by whom, and the free list is last in first out, so the very next retain takes that slot back. A stale release then frees somebody else's object and reports success, leaving two owners naming one slot, one of them reading an object it never retained, with no status anywhere to notice.
+
+**No retain, release or guard belongs in a load hook.** `script.on_load` runs on the peer that loads the state, which on a running server is the joining client and nobody else, while the host's persistent table is aliased into `storage` and a Rust guard lives in the guest's own memory. Both are checksummed, so a retain or a release taken there is a peer-local write to replicated state, which is a desync rather than a leak. Rebuild caches from a load hook and change nothing. See [the rules a guest has to follow](rules.md).
+
+### Asking which space a handle is in
+
+Three predicates answer it with no host call, because the answer is a compare against the two split points:
+
+| | Go | Rust |
+|---|---|---|
+| the number is in the globals range | `o.Global()` | `o.is_global()` |
+| the number names a slot in the persistent space | `o.Persistent()` | `o.is_persistent()` |
+| the number is in the transient range | `o.Transient()` | `o.is_transient()` |
+
+They partition every handle: exactly one is true, and the null handle answers false to all three.
+
+**They are range tests, and they answer the space question rather than the ownership one.** `Persistent()` does not say that your guest retained the slot, that the slot is still occupied, or that the object behind it is alive. A handle you already released answers true, and so does a number you built yourself with `ObjectAt` and never retained. The only way to learn that a handle is dead is to make a call and read `ERR_BAD_HANDLE`. For ownership in Rust, hold a `Retained`: the guard is the only thing that says a slot is owed a release, because it is the only thing that was there when the slot was minted. In Go, ownership is the retain and the `defer` beside it, and nothing can check for you that they are paired.
+
+**None of the three says a handle is live, the globals range included.** What is true of 1 to 9 is that the numbers are never reused for something else, because they are never allocated or freed. The objects behind them are read out of the game's environment by name on every access, and `game` does not exist while `control.lua` is loading, which is where a guest's package initialisers run: a global there answers `ERR_BAD_HANDLE` and its retain comes back 0.
+
+**A global answers false to `Persistent`**, deliberately, and it follows from the ranges alone: a global is in neither dynamic space. 1 to 9 sit below the first allocated handle and are never allocated or freed, so folding them into `Persistent` would put them in a range they are not in. For "does this outlive the dispatch", ask `!o.Transient()` on a handle you already know is not null.
+
+`Valid()` (`is_valid()` in Rust) is none of these. It reports a handle that is not the null one, and nothing more. It does not ask the game whether the object behind it still exists: make a call and read the status for that, which comes back `ERR_INVALID` when the object has been destroyed.
+
+### Rust: a guard that releases itself
+
+A retain and its release have to be balanced on every path out of a scope, including the ones nobody plans: an early return, a `?` on a failing call, a loop that breaks. Rust can hold that for you.
+
+```rust
+let Some(e) = ev.entity.retained() else { return };  // retains, and owns the release
+let name = LuaEntity(*e).name()?;  // Deref, so every generated method works through it
+// released here, and on the ? above
+```
+
+**A guard is born at the promotion and nowhere else, which is what makes two owners of one slot unrepresentable.** `retained()` accepts only a **transient** handle, the one case where the host mints a fresh slot, so every guard that exists names a slot nothing else names. It answers `None` for everything else, and each refusal is a shape that used to be a silent defect:
+
+| the handle | why `None` |
+|---|---|
+| already persistent | the number names a slot in the persistent space, which may be owned by a guard, or by hand, or by nobody. Retain mints nothing there, so a guard over it could not be the slot's only owner, and the release that came with it would free whatever the next retain took |
+| a global | owned by nobody, so the guard owns nothing and its `Drop` is a discarded `ERR_BAD_HANDLE` |
+| the null handle | names nothing |
+| a retain that failed | `ERR_NO_SPACE`, or a transient number the host never handed out; the guard would be over nothing and the caller would never learn the retain missed |
+
+**It cannot refuse a stale transient handle, and nothing could.** A number kept past its dispatch has been handed out again and names whatever the current dispatch put at that index, so the retain succeeds and the guard that comes back owns a real slot over an object the caller did not mean to name. The gate is over the space; the dispatch rule is yours.
+
+`Retained` derefs to `Object`, so a generated class type wraps it as `LuaEntity(*guard)`. It is neither `Copy` nor `Clone`. **A copy taken through `Deref` is a borrow**: `*guard` is fine to read and fine to pass to a call, and it must not outlive the guard, must not be released by hand, and must not be stored past the guard's scope. It cannot become a second guard, because `retained()` refuses a handle that is already persistent. `into_object()` hands the handle back without releasing, for a caller that means to manage the pair itself; after that the slot is yours to release exactly once, and no new guard can be made over it.
+
+The guard lives in your own state, so under `--persist=table` or `--persist=packed` one parked in a static map comes back after a load still naming its slot, because the host's persistent table came back with it. `Drop` is guest-driven, so it runs at the same point on every peer that runs that scope, which is what a lockstep game needs. `fk_after_load` is not such a scope: it runs on the joining client alone, so no guard may be constructed or dropped there. A guest is compiled `panic = "abort"`, so no `Drop` runs during a panic: a trap takes the mod down and the whole handle table goes with the session.
+
+### Go: `defer o.Release()`
+
+Go has no destructor, so the idiom is a deferred release beside the retain:
+
+```go
+o := ev.Entity.Retain()
+defer o.Release()
+```
+
+There is no guard type. Wrapping the defer in one would hide the same defer without removing the obligation, and Go's own convention for a paired acquire and release is already `defer`. The rules above are yours to keep: one release per slot, and nothing retained or released from a load hook.
+
+The `retain` example shows a handle surviving a real save; the `handles` example shows the predicates, the guard and the Go idiom side by side.
+
+Handles are also why the bindings can offer host-side predicates such as `surface.NameIs("nauvis")`: the question is asked where the string already is, instead of copying it into guest memory to compare.
 
 ## Reading one attribute off many entities
 

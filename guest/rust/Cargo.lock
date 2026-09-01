@@ -110,6 +110,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "handles"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkapi",
+]
+
+[[package]]
 name = "hello"
 version = "0.1.0"
 dependencies = [
