@@ -1200,7 +1200,9 @@ The trap was that the description carries `CustomInputEvent` as an ordinary even
 
 **A NAME PARAMETER WIDENING `fk.subscribe`, and not a third `fk.register` kind.** The distinction is load-bearing rather than stylistic: `UsedEvents` prunes the packaged event table by scanning the wasm for an i32 constant reaching operand 0 of the subscribe call, and a register descriptor is a tier-2 blob that scan cannot read -- so the register shape would prune the payload descriptor out of the very mod that needs it. The id stays a constant in its own operand and supplies the LAYOUT; the name arrives trailing and supplies the KEY. The import is `subscribe(id, filterp, mask, namep, namelen)`, and a guest compiled before any of the three additions declares it with fewer parameters and gets nil for the rest, which reads exactly as 0.
 
-**A RAW `(ptr, len)`, which is `fk_log`'s shape and not `filterp`'s.** It allocates nothing and writes no dyn, so the wrapper stays small enough that both toolchains keep inlining it -- and that is the whole pruning story, since R6 is a wrapper that GREW until rustc stopped inlining it and every mod using it silently shipped all 219 descriptors. The bytes are read inside the call, which is the standing rule for a `(ptr, len)` a guest hands over.
+**A RAW `(ptr, len)`, which is `fk_log`'s shape and not `filterp`'s.** It allocates nothing and writes no dyn, so the named wrappers stay small -- and small is what a cost heuristic likes, since R6 is a wrapper that GREW until rustc stopped inlining it and every mod using it silently shipped all 219 descriptors. The bytes are read inside the call, which is the standing rule for a `(ptr, len)` a guest hands over.
+
+**Small is not the guarantee, and this paragraph said it was** ("stays small enough that both toolchains keep inlining it"). Inlining is a cost decision over the whole module, so a wrapper can stop being inlined because something ELSE grew -- which is exactly what happened to `SubscribeFiltered` under `-gc=custom` once this widening landed. See "Item 30".
 
 **Four wrappers, and the missing fifth is a decision.** `SubscribeNamed` / `subscribe_named` and `SubscribeNamedMasked` / `subscribe_named_masked`: the matrix is {plain, masked} x {numeric, named}, and **{filtered} is numeric-only**, because Factorio's filters are declared per described event as the `Lua<Event>EventFilter` concepts and a custom input has none. A named-and-filtered form would be a binding that exists and always fails, which is "a skipped member is skipped, never faked" pointed at a wrapper. **Several custom inputs share one guest registration**, since they all encode through one descriptor and therefore arrive under one id; the payload's own `input_name` is what tells them apart.
 
@@ -1312,7 +1314,9 @@ Three rules, each of which is a way this could have been quietly wrong:
 - **A filter for an event that takes none is logged and dropped, not fatal.** `script.on_event` raises for those, and raising during `_initialize` takes the whole mod down at load. Running unfiltered with a line in the log is the widening direction again.
 - **Zero stays unfiltered, and a guest compiled before this existed declares the import with one parameter.** Lua hands the second one a nil, which reads the same. Nothing about the wire changed for an existing mod.
 
-Guest side: `fkapi.Subscribe(id)` and `fkapi.SubscribeFiltered(id, filters...)`, with `fkapi.NameFilter("a", "b")` for the commonest list. **The Go bindings had no `Subscribe` at all** before this — every Go guest hand-declared `//go:wasmimport fk subscribe`, which the Rust bindings never made anyone do. Both wrappers were measured to inline under TinyGo `-opt=2`, so the constant scan still proves the id and a mod still ships 2 event descriptors rather than 219; *enforced by `TestTheEventIdSurvivesTheGeneratedSubscribeWrapper`*, because if that ever stopped being true nothing else would say so.
+Guest side: `fkapi.Subscribe(id)` and `fkapi.SubscribeFiltered(id, filters...)`, with `fkapi.NameFilter("a", "b")` for the commonest list. **The Go bindings had no `Subscribe` at all** before this — every Go guest hand-declared `//go:wasmimport fk subscribe`, which the Rust bindings never made anyone do. Both wrappers inline, so the constant scan still proves the id and a mod still ships 2 event descriptors rather than 219; *enforced by `TestTheEventIdSurvivesTheGeneratedSubscribeWrapper`*, because if that ever stopped being true nothing else would say so.
+
+**That sentence said "were measured to inline under TinyGo `-opt=2`" and that was one arm's measurement stated as both.** It stopped being true under `-gc=custom` — see **"Item 30"** below, which is R6's shape one toolchain over. All six public entry points carry an inlining hint now (`//go:inline` in Go, `#[inline(always)]` in Rust) and the gate builds **both `-gc` arms**.
 
 ### The event FIELD MASK — declared once at subscribe time
 
@@ -1346,7 +1350,42 @@ Two smaller decisions:
 - **Masks are not merged across subscriptions, unlike filters.** Filters share one `script.on_event` registration and therefore have to be union-ed; a mask belongs to one handler's closure and says only what *that* handler will not look at. Nothing is shared, so nothing needs merging.
 - **The bit index is the LAID-OUT field order**, which is why the constants are generated beside the layout rather than written by hand — the same reason the event ids are. A hand-written `1 << 1` drifts the moment the API pin adds a field, and drifts toward masking the wrong one.
 
-Guest side: `fkapi.SubscribeMasked(id, skip)` and `fkapi.SubscribeFilteredMasked(id, skip, filters...)`. The mask is a plain `uint32` rather than a tier-2 value: the widest event payload in 2.0.77 has **13 fields**, so nothing needs allocating, and unlike a filter list there is nothing here the guest computes from its own data. *`TestTheEventIdSurvivesTheGeneratedSubscribeWrapper` still holds, so the constant scan still prunes 219 event descriptors to 2.*
+Guest side: `fkapi.SubscribeMasked(id, skip)` and `fkapi.SubscribeFilteredMasked(id, skip, filters...)`. The mask is a plain `uint32` rather than a tier-2 value: the widest event payload in 2.0.77 has **13 fields**, so nothing needs allocating, and unlike a filter list there is nothing here the guest computes from its own data. *`TestTheEventIdSurvivesTheGeneratedSubscribeWrapper` still holds, in **both `-gc` arms** since item 30, so the constant scan still prunes 219 event descriptors to 2.*
+
+**`SubscribeFilteredMasked` releases its arena mark plainly rather than by `defer`**, and that is an inlining decision rather than a style one: the wrapper has no early exit between the mark and the host call, and a panic on `wasm-unknown`/`-scheduler=none` traps the guest rather than unwinding out of it, so the defer could only ever fire on the one path the plain call already covers — while the machinery it lowered to was most of what the wrapper cost the inliner to swallow. The Rust arm never had the question: its `AllocMark` drop guard is an empty no-op.
+
+### Item 30 — the subscribe wrappers stopped inlining, in the arm nobody was building
+
+**R6 said the pruning scan rests on an inlining decision and fixed it in Rust. It recurred in Go, under `-gc=custom`, and the gate could not see it because the gate built `-gc=leaking`.** Filed by BetterBeltBalancer (item 30), 2026-08-31.
+
+`usedIDs` is **intraprocedural**: it wants an `i32.const` on `fk.subscribe`'s first operand, inside the function it is looking at. That is only ever true if the wrapper the guest called has been inlined into the guest's own code. When `SubscribeFiltered` survives as a real wasm function, the id inside it is `local.get $0`, the scan gives up, and — being all-or-nothing — the mod ships **every descriptor there is**.
+
+**What changed underneath it was not the wrapper.** `fk.subscribe` widened from two operands to five (filters, then the mask, then the name pair), and the collector's own weight arrived in the module. Measured on this repo's own `examples/api` under `-gc=custom -opt=2` (TinyGo 0.41.1, LLVM 20.1.1), four filtered subscriptions sharing one **mixed** filter list — `append(NameFilter(...), TypeFilter(...)...)`, which is the form `SubscribeFiltered`'s own doc comment tells an author to write:
+
+| | `-gc=leaking` | `-gc=custom` |
+|---|---|---|
+| the scan | **7 of 219 ids** | **gave up** |
+| `fk_api_gen.lua` | 8,425 B | **60,118 B** |
+| what the mod says | `7 events subscribed, of 219` | `all 219 events -- an event id was not a compile-time constant` |
+
+50 KB of extra Lua, parsed by the game on every load. Downstream it was eleven filtered call sites through one shared five-term list and `all 225 events`, with every id a literal at every call site.
+
+**A bare `NameFilter("a","b","c","d","e")` does not provoke it and the mixed form does** — measured green at every call-site count to eleven for the bare one. One helper call with a loop in it costs the inliner almost nothing; two helper calls and an `append` are enough that, by the time the subscribe wrappers are weighed, the budget is spent. That is the shape to remember: **the wrapper did not grow, its neighbourhood did.**
+
+**What does and does not move it**, one lever at a time:
+
+| | |
+|---|---|
+| remove the `defer` in `SubscribeFilteredMasked` | **still red** — headroom, not the lever |
+| a smaller callee | still red |
+| `//go:inline` on `SubscribeFilteredMasked` alone | **still red** |
+| `//go:inline` on `SubscribeFiltered` alone | **GREEN**, all seven `i32.const` |
+
+The last two rows are the whole diagnosis: **the constant lives at the GUEST's call site, so the function that has to disappear is the one the guest called.** Marking only the callee moves its body up into a caller that is still a real function taking the id in a parameter. So the hint goes on **every public entry point a guest can name** — `Subscribe`, `SubscribeNamed`, `SubscribeMasked`, `SubscribeNamedMasked`, `SubscribeFiltered` and `SubscribeFilteredMasked` — rather than on whichever is biggest today. A structural split keeping the id at a call site the scan can see would serve as well; a diet would not.
+
+**`//go:inline` is a HINT and `#[inline(always)]` is a DIRECTIVE, and the asymmetry is why the two arms need different confidence.** TinyGo lowers `//go:inline` to LLVM's `inlinehint`, which the inliner weighs against its cost model and may decline; Rust's `#[inline(always)]` lowers to `alwaysinline` and is obeyed. So the Rust arm's six wrappers are safe by construction, and **on the Go side the pragma is a lever and the gate is the evidence** — `TestTheEventIdSurvivesTheGeneratedSubscribeWrapper` builds both `-gc` arms, asserts complete-and-seven in each, and names the arm in every failure message. Its `fkipc` sibling took the same split; that one's collected arm was **already green** against the pre-fix bindings (complete, one id, 207), which is worth writing down rather than implying a save — `fkipc` reaches `fkapi.Subscribe`, the smallest wrapper in the family. What was wrong there was that nobody was asking.
+
+**Two standing lessons.** *An arm nobody builds is an arm nobody is gating* — and the arm that went ungated for four milestones is the one `agents/gc.md` tells every mod to ship. And *a fix filed per language is a fix per language*: R6's remedy was applied to Rust and its reasoning was never carried across, so the Go side kept a comment asserting as fact what the Rust side had already learned was a heuristic.
 
 ### `fk.define` — defines, resolved by name at load
 

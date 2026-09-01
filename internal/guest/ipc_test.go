@@ -3,6 +3,7 @@ package guest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Techrocket9/fklua/internal/factorio"
@@ -45,19 +46,57 @@ import (
 // load. fkipc's own call site is two inlinings deep in BOTH languages, because
 // the guest author never names an event: the constant has to travel from inside
 // the transport, through the generated `subscribe`, to `fk.subscribe`.
+//
+// # ...AND BOTH -gc ARMS ON THE GO SIDE
+//
+// The Go arm built LEAKING alone until this one was split, and leaking is not
+// what FkLua tells a mod to ship: agents/gc.md's whole argument is for
+// --gc=collected, and -gc=custom is the flag that carries it. The two arms are
+// the same four flags with one word changed and they do NOT agree about
+// inlining -- which stopped being a theoretical objection when the generated
+// SubscribeFiltered wrapper was found shipping every descriptor there is under
+// -gc=custom while the leaking arm of the same source proved all seven. Filed
+// by BetterBeltBalancer (item 30); the write-up is on
+// internal/factorio/gogen.go's SubscribeFiltered and in
+// TestTheEventIdSurvivesTheGeneratedSubscribeWrapper.
+//
+// THIS GATE'S COLLECTED ARM WAS ALREADY GREEN WHEN IT WAS ADDED, measured
+// against the pre-fix bindings: complete, one id, 207. That is the honest
+// finding and it is worth writing down rather than implying a save -- fkipc
+// reaches fkapi.Subscribe, the smallest wrapper in the family and the one every
+// toolchain has always inlined, while item 30's defect was in the filtered one.
+// What was wrong here was not the answer but that nobody was asking: the arm
+// every real mod ships was ungated, on the one call site in this repo where the
+// constant has two inlinings to survive rather than one.
+//
+// Building it at all needed guest/go/examples/ipc/gc.go, which did not exist --
+// without the fkgc import -gc=custom does not link (missing core function
+// "runtime.free"). That import is an EMPTY PACKAGE under -gc=leaking and the
+// leaking wasm is byte-identical either side of the file, measured, so this arm
+// cost the existing one nothing.
 func TestTheEventIdSurvivesTheFkipcSubscribeCallSite(t *testing.T) {
-	t.Run("go", func(t *testing.T) {
-		ok, why := guest.Available()
-		if !ok {
-			t.Skipf("skipping: %s", why)
-		}
-		root := repoRoot(t)
-		out := filepath.Join(t.TempDir(), "ipc.wasm")
-		if err := guest.Build(filepath.Join(root, "guest", "go"), "./examples/ipc", out); err != nil {
-			t.Fatalf("the fkipc example does not build: %v", err)
-		}
-		checkFkipcPruning(t, out)
-	})
+	for _, arm := range []struct {
+		name  string
+		flags []string
+		build func(dir, pkg, out string) error
+	}{
+		{"go-leaking", guest.BuildFlags, guest.Build},
+		{"go-collected", guest.CollectedBuildFlags, guest.BuildCollected},
+	} {
+		t.Run(arm.name, func(t *testing.T) {
+			ok, why := guest.Available()
+			if !ok {
+				t.Skipf("skipping: %s", why)
+			}
+			root := repoRoot(t)
+			out := filepath.Join(t.TempDir(), "ipc.wasm")
+			if err := arm.build(filepath.Join(root, "guest", "go"), "./examples/ipc", out); err != nil {
+				t.Fatalf("the fkipc example does not build in the %s arm (%s): %v",
+					arm.name, strings.Join(arm.flags, " "), err)
+			}
+			checkFkipcPruning(t, arm.name, out)
+		})
+	}
 	t.Run("rust", func(t *testing.T) {
 		ok, why := guest.RustAvailable()
 		if !ok {
@@ -69,11 +108,11 @@ func TestTheEventIdSurvivesTheFkipcSubscribeCallSite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("the Rust fkipc example does not build: %v", err)
 		}
-		checkFkipcPruning(t, out)
+		checkFkipcPruning(t, "rust", out)
 	})
 }
 
-func checkFkipcPruning(t *testing.T, wasmPath string) {
+func checkFkipcPruning(t *testing.T, arm, wasmPath string) {
 	t.Helper()
 	root := repoRoot(t)
 	raw, err := os.ReadFile(wasmPath)
@@ -90,13 +129,13 @@ func checkFkipcPruning(t *testing.T, wasmPath string) {
 	}
 	ids, complete := factorio.UsedEvents(im)
 	if !complete {
-		t.Fatal("the event id scan gave up, so an fkipc mod would ship all 224 " +
-			"event descriptors: fkipc's fkapi.Subscribe call site is no longer " +
-			"reached by a constant")
+		t.Fatalf("the event id scan gave up on the %s arm, so an fkipc mod would "+
+			"ship every event descriptor there is: fkipc's fkapi.Subscribe call "+
+			"site is no longer reached by a constant", arm)
 	}
 	if len(ids) != 1 {
 		t.Fatalf("examples/ipc subscribes to exactly one event -- fkipc's own; "+
-			"the scan proved %d", len(ids))
+			"the %s arm's scan proved %d", arm, len(ids))
 	}
 
 	// ...and it must be the RIGHT one, read from the bindings rather than

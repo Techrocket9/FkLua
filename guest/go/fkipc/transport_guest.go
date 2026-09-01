@@ -30,10 +30,21 @@ import (
 // layout. `fklua mod` prunes the event table (`events` in census.json is how
 // many there are) by scanning the wasm for an i32.const reaching fk.subscribe;
 // an id it cannot prove constant ships all of them. So the constant has to
-// appear AT the fkapi.Subscribe call site and the wrapper has to inline --
-// which is a property, not a hope, and internal/guest asserts it against a real
-// TinyGo build. It was a live defect on the Rust side once (R6:
-// subscribe_filtered lacked #[inline] and shipped 85 KB per load).
+// appear AT the fkapi.Subscribe call site and the wrapper has to inline.
+//
+// WHETHER IT INLINES IS A GATE, NOT A PROPERTY, and this comment used to say
+// otherwise. Every entry point in the generated subscribe family carries an
+// inlining hint -- //go:inline in Go, #[inline(always)] in Rust -- but Go's is
+// an LLVM inlinehint the inliner may still decline, so the standing evidence is
+// TestTheEventIdSurvivesTheFkipcSubscribeCallSite, which builds this example
+// against a real toolchain in BOTH -gc arms and both languages. It has been a
+// live defect twice: on the Rust side as R6 (subscribe_filtered lacked
+// #[inline] and shipped 85 KB per load), and on the Go side under -gc=custom
+// alone, where the leaking arm of the same source went on proving every id --
+// filed by BetterBeltBalancer (item 30). fkipc's own call site was green
+// through both, measured, because it reaches fkapi.Subscribe, the smallest
+// wrapper in the family; what item 30 changed here is that the collected arm is
+// now built rather than assumed.
 //
 // WHAT THAT COSTS, ATTRIBUTED, because this comment used to charge it to the
 // wrong table: the full event descriptor table is about 55 KB of Lua at the

@@ -88,32 +88,46 @@ func init() {
 	// ...AND FOUR WITH FACTORIO'S OWN FILTERS, which the engine applies in C++
 	// before the guest is entered.
 	//
-	// FOUR RATHER THAN ONE, AND THE COUNT IS THE TEST. These are here for the
-	// PRUNING as much as for the filtering: fklua mod ships only the event
-	// descriptors it can prove a guest subscribes to, by scanning the wasm for a
-	// constant reaching the import, and it is all-or-nothing -- one id it cannot
-	// prove and the whole table ships. SubscribeFiltered is several times the
-	// size of Subscribe, and on the Rust arm that difference was enough for the
-	// id to arrive as a runtime parameter once there were four call sites --
-	// 85 KB of extra Lua per load, reported from the field by a downstream
-	// Rust port. TinyGo inlines both wrappers here; this is the
-	// guest that keeps saying so, gated by
-	// TestTheEventIdSurvivesTheGeneratedSubscribeWrapper.
-	onlyChests := fkapi.NameFilter("iron-chest")
-	fkapi.SubscribeFiltered(evOnBuiltEntity, onlyChests...)
-	fkapi.SubscribeFiltered(evOnRobotBuiltEntity, onlyChests...)
-	fkapi.SubscribeFiltered(evOnPlayerMinedEntity, onlyChests...)
-
-	// ...AND THE FOURTH BY prototype TYPE RATHER THAN BY NAME, which is the
-	// other filter helper and the one nothing exercised until now.
+	// FOUR CALL SITES SHARING ONE FOUR-TERM LIST, AND BOTH COUNTS ARE THE TEST.
+	// These are here for the PRUNING as much as for the filtering: fklua mod
+	// ships only the event descriptors it can prove a guest subscribes to, by
+	// scanning the wasm for a constant reaching the import, and it is
+	// all-or-nothing -- one id it cannot prove and the whole table ships.
+	// SubscribeFiltered is several times the size of Subscribe, so whether the
+	// id survives is a real question about it and an obvious yes about its
+	// sibling.
 	//
-	// It is the same event count and the same wire shape -- one map term, two
-	// keys -- so nothing calibrated moves; what it demonstrates is the choice.
-	// `iron-chest` is one prototype and `container` is every chest there is,
-	// including ones a mod added, which is why a guest that means "any chest"
-	// should not be writing names. Terms OR together within a call, so the
-	// mixed form is append(NameFilter(...), TypeFilter(...)...).
-	fkapi.SubscribeFiltered(evOnRobotMinedEntity, fkapi.TypeFilter("container")...)
+	// FOUR CALL SITES is the Rust arm's cliff, measured: one filtered
+	// subscription inlined and four did not, so the id arrived as a runtime
+	// parameter and a mod crossed the line by GROWING -- 85 KB of extra Lua per
+	// load, reported from the field by a downstream Rust port (R6).
+	//
+	// ONE SHARED MIXED LIST is the GO arm's, and it is one axis over: the size
+	// of what gets inlined into init BEFORE the subscribe wrappers are weighed.
+	// A bare NameFilter("a", "b", "c", "d", "e") is one call with a loop in it
+	// and costs almost nothing here -- measured green at every call-site count
+	// to eleven -- while the MIXED form below is two helper calls and an
+	// append, and four call sites of it are enough. Measured on this example
+	// under -gc=custom -opt=2 (TinyGo 0.41.1, LLVM 20.1.1): fkapi.SubscribeFiltered
+	// stops being inlined and survives as a standalone wasm function whose
+	// interior fk.subscribe calls pass the id as local.get $0, so the constant
+	// scan gives up and the packaged mod carries every descriptor there is.
+	// Under -gc=leaking the same source inlines and proves all seven, which is
+	// why one arm cannot gate this and
+	// TestTheEventIdSurvivesTheGeneratedSubscribeWrapper builds both.
+	//
+	// It is also the MIXED FORM SubscribeFiltered's own doc comment tells a
+	// guest author to write -- append(NameFilter(...), TypeFilter(...)...) --
+	// which the corpus described and never compiled, and it keeps both helpers
+	// called: a helper nothing calls is a helper nothing compiles. Terms OR
+	// together, so this is every container there is, including ones a mod
+	// added, plus three chests named outright.
+	chests := append(fkapi.NameFilter("iron-chest", "steel-chest", "wooden-chest"),
+		fkapi.TypeFilter("container")...)
+	fkapi.SubscribeFiltered(evOnBuiltEntity, chests...)
+	fkapi.SubscribeFiltered(evOnRobotBuiltEntity, chests...)
+	fkapi.SubscribeFiltered(evOnPlayerMinedEntity, chests...)
+	fkapi.SubscribeFiltered(evOnRobotMinedEntity, chests...)
 
 	// ...AND ONE BY NAME, which is the only way a CUSTOM INPUT can be reached.
 	//
