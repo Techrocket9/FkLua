@@ -1387,6 +1387,35 @@ The last two rows are the whole diagnosis: **the constant lives at the GUEST's c
 
 **Two standing lessons.** *An arm nobody builds is an arm nobody is gating* — and the arm that went ungated for four milestones is the one `agents/gc.md` tells every mod to ship. And *a fix filed per language is a fix per language*: R6's remedy was applied to Rust and its reasoning was never carried across, so the Go side kept a comment asserting as fact what the Rust side had already learned was a heuristic.
 
+#### ...and then the SCAN learned to see past the wrapper, so the pragma stopped being the fix
+
+**The hint holds that instance and cannot hold the class, because it is a hint.** `//go:inline` is an LLVM `inlinehint` weighed against a cost model that changes its mind when something *else* grows — which is the whole of the story above — so pruning would have stayed one cost decision away from silently shipping every descriptor there is, on a lever with no failure signal but a gate. `usedIDs` is **one level interprocedural** now, and the wrapper-out-of-line shape is provable rather than fatal.
+
+**The rule, and the one fact it rests on.** A **parameter the function never writes** holds what the caller passed, at every point in the body. So when the import's id operand is not a constant but *is* such a parameter, the `(function, parameter)` pair goes **PENDING** instead of incomplete, and its ids are read off that function's own **direct call sites** — which is where the guest wrote its literal in the first place. The tracking is the constant tracking exactly: same writes, same invalidation, same clearing at every control-flow boundary; the only new fact is that a never-written parameter is the caller's argument.
+
+**ONE LEVEL, NO FIXPOINT, DELIBERATELY.** A call-site argument that is itself a parameter of *its* caller counts as non-constant, so two out-of-line wrappers in a row give up — and so does recursion, with no special case and no way to loop. One is the shape the generator produces.
+
+**The safe direction is absolute and every rule points at it.** A function that **escapes** — named by an export, by an element segment (so reachable through `call_indirect` with anything), or as `start` — gives up, because its callers are not all in this module. One call site whose argument is not provably constant loses the whole argument, not just its own id: the union would be missing whatever that site passed. And a pending function with **no call sites** constrains nothing and is skipped, which is strictly better than today rather than a new claim — its import call is unreachable, so there is demonstrably no id to miss.
+
+**Measured with the pragmas TAKEN BACK OUT, which is the only measurement that says the class is closed.** The six `//go:inline` lines were stripped from `internal/factorio/gogen.go`, the bindings regenerated, and `TestTheEventIdSurvivesTheGeneratedSubscribeWrapper` run against both scanners:
+
+| `examples/api`, no inlining hints | pre-extension scan | **one level interprocedural** |
+|---|---|---|
+| `-gc=leaking` | PASS | **PASS** |
+| `-gc=custom` | **FAIL** — *"the event id scan gave up on the collected arm"* | **PASS**, all seven ids |
+
+The left column is item 30 reproduced on demand — the same arm, the same message — and the right one is it closed **by the scan alone**, with the toolchain still declining to inline. The pragmas are restored (byte-identical `gogen.go` and `fkapi.go`) and stay: a wrapper that inlines is still the cheap answer, and it is now a size optimisation rather than the thing correctness rests on.
+
+**What is still all-or-nothing is everything past one level.** A loop over event ids, a computed id, an id written on two sides of a branch, and a wrapper calling a wrapper all still ship the whole table and still say so in the two lines `fklua mod` prints. Nothing here weakens that; the give-up simply moved one call deep. *Gated by ten cases beside the existing scan tests in `internal/factorio/used_test.go` — the positive at operand 0 and at operand 1, an exported wrapper, one in the element table, one unprovable call site, a reassigned parameter, two wrappers deep, a wrapper nothing calls, and recursion. Red-proven: the two positives and the zero-call-sites case fail against the pre-extension `used.go`, and the six give-up cases pass on both, which is what says they assert the safe direction rather than the mechanism.*
+
+**One thing the refactor fixed on the way, and it is the only change in this round that could prune MORE rather than less — so it has its own proof.** The walk invalidates the slot a step wrote at the value's **full width** now, where it used to delete one slot; and it visits a dispatch call before invalidating rather than `continue`ing past it.
+
+**The observable shape is a MULTI-VALUE result and it is the only one, measured rather than reasoned.** A slot is normally readable as an operand only after a step whose `Dst` is that slot, and a `Dst` clears it either way — so a stale constant cannot be reached. `Step.Dst` records **result 0 alone**, so results 1..n are real stack values the walk sees no write for. Put a constant on the slot a two-result call is about to land its second result on, and read that slot as a member operand: the old scan reports **`complete=true` with id 222, a member nothing calls** — pruning the table to it and dropping the one the guest really calls, which answers `ERR_NO_MEMBER` in game. The new scan reports `complete=false`.
+
+Two shapes that look like the same hole and are **not** observable, both checked: an i64 single result (`Dst` at N, two slots wide) leaves N+1 stale and unreachable, because anything that later pushes to N+1 writes it; and a dispatch call's own `Dst` is its **first argument's** slot while the member operand sits one above it, so the id a later call reads is never the slot an earlier one left. *Gated by `TestAStaleConstantUnderAMultiValueResultIsNotAnID`, red against the pre-round `used.go` on both of its assertions.* Everything else about the widening only makes the scan give up more, and no test in the repo moved.
+
+**And the third lesson is this commit's rather than that one's**: *a fix that rests on a heuristic is a fix that comes back*. `//go:inline` made the measured instance green and left the class exactly where it was, because nothing about a cost model promises to stay decided. What closed it was making the thing being measured provable.
+
 ### `fk.define` — defines, resolved by name at load
 
 `fk.define(id) -> i32` is the fifth `fk` import. It answers the last thing a guest still had to hardcode: `defines.direction.east` was a hand-written `4`, in a project whose own ABI doc says defines are "resolved through a generated table at load, never hardcoded."
