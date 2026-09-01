@@ -1223,15 +1223,29 @@ func checkAPIPin(im *ir.Module, version string, from pinSource) error {
 // falls back to the raw export name, which is still enough to act on and is
 // honest about what is known.
 func pinVersionName(stamp string) string {
-	if ents, err := os.ReadDir(apiDir()); err == nil {
-		for _, e := range ents {
-			if e.IsDir() && factorio.PinExport(e.Name()) == stamp {
-				return e.Name()
-			}
-		}
+	if v, ok := pinCommittedVersion(stamp); ok {
+		return v
 	}
 	return strings.TrimPrefix(stamp, factorio.PinExportPrefix) +
 		" (no description for it is committed here)"
+}
+
+// pinCommittedVersion is pinVersionName's matching half on its own, for the
+// caller that needs the "committed?" bit rather than a phrase to print.
+//
+// `api check` is that caller: a stamp naming a description this checkout does
+// not have is a check it cannot RUN, which is a different outcome from one it
+// merely has to word carefully, and deriving it by looking for a parenthesis in
+// the sentence above would be two places spelling one fact.
+func pinCommittedVersion(stamp string) (string, bool) {
+	if ents, err := os.ReadDir(apiDir()); err == nil {
+		for _, e := range ents {
+			if e.IsDir() && factorio.PinExport(e.Name()) == stamp {
+				return e.Name(), true
+			}
+		}
+	}
+	return "", false
 }
 
 // heapBytes is the module's declared initial linear memory, which is what

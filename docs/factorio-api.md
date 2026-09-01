@@ -369,20 +369,21 @@ A new version is a data drop, not a porting job. `fklua api pull <version>` fetc
 |---:|---|
 | 0 | nothing this guest uses breaks between the two versions |
 | 1 | something does, or the scan could not see everything the guest reaches |
-| 2 | the check could not be run: a bad flag, an unreadable module, a version this installation does not have |
+| 2 | the check could not be run: a bad flag, an unreadable module, a version this installation does not have, a guest whose ids no committed description can decode, or an `fklua.toml` in the working directory that could not be read |
 
 Codes 0 and 1 are both successful runs. The third is what separates "your mod is fine" from "you typed the version wrong".
 
 `--json` writes one verdict object to standard output instead of the report, so a build script does not have to read prose:
 
 ```sh
-fklua api check dist/my-mod.wasm --from 2.0.77 --to 2.1.16 --json
+fklua api check dist/my-mod.wasm --to 2.1.16 --json
 ```
 
 ```json
 {
   "from": "2.0.77",
   "to": "2.1.16",
+  "from_source": "stamp",
   "guest": "dist/my-mod.wasm",
   "verdict": "impacted",
   "complete": true,
@@ -409,6 +410,12 @@ Payload types count for the same reason signature types do. An event's data bloc
 
 `api diff` classifies `defines` at two levels, and `api check` reads both. A whole group going away is reported as `defines.<group>`; an individual value going away is reported as `defines.<group>.<value>`, including values nested under a subkey. The value level is the one a guest depends on, because a generated define accessor resolves one dotted value path by name at load: a value that a release removed reads back as `0` at runtime rather than failing, so a guest holding one has a wrong constant and no error. Values under `defines.events` are not diffed here, since events are compared as events.
 
-**Pass `--from` explicitly.** It defaults to the FkLua binary's own pin, and that value moves between FkLua releases, so a script that omits it can silently start asking a different question. The document echoes the versions it resolved for exactly that reason.
+**`--from` resolves in four steps, and most callers should not pass it.** In order: an explicit `--from`; the guest's own pin stamp, which every generated binding set exports to name the description its ids were assigned over; `[fklua] api` in an `fklua.toml` in the working directory; the FkLua binary's own default pin. The stamp comes before the other three because it is a fact about the module rather than about the tool or the project: member, event and define ids are dense per-description indices, so a surface recovered from a compiled guest means something only against the description that guest was built against. Decoding it against another one names different members, silently, because every id still resolves to something, and the verdict over that surface is a fiction rather than a wrong number.
+
+`from` and `to` in the document are the resolved versions, and `from_source` says which of the four rules chose `from`: `flag`, `stamp`, `manifest` or `default`. A caller that passed no `--from` needs it, because the four routinely resolve to the same string and the default moves between FkLua releases.
+
+Four arrangements exit 2 rather than answering: an explicit `--from` that contradicts a stamped guest; a guest linking two generated binding sets (there is no description that decodes both); a guest whose stamp names a version this installation has no description for (`fklua api pull` it and run again); and an unstamped guest checked beside an `fklua.toml` that cannot be read, since the manifest is the rule that would have answered (pass `--from` to answer without it, or run from a directory that has no manifest). Pass `--from` when the guest carries no stamp, which is the case for bindings older than the stamp and for a module that links none, and when the working directory is not the project's. Passing the same version to `--from` and `--to` is legal and is how a harness gates a guest at one pin; on a stamped guest that version has to be the stamp's own.
+
+One arrangement is a notice rather than a refusal. A stamped guest checked in a directory whose `fklua.toml` pins a different version is answered from the stamp, since that is the fact about which description the guest's ids are indices into, and a notice naming both versions and both ways to reconcile them goes to standard error. It is not a refusal because the verdict is still about the guest as it was built; it is not silence because `fklua mod` refuses that same pairing at package time rather than choosing between them, so a clean verdict here followed by a package walks into a refusal. The exit code, the verdict and standard output are unchanged, and the notice is printed whether or not `--from` was passed.
 
 Every field name in the document is stable. The report printed without `--json` is not: it is presentation and free to change wording, so parse the JSON rather than the report.

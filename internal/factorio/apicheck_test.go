@@ -3,6 +3,7 @@ package factorio
 import (
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -173,4 +174,134 @@ func TestSomeConceptsAreReachableOnlyThroughAnEventPayload(t *testing.T) {
 			"not carry it: %v", pickName, want, s.Concepts)
 	}
 	t.Logf("%s names %q, which no member signature reaches", pickName, want)
+}
+
+// EVERY VALUE `from_source` MAY CARRY HAS A PHRASE, and the set is pinned here
+// as four literals rather than read off FromSources.
+//
+// The failure this catches is a FIFTH rule. `from_source` is a closed set a
+// script switches on and FromSourcePhrase is the same fact in the words the
+// report prints, so a constant added to one and not the other ships a raw token
+// (`(from: env)`) into the output a mod author reads -- which looks exactly like
+// a phrase somebody wrote. Reading the set out of FromSources would not catch
+// it, because a rule added to the constants and not to the slice is invisible to
+// both; this list is the thing a fifth rule has to edit.
+func TestEveryFromSourceHasAReportPhrase(t *testing.T) {
+	want := []string{FromSourceFlag, FromSourceStamp, FromSourceManifest,
+		FromSourceDefault}
+
+	if len(FromSources) != len(want) {
+		t.Errorf("FromSources carries %d values and the closed set is %d: %v",
+			len(FromSources), len(want), FromSources)
+	}
+	for _, s := range want {
+		if !ValidFromSource(s) {
+			t.Errorf("%q is one of the four rules and ValidFromSource rejects it, "+
+				"so VerdictDoc would refuse a document that resolved it", s)
+		}
+	}
+	for _, s := range FromSources {
+		if !has(want, s) {
+			t.Errorf("FromSources carries %q, which is not in this test's list; a "+
+				"fifth rule is an edit to both, or it prints as a raw token", s)
+		}
+	}
+
+	seen := map[string]string{}
+	for _, s := range want {
+		p := FromSourcePhrase(s)
+		if p == "" || p == s {
+			t.Errorf("FromSourcePhrase(%q) is %q: a value with no phrase of its "+
+				"own prints as the raw token, in the one output a mod author reads",
+				s, p)
+		}
+		if prev, dup := seen[p]; dup {
+			t.Errorf("FromSourcePhrase(%q) and (%q) are both %q, so the report "+
+				"cannot say which rule answered", s, prev, p)
+		}
+		seen[p] = s
+	}
+
+	// AND THE DEFAULT BRANCH IS LOUD. A value outside the set is a defect, and
+	// the phrase for it has to read as one rather than as a fifth rule nobody
+	// documented.
+	const bogus = "env"
+	if ValidFromSource(bogus) {
+		t.Fatalf("%q is not one of the four rules", bogus)
+	}
+	if p := FromSourcePhrase(bogus); p == bogus {
+		t.Errorf("FromSourcePhrase(%q) hands back the token unchanged, which "+
+			"renders as `(from: %s)` and reads as a phrase somebody wrote", bogus, p)
+	}
+}
+
+// A DOCUMENT WITH NO RESOLUTION RULE IN IT IS REFUSED, not defaulted.
+//
+// The command-line path always sets FromSource, so this is about the OTHER
+// caller: a CheckResult assembled in Go, from CheckGuest and a surface, by a
+// harness that never heard of the field. That result would have marshalled to
+// `"from_source": ""` -- outside the closed set the document promises, and
+// indistinguishable to a script from a value it can switch on. Defaulting the
+// field instead would be worse: it would NAME a rule that did not fire, which
+// is the one thing `from_source` exists to prevent.
+func TestAVerdictDocumentRefusesAnUnresolvedFromSource(t *testing.T) {
+	r := CheckResult{From: DefaultAPIVersion, To: DefaultAPIVersion, Guest: "g.wasm"}
+
+	if _, err := r.VerdictDoc(); err == nil {
+		t.Error("VerdictDoc built a document for a CheckResult whose FromSource " +
+			"was never set, so `from_source` would ship as \"\"")
+	}
+	if b, err := r.JSON(); err == nil {
+		t.Errorf("JSON marshalled the same result rather than refusing it:\n%s", b)
+	}
+
+	// THE CONTROL. A refusal that refuses everything would pass the two
+	// assertions above and take the whole `--json` mode with it.
+	r.FromSource = FromSourceStamp
+	doc, err := r.VerdictDoc()
+	if err != nil {
+		t.Fatalf("a resolved FromSource was refused: %v", err)
+	}
+	if doc.FromSource != FromSourceStamp {
+		t.Errorf("from_source is %q, want %q", doc.FromSource, FromSourceStamp)
+	}
+	if _, err := r.JSON(); err != nil {
+		t.Fatalf("JSON refused a resolved result: %v", err)
+	}
+}
+
+// THE REPORT SAYS SO TOO WHEN NO RULE RESOLVED `from`, rather than printing the
+// heading this command had before `from_source` existed.
+//
+// VerdictDoc refuses that value and FromSourcePhrase's default branch is
+// deliberately loud, so a Report() that dropped the phrase for an unset source
+// would leave the two halves of one closed set disagreeing about the same value
+// -- and the half that stayed quiet is the one a mod author READS. Quiet is the
+// worse failure here: the old heading is a valid heading, so the reader has
+// nothing to notice.
+func TestAReportWithNoResolutionRuleSaysSoInItsHeader(t *testing.T) {
+	r := CheckResult{From: DefaultAPIVersion, To: DefaultAPIVersion, Guest: "g.wasm"}
+
+	head, _, _ := strings.Cut(r.Report(), "\n")
+	// The "A -> B" shape is still at the front, as it is for a resolved one.
+	if !strings.HasPrefix(head, "# api check: ") || !strings.Contains(head, " -> ") {
+		t.Fatalf("the report's heading moved: %q", head)
+	}
+	if want := FromSourcePhrase(r.FromSource); !strings.Contains(head, want) {
+		t.Errorf("the heading is %q for a CheckResult whose FromSource was never "+
+			"set; it reads exactly like one an older fklua printed, while "+
+			"VerdictDoc refuses the same value outright. Want %q in it", head, want)
+	}
+
+	// THE CONTROL, and the anti-vacuity tooth: a header that carried the loud
+	// phrase whatever the source is would pass the assertion above and say
+	// nothing. A resolved source prints ITS phrase and not the loud one.
+	r.FromSource = FromSourceStamp
+	head, _, _ = strings.Cut(r.Report(), "\n")
+	if want := FromSourcePhrase(FromSourceStamp); !strings.Contains(head, want) {
+		t.Errorf("the heading %q does not name %q for a resolved source", head, want)
+	}
+	if bad := FromSourcePhrase(""); strings.Contains(head, bad) {
+		t.Errorf("the heading %q carries %q for a source that resolved", head, bad)
+	}
 }

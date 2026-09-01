@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Techrocket9/fklua/internal/factorio"
+	"github.com/Techrocket9/fklua/internal/ir"
 )
 
 // The `api` command: pull, list and diff.
@@ -26,7 +27,10 @@ const apiEndpoint = "https://lua-api.factorio.com/%s/runtime-api.json"
 
 func runAPI(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: fklua api pull|list|diff")
+		// ALL FOUR, and `check` is the one a script actually calls: it was
+		// missing here while the unknown-subcommand line one return below named
+		// it, so the two disagreed about what this command can do.
+		return fmt.Errorf("usage: fklua api pull|list|diff|check")
 	}
 	switch args[0] {
 	case "pull":
@@ -302,7 +306,20 @@ func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
 	var res factorio.CheckResult
 	var wasmPath, to string
 	asJSON := false
-	from := factorio.DefaultAPIVersion
+	// WHETHER --from WAS TYPED, rather than what it defaults to. The default is
+	// no longer one constant -- it is checkFrom's four rules -- so "the caller
+	// asked for a version" has to be a different question from "the value equals
+	// DefaultAPIVersion", which is a version a caller can legitimately type. The
+	// same shape --gc and --factorio-version carry in `fklua mod`.
+	//
+	// AND IT IS A BOOL RATHER THAN AN EMPTY-STRING SENTINEL, because the empty
+	// string is a value a caller can PASS: `--from "$PIN"` with PIN unset arrives
+	// here as a typed flag carrying nothing, and a sentinel would read that as
+	// "no flag" and answer from the stamp -- silently, and with `from_source`
+	// saying `stamp` to a caller that believes it named a version. That is the
+	// filed defect's own shape one level down.
+	fromFlag := ""
+	fromTyped := false
 	for i := 0; i < len(args); i++ {
 		switch {
 		case args[i] == "--to":
@@ -316,7 +333,15 @@ func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
 				return res, asJSON, fmt.Errorf("--from needs a version")
 			}
 			i++
-			from = args[i]
+			if args[i] == "" {
+				// THE SAME REFUSAL AS NO VALUE AT ALL, and the same words,
+				// because it is the same mistake: an unexpanded shell variable
+				// is a flag whose version went missing, not a request for the
+				// resolver's other rules.
+				return res, asJSON, fmt.Errorf("--from needs a version")
+			}
+			fromFlag = args[i]
+			fromTyped = true
 		case args[i] == "--json":
 			// A BOOLEAN, WHERE `api diff --json` TAKES A PATH, and the
 			// divergence is deliberate: this one's whole job is to be captured
@@ -349,6 +374,10 @@ func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
 	if err != nil {
 		return res, asJSON, err
 	}
+	from, fromSource, err := checkFrom(im, fromFlag, fromTyped)
+	if err != nil {
+		return res, asJSON, err
+	}
 	a, err := factorio.LoadAPI(apiPath(from))
 	if err != nil {
 		return res, asJSON, fmt.Errorf("%s: %w (run `fklua api pull %s`)", from, err, from)
@@ -371,12 +400,309 @@ func checkGuestFromArgs(args []string) (factorio.CheckResult, bool, error) {
 
 	// From and To come out of the DESCRIPTIONS' own application_version rather
 	// than from what was typed, which is what makes echoing them worth anything:
-	// `--from` defaults to this binary's pin, so a harness that passed no
-	// version has no other way to learn which one it got, and the default moving
-	// under it is a real thing that has happened here twice.
+	// a harness that passed no `--from` has no other way to learn which of
+	// checkFrom's four rules answered, and `from_source` is the other half of
+	// that -- the four resolve to the same string often enough that the version
+	// alone does not say which question was asked.
 	res = factorio.CheckGuest(surface, factorio.DiffAPI(a, b))
 	res.Guest = wasmPath
+	res.FromSource = fromSource
 	return res, asJSON, nil
+}
+
+// checkFrom decides WHICH DESCRIPTION THE GUEST'S IDS ARE INDICES INTO, which is
+// the only one this check may decode them against.
+//
+// THE DEFECT, filed by WormholeBelts as its FKLUA-GAPS item 9. Member, event and
+// define ids are DENSE PER-DESCRIPTION INDICES, so a surface recovered from a
+// module means something only against the description its bindings were
+// generated from -- and `--from` defaulted to this binary's DefaultAPIVersion,
+// which is a fact about the FKLUA BINARY and about nothing else. Measured on a
+// guest stamped 2.1.17 that calls member 4500: `api check g.wasm --to 2.1.17`
+// reported from 2.0.77, a surface of ZERO members, verdict clean, exit 0 -- a
+// guest that calls a member told it touches nothing -- while `--from 2.1.17`
+// reports the one member it really calls. The other direction is as quiet and
+// worse: the same module read from 2.0.77 invented a removal of
+// `LuaEntity::mining_progress`, a member that guest has never called.
+//
+// FOUR RULES, MOST-KNOWING FIRST. The flag is what the caller asked for. THE
+// STAMP IS THE FACT -- a generated binding set exports fk_api_pin_<version> to
+// name the description its ids were assigned over, which is this question
+// exactly, and it is the half that was sitting in the module unread. The
+// manifest is the project's stated INTENT, for a guest carrying no stamp. The
+// default is the last resort and is unchanged, which is the whole of the
+// compatibility: an unstamped guest with no manifest resolves as it always did.
+//
+// AND FOUR REFUSALS, every one of them exit 2 -- "the check could not be RUN"
+// rather than a verdict -- because each leaves no description the ids could
+// honestly be decoded against. Answering anyway is the defect above: not a wrong
+// number, a fiction that reads exactly like an answer. Three are about the
+// module (a --from contradicting its stamp, two stamps, a stamp naming a
+// version this checkout has no description for); the fourth is about the rule
+// that would have answered instead -- a manifest that is there and unreadable.
+// `typed` IS THE TEST FOR RULE ONE, not `flag != ""`. The empty string is a
+// version a caller can type, and the parse loop above refuses it there so that
+// nothing here has to treat one as the other; taking the bool means this
+// function is right whatever a future caller hands it.
+func checkFrom(im *ir.Module, flag string, typed bool) (version, source string, err error) {
+	pins := factorio.GuestPins(im)
+
+	// WHY a wrong description is worse than no answer, shared by all three
+	// refusals rather than written three times with a word different --
+	// checkAPIPin's own arrangement, one command over.
+	const why = "Member, event and define ids are DENSE SORTED INDICES over one " +
+		"description's\nset, so a member added or removed anywhere shifts every " +
+		"later id. Decoding this\nguest against another description names " +
+		"DIFFERENT members -- silently, since every id\nstill resolves to " +
+		"something -- so the surface, and the verdict over it, would be\na " +
+		"fiction rather than a wrong number."
+
+	if len(pins) > 1 {
+		// REFUSED WHETHER OR NOT --from WAS TYPED, because no version can rescue
+		// it: the two sets disagree about what every id past their first
+		// difference means, so at most one of them is decoded correctly whatever
+		// description is named. `fklua mod` refuses the same shape.
+		var named []string
+		exact := true
+		for _, p := range pins {
+			v, committed := pinStampVersion(p)
+			named = append(named, v)
+			exact = exact && committed
+		}
+		return "", "", fmt.Errorf(
+			"this guest links %d generated binding sets, at APIs %s.\n"+
+				"  what the module says: it exports %s\n"+
+				"%s\n"+
+				"A guest may link exactly ONE, so there is no description this "+
+				"check could decode\nit against. Regenerate every binding set it "+
+				"imports at ONE pin: `fklua gen-bindings`\nfor the project's own, "+
+				"and `fklua gen-bindings --into DIR` for the committed copy\ninside "+
+				"a vendored FkLua checkout. Then rebuild the guest.%s",
+			len(pins), strings.Join(named, " and "), strings.Join(pins, " and "), why,
+			guessCaveat(exact, false))
+	}
+
+	if len(pins) == 1 {
+		stamp := pins[0]
+		// WHICH VERSION THIS STAMPED GUEST RESOLVES TO, and which rule answered
+		// with it, decided BEFORE the notice below. WHETHER the notice fires is a
+		// function of (stamp, manifest) and not of which rule fired -- see
+		// noteStampManifestDivergence -- so both arms reach it and only one of
+		// this function's own refusals, which resolve no version at all,
+		// pre-empts it. WHAT it says about the rule is `source`, handed over
+		// rather than assumed, because both arms get here.
+		version, source := "", factorio.FromSourceStamp
+		if typed {
+			// COMPARED AS MANGLED NAMES rather than by recovering the stamp's
+			// version, so this holds for a description this checkout does not
+			// carry as well as for one it does. PinExport is what both
+			// generators spell the export with, so the comparison is exact.
+			if factorio.PinExport(flag) != stamp {
+				named, committed := pinStampVersion(stamp)
+				return "", "", fmt.Errorf(
+					"this guest was built against API %s bindings, and --from names "+
+						"API %s.\n"+
+						"  what asked for %s: the --from flag\n"+
+						"  what the module says: it exports %s, which every generated "+
+						"binding set carries\n    to name the description its ids were "+
+						"assigned over\n"+
+						"%s\n"+
+						"Two ways to reconcile:\n"+
+						"  (1) DROP --from. With no flag it resolves to the guest's own "+
+						"stamp, which is\n      the fact about what its ids are indices "+
+						"into.\n"+
+						"  (2) PASS THE STAMP'S VERSION: --from %s.%s",
+					named, flag, flag, stamp, why, named, guessCaveat(committed, true))
+			}
+			version, source = flag, factorio.FromSourceFlag
+		} else {
+			v, ok := pinCommittedVersion(stamp)
+			if !ok {
+				// ALWAYS A READING rather than a fact, by construction: this is
+				// the branch where no committed description carries the version,
+				// which is the only thing that could have spelled it exactly.
+				named, _ := pinStampVersion(stamp)
+				return "", "", fmt.Errorf(
+					"this guest was built against API %s bindings, and no description "+
+						"for that\nversion is committed here.\n"+
+						"  what the module says: it exports %s, which every generated "+
+						"binding set carries\n    to name the description its ids were "+
+						"assigned over\n"+
+						"%s\n"+
+						"Pull it and check again: `fklua api pull %s` (`fklua api list` "+
+						"shows what this\ninstallation has).%s",
+					named, stamp, why, named, guessCaveat(false, true))
+			}
+			version = v
+		}
+		noteStampManifestDivergence(stamp, version, source)
+		return version, source, nil
+	}
+
+	// NO STAMP IS SILENCE, exactly as it is for `fklua mod`: bindings generated
+	// before the stamp existed carry none, and a guest linking no generated
+	// bindings carries none either. What answers then is what the caller said.
+	if typed {
+		return flag, factorio.FromSourceFlag, nil
+	}
+	proj, ok, err := loadProject()
+	if err != nil {
+		// A manifest that is present and unreadable is not a reason to fall
+		// through to the default quietly: answering against a version nobody
+		// chose is the exact shape of the defect this function exists to close.
+		//
+		// WRAPPED RATHER THAN RETURNED RAW, and that is the fourth refusal
+		// rather than a rewording. loadProject's error is about a FILE -- e.g.
+		// `fklua.toml: line 7: unknown key "some_future_key" in [fklua]`, which
+		// is what an older fklua makes of a manifest a newer one wrote -- and it
+		// names neither the question this command was asking nor the flag that
+		// answers it without a manifest. A caller checking a guest is then
+		// looking at an exit 2 about a file it never mentioned.
+		return "", "", fmt.Errorf(
+			"this guest carries no pin stamp, so the working directory's %s was "+
+				"consulted\nfor `[fklua] api` -- and it could not be read.\n"+
+				"  what the module says: nothing. It exports no %s* function, "+
+				"which is what a\n    generated binding set carries to name the "+
+				"description its ids were assigned over\n"+
+				"  what the manifest says: %w\n"+
+				"%s\n"+
+				"Two ways forward:\n"+
+				"  (1) PASS --from <version>. It answers without the manifest, and "+
+				"an unstamped\n      guest is the case the flag exists for.\n"+
+				"  (2) FIX %s, or run from a directory that has none.",
+			projectFile, factorio.PinExportPrefix, err, why, projectFile)
+	}
+	if ok {
+		// NO `&& proj.API != ""`, and its absence is deliberate rather than an
+		// omission. ParseProject makes `[fklua] api` REQUIRED, so a manifest
+		// that parsed HAS a pin: there is no "present but empty" state for the
+		// guard to catch, and it would be dead today and worse than dead
+		// tomorrow. If the key ever became optional, that guard would hand this
+		// question to the default without a word -- the exact silent
+		// fall-through this resolver exists to close -- where its absence makes
+		// the empty pin an unreadable-description error that names itself.
+		return proj.API, factorio.FromSourceManifest, nil
+	}
+	return factorio.DefaultAPIVersion, factorio.FromSourceDefault, nil
+}
+
+// noteStampManifestDivergence says so out loud when the guest's own stamp and
+// the project's manifest name DIFFERENT descriptions.
+//
+// NOT A REFUSAL, and the distinction is the whole of why this is a notice.
+// `api check` answers a question about a GUEST -- which description are this
+// module's ids indices into -- and the stamp is the fact that answers it, so
+// proceeding from the stamp is right even when the project meant something else.
+// What is NOT right is answering silently: `fklua mod` REFUSES this exact
+// pairing rather than choosing (checkAPIPin), because a packaged table whose ids
+// were assigned over a different description answers the guest's calls with
+// different members, silently wherever the kinds line up, in a lockstep game. A
+// caller who reads a clean verdict here and then packages is walking into that
+// refusal, and a caller who reads it as covering the build the PROJECT would
+// make has read it wrong.
+//
+// A FUNCTION OF (STAMP, MANIFEST), AND OF NOTHING ELSE -- which is why checkFrom
+// calls it once, after the stamp has resolved, rather than on the untyped arm
+// alone. The refusal it warns about (`checkAPIPin`) reads the stamp and the
+// packaging pin and has never heard of `--from`, so the arrangement is exactly
+// as present when the caller typed `--from` naming the stamp's own version --
+// which is the shape a downstream harness types, as a same-pin gate -- as when
+// it typed nothing. Firing on one and not the other left the arm every harness
+// reaches silent.
+//
+// STDERR, because stdout carries the verdict a script parses -- `--json`'s whole
+// contract is that nothing else lands there.
+//
+// IT TAKES THE RESOLVED SOURCE AND PRINTS FromSourcePhrase RATHER THAN SPELLING
+// A RULE, for the reason that function is one function: this notice is a THIRD
+// output describing which of the four answered, beside the report's header and
+// the document's `from_source`, and a sentence that hard-codes one of them is
+// wrong on the other arm -- two lines above a header that says otherwise. It
+// also PROMISES NO VERDICT. checkFrom calls this before either description is
+// loaded, so a run that refuses downstream (an unreadable `--to`, say) prints
+// the notice and then nothing else; "the verdict below" was a claim about output
+// this function cannot know will exist.
+func noteStampManifestDivergence(stamp, stamped, source string) {
+	proj, ok, err := loadProject()
+	// An unreadable manifest is not this function's business: the stamp already
+	// answered, and the refusal above covers the case where the manifest is the
+	// rule that would have.
+	if err != nil || !ok || proj.API == stamped {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"NOTICE: this guest is stamped API %s and %s pins API %s.\n"+
+			"  what the module says: it exports %s, which every generated binding "+
+			"set carries\n    to name the description its ids were assigned over\n"+
+			"  what the project says: api = %q in %s\n"+
+			"This check resolved API %s, which this guest's stamp names, so what it\n"+
+			"reports is about the guest as it was BUILT rather than as the project\n"+
+			"would package it. The rule that answered: %s.\n"+
+			"`fklua mod` refuses this pairing rather than choosing between them, so "+
+			"reconcile\nthem before packaging: regenerate the bindings this guest "+
+			"imports at %s and\nrebuild it (`fklua gen-bindings`, and "+
+			"`fklua gen-bindings --into DIR` for the\ncommitted copy inside a "+
+			"vendored FkLua checkout), or move the project's pin to %s.\n",
+		stamped, projectFile, proj.API, stamp, proj.API, projectFile,
+		stamped, factorio.FromSourcePhrase(source),
+		proj.API, stamped)
+}
+
+// pinStampVersion is the version to NAME in a refusal about a stamp, and
+// whether that spelling is a FACT or a READING.
+//
+// The committed directory's own name when this checkout has one, which is
+// exact, and `committed` is true. Otherwise the stamp read back: PinExport
+// writes every character outside [0-9A-Za-z] as '_' and has no inverse, so
+// putting the dots back is a guess -- an exact one for every Factorio version
+// there has ever been, since those are digits and dots, but a guess. The second
+// return is what makes the difference SAYABLE: every refusal that prints a
+// recovered version appends guessCaveat, so none of them implies a spelling it
+// cannot know. Returning the bool rather than leaving each caller to re-ask
+// pinCommittedVersion is what keeps the two halves from drifting apart.
+func pinStampVersion(stamp string) (version string, committed bool) {
+	if v, ok := pinCommittedVersion(stamp); ok {
+		return v, true
+	}
+	return strings.ReplaceAll(
+		strings.TrimPrefix(stamp, factorio.PinExportPrefix), "_", "."), false
+}
+
+// guessCaveat is the sentence a refusal adds when it printed a version it read
+// back out of an export name, and nothing when it printed one this checkout
+// carries a description for.
+//
+// ONE NAMING HALF for all three refusals, for the reason `why` is one: the
+// caveat has to say the same thing wherever it lands, and a refusal that names
+// an exact version must not carry it -- "this might not be how it is spelled"
+// about a version read off a committed directory is noise that teaches a reader
+// to skip the paragraph.
+//
+// AND A SEPARATE ACTIONABLE TAIL, because "pass the real spelling as --from" is
+// only an instruction where `--from` can change the outcome. It cannot for the
+// TWO-STAMP refusal: `len(pins) > 1` returns before the flag is ever read, and
+// the refusal's own body two lines above says a guest may link exactly ONE and
+// there is no description this check could decode it against. A message that
+// contradicts itself spends the reader's next attempt on a run that prints the
+// same words. The naming half still belongs there -- it is what stops a reader
+// grepping for a directory spelled `9.9.9` -- so the two are separate rather
+// than the caveat being dropped.
+func guessCaveat(committed, fromCanAnswer bool) string {
+	if committed {
+		return ""
+	}
+	// "A VERSION NAMED ABOVE" rather than "the version above", because the
+	// two-stamp refusal names two and only one of them may be a reading.
+	s := "\nA VERSION NAMED ABOVE IS READ BACK OUT OF ITS EXPORT NAME, not " +
+		"looked up: a stamp\nwrites every character outside [0-9A-Za-z] as `_` " +
+		"and the mangling has no inverse,\nso `_` stands for whatever separator " +
+		"the real version uses. That reading is exact\nfor a version spelled in " +
+		"digits and dots, which every Factorio release has been."
+	if fromCanAnswer {
+		s += "\nIf this one is spelled some other way, pass the real spelling " +
+			"as --from."
+	}
+	return s
 }
 
 // runDocs renders the per-language API reference.

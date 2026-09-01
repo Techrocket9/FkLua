@@ -164,6 +164,80 @@ const (
 	MatchClass = "class"
 )
 
+// WHERE THE `from` VERSION CAME FROM, and it is a data interface for the same
+// reason Match is: `api check --json` prints it verbatim, so a new value is a
+// new constant here and nowhere else.
+//
+// It is carried because `--from` stopped being one thing. The flag defaults to
+// whatever the resolver found -- an explicit flag, the guest's OWN pin stamp,
+// the project manifest, this binary's default -- and a caller that passed no
+// flag would otherwise have no way to learn which of the four it got. That is
+// not a cosmetic difference: member, event and define ids are dense per-version
+// indices, so the answer to "what does this guest touch" is a DIFFERENT answer
+// under each one, and every id still resolves to something under all of them.
+const (
+	// FromSourceFlag is an explicit --from on the command line.
+	FromSourceFlag = "flag"
+	// FromSourceStamp is the guest's own pin stamp: the FACT about which
+	// description its ids were assigned over, and the strongest of the four.
+	FromSourceStamp = "stamp"
+	// FromSourceManifest is `[fklua] api` in an fklua.toml beside the caller:
+	// the project's stated INTENT, for a guest that carries no stamp.
+	FromSourceManifest = "manifest"
+	// FromSourceDefault is this binary's DefaultAPIVersion, the last resort --
+	// and it has moved under this repo twice.
+	FromSourceDefault = "default"
+)
+
+// FromSources is that closed set as a value, in resolution order.
+//
+// So that "what may `from_source` say" is answerable without restating four
+// constants a fifth time, and so that the two things which have to cover all of
+// them -- FromSourcePhrase and VerdictDoc's refusal -- are checkable against one
+// list rather than against each other.
+var FromSources = []string{
+	FromSourceFlag, FromSourceStamp, FromSourceManifest, FromSourceDefault,
+}
+
+// ValidFromSource reports whether src is one of them.
+//
+// THE EMPTY STRING IS NOT ONE. "Nobody recorded which rule answered" is not a
+// rule, and it is the value a CheckResult built by hand carries by default --
+// which is why VerdictDoc refuses it rather than shipping `"from_source": ""`
+// into a document whose whole contract is that the field names one of four.
+func ValidFromSource(src string) bool {
+	for _, s := range FromSources {
+		if s == src {
+			return true
+		}
+	}
+	return false
+}
+
+// FromSourcePhrase is the same fact in the human report's words.
+//
+// ONE FUNCTION rather than a phrase spelled beside each constant, because the
+// report and the document must not be able to disagree about which of the four
+// answered -- this repo's most-repeated failure shape.
+func FromSourcePhrase(src string) string {
+	switch src {
+	case FromSourceFlag:
+		return "the --from flag"
+	case FromSourceStamp:
+		return "the guest's own pin stamp"
+	case FromSourceManifest:
+		return "fklua.toml, [fklua] api"
+	case FromSourceDefault:
+		return "fklua's default pin"
+	}
+	// A FIFTH VALUE MUST NOT PRINT AS A RAW TOKEN. Returning `src` unchanged
+	// renders `(from: env)` in the report, which reads exactly like a phrase
+	// somebody wrote -- so a constant added to the set above and forgotten here
+	// would ship silently into the one output a mod author actually reads. This
+	// says what it is instead, and VerdictDoc refuses the same value outright.
+	return fmt.Sprintf("an unrecognised resolution rule %q", src)
+}
+
 // The three verdicts, which are what a calling harness branches on. They are a
 // partition: exactly one holds for any result.
 const (
@@ -200,6 +274,10 @@ type CheckFinding struct {
 // CheckResult is what an upgrade would do to one guest.
 type CheckResult struct {
 	From, To string
+	// FromSource is which of the four resolution rules chose From: one of the
+	// FromSource* constants. Set by whoever resolved it, since the rules live
+	// where the command line, the module and the manifest are.
+	FromSource string
 	// Guest is the module that was checked, as the caller named it. Carried for
 	// the JSON verdict, where a harness checking many guests in a loop has
 	// nothing else to tell the documents apart by.
@@ -309,11 +387,15 @@ func (r CheckResult) ExitCode() int {
 // `findings` is an array even when it is empty -- a caller that has to
 // distinguish null from [] is a caller parsing twice.
 type CheckVerdict struct {
-	// From and To are the RESOLVED versions, always. --from defaults to the
-	// binary's own pin, so a harness that did not pass one has no other way to
-	// learn which description its answer is about.
+	// From and To are the RESOLVED versions, always. A harness that passed no
+	// --from has no other way to learn which description its answer is about.
 	From string `json:"from"`
 	To   string `json:"to"`
+	// FromSource is WHICH RULE chose From: one of the FromSource* constants.
+	// `from` alone cannot answer it, because the four rules routinely resolve
+	// to the same string -- and a caller that omitted --from gets a different
+	// question answered depending on which one fired.
+	FromSource string `json:"from_source"`
 	// Guest is the module path as it was given on the command line.
 	Guest string `json:"guest"`
 	// Verdict is one of the Verdict* constants.
@@ -345,13 +427,29 @@ type CheckVerdictSurface struct {
 
 // VerdictDoc builds the machine-readable document. `Verdict` above is the one
 // word inside it; this is the whole of what a caller is handed.
-func (r CheckResult) VerdictDoc() CheckVerdict {
+//
+// IT REFUSES A FromSource OUTSIDE THE CLOSED SET RATHER THAN DEFAULTING ONE, and
+// the empty string is outside it. `from_source` is a value a script switches on,
+// so `"from_source": ""` is a document that broke its own contract while looking
+// exactly like one that kept it -- and it is what a CheckResult assembled by a
+// library caller carries until somebody sets the field, which is a whole class
+// of caller the command-line path cannot speak for. Defaulting it would be
+// worse than the empty string: it would NAME a rule that did not fire, which is
+// this field's one job to prevent.
+func (r CheckResult) VerdictDoc() (CheckVerdict, error) {
+	if !ValidFromSource(r.FromSource) {
+		return CheckVerdict{}, fmt.Errorf(
+			"CheckResult.FromSource is %q, which is not one of %s: `from_source` "+
+				"names WHICH RULE resolved `from`, and there is no honest default "+
+				"for a rule that did not fire",
+			r.FromSource, strings.Join(FromSources, ", "))
+	}
 	findings := r.Hits
 	if findings == nil {
 		findings = []CheckFinding{}
 	}
 	return CheckVerdict{
-		From: r.From, To: r.To, Guest: r.Guest,
+		From: r.From, To: r.To, FromSource: r.FromSource, Guest: r.Guest,
 		Verdict:  r.Verdict(),
 		Complete: r.Surface.Complete,
 		ExitCode: r.ExitCode(),
@@ -364,13 +462,17 @@ func (r CheckResult) VerdictDoc() CheckVerdict {
 		BreakingTotal: len(r.Hits) + r.Ignored,
 		Ignored:       r.Ignored,
 		Findings:      findings,
-	}
+	}, nil
 }
 
 // JSON is the verdict document, indented, with a trailing newline so it lands
 // in a terminal and a file the same way.
 func (r CheckResult) JSON() ([]byte, error) {
-	b, err := json.MarshalIndent(r.VerdictDoc(), "", "  ")
+	doc, err := r.VerdictDoc()
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -378,9 +480,23 @@ func (r CheckResult) JSON() ([]byte, error) {
 }
 
 // Report renders the answer a mod author reads.
+//
+// AN UNRESOLVED FromSource PRINTS LOUDLY HERE rather than printing the header
+// this command had before the field existed. VerdictDoc refuses that value
+// outright, and the two halves of one closed set may not disagree about it: a
+// report that quietly dropped the phrase would read as an OLDER fklua's output,
+// which is the one reading a mod author cannot check. The report is presentation
+// and stays a string -- it has no error to return -- so what it does with a
+// value outside the set is say so, in FromSourcePhrase's own words.
 func (r CheckResult) Report() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# api check: %s -> %s\n\n", r.From, r.To)
+	// THE HEADER NAMES WHERE `from` CAME FROM, for the reason the document
+	// carries `from_source`: the four rules resolve to the same string often
+	// enough that the version alone does not say which question was asked.
+	// Appended rather than spliced between the versions so the "A -> B" shape a
+	// reader scans for is where it has always been.
+	fmt.Fprintf(&b, "# api check: %s -> %s (from: %s)\n\n", r.From, r.To,
+		FromSourcePhrase(r.FromSource))
 	fmt.Fprintf(&b, "This guest touches %d member(s), %d event(s), %d define(s) and %d named type(s).\n\n",
 		len(r.Surface.Members), len(r.Surface.Events), len(r.Surface.Defines),
 		len(r.Surface.Concepts))

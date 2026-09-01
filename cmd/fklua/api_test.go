@@ -1,9 +1,13 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,4 +186,90 @@ func TestTheRegenBotCannotBeBlockedByARegenerationItCannotDo(t *testing.T) {
 			"failed; the draft condition must carry steps.regen.outcome the way " +
 			"it carries steps.tests.outcome")
 	}
+}
+
+// THE USAGE LINE NAMES EVERY SUBCOMMAND `fklua api` DISPATCHES, and so does the
+// unknown-subcommand line beside it.
+//
+// The two disagreed: `fklua api` with no arguments printed `pull|list|diff`
+// while the line one return below already named `check` -- so the command's own
+// help omitted the one subcommand a script calls, and nothing noticed, because
+// every other test drives `api check` by calling it rather than by asking what
+// exists. This repo's most-recorded shape one command over: two places
+// describing one thing, free to drift.
+//
+// THE LIST IS DERIVED FROM THE DISPATCH, by parsing runAPI's own switch, rather
+// than being a fourth spelling of it here. A test carrying its own list is a
+// third place to forget.
+func TestTheAPIUsageNamesEverySubcommandItDispatches(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Skipf("not in a checkout, so runAPI's dispatch cannot be read: %v", err)
+	}
+	subs := dispatchedSubcommands(t, filepath.Join(root, "cmd", "fklua", "api.go"))
+
+	// ANTI-VACUITY. A parse that found nothing, or that walked the wrong
+	// function, would pass every assertion below by asserting nothing at all.
+	if len(subs) < 4 {
+		t.Fatalf("runAPI dispatches %d subcommand(s) (%v); it has had four since "+
+			"`api check` landed, so either this parse is reading the wrong thing "+
+			"or one was removed", len(subs), subs)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"no subcommand", nil},
+		{"an unknown subcommand", []string{"nope"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runAPI(tc.args)
+			if err == nil {
+				t.Fatalf("runAPI(%v) returned no error", tc.args)
+			}
+			for _, s := range subs {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("%q does not name the %q subcommand, which runAPI "+
+						"dispatches", err.Error(), s)
+				}
+			}
+		})
+	}
+}
+
+// dispatchedSubcommands reads the string cases of the switch inside runAPI: what
+// `fklua api` will actually run, as the compiler sees it.
+func dispatchedSubcommands(t *testing.T, path string) []string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subs []string
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Name.Name != "runAPI" {
+			continue
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			cc, ok := n.(*ast.CaseClause)
+			if !ok {
+				return true
+			}
+			for _, e := range cc.List {
+				lit, ok := e.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				v, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					t.Fatalf("%s: %v", lit.Value, err)
+				}
+				subs = append(subs, v)
+			}
+			return true
+		})
+	}
+	return subs
 }
