@@ -15,6 +15,12 @@ One export per stage. `fklua mod` writes a stage file for each hook the module a
 | `fk_data_updates` | `data-updates.lua` | patching another mod's prototypes |
 | `fk_data_final_fixes` | `data-final-fixes.lua` | the last word |
 
+## Scaffolding one
+
+`fklua init <mod-name> --data` writes the whole shape, in every language the project declares: the data guest itself, its place in the build, and the `data_module` key that names its artifact. For Go that is a second `main` package at `guest/go/data/`, inside the control guest's own module, so a package both stages need is an ordinary import from a sibling. For Rust it is a third crate in `guest/rust/`, depending on `fkdata` and nothing else, with `fkdata` and `fklog` added to the workspace dependencies. `init` then prints the whole recipe, a build line per module and the packaging command that takes them both, and scaffolds it into the data guest's own header; the generated comments carry the two rules below that are easy to get wrong.
+
+Adding a data stage to a project that already exists means writing those files by hand and declaring `data_module` yourself; `init` refuses to overwrite anything.
+
 ## A first data stage, in Go
 
 ```go
@@ -57,33 +63,58 @@ pub extern "C" fn fk_data() {
 
 A data module is compiled `--persist=none` and `-gc=leaking` whatever the control guest uses, so its build line is not the control guest's. Packaging refuses a data module that carries a collector, and names the fix.
 
-In Go, that is `-gc=leaking` and no `fkgc` import in the data guest's own package:
+Each language has a recipe of three commands, and they are the ones `fklua init --data` prints and scaffolds into the data guest's header, here for a mod named `my-mod`. Build both modules, then package them together: `data_module` names the DATA module, so the packaging command takes the CONTROL guest's wasm as its positional argument and needs no flag. There is no manifest key for the control module.
+
+In Go the two builds differ in one flag, `-gc=leaking` against `-gc=custom`, and the data guest's package imports no `fkgc`:
 
 ```sh
-tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 \
-    -o dist/data.wasm ./datastage
+(cd guest/go && tinygo build -target=wasm-unknown -scheduler=none -gc=custom -opt=2 \
+    -o ../../my-mod.wasm .)
+(cd guest/go && tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 \
+    -o ../../my-mod-data.wasm ./data)
+fklua mod my-mod.wasm
 ```
 
-In Rust, it is a release build of the data crate with no `--features fk/fkgc`, **in its own cargo invocation**:
-
-```sh
-cargo build --release --target wasm32-unknown-unknown -p my-mod-data
-```
-
-The separate invocation is the load-bearing part. Cargo's v2 resolver unifies features across every package built in one command, so a control guest built `--features fk/fkgc` in the same invocation turns the collector on for the data crate too, silently and only for that build. Two commands, one per module, keeps the two apart. There is no source difference between the two arms: the `fk` crate owns the single `#[global_allocator]` site and the feature chooses what backs it.
-
-Then package the two together:
-
-```sh
-fklua mod dist/control.wasm --data-module dist/data.wasm
-```
-
-or put it in the manifest and drop the flag:
+with the key naming the artifact the second line wrote:
 
 ```toml
 [fklua]
 api = "2.0.77"
-data_module = "dist/data.wasm"
+data_module = "my-mod-data.wasm"
+```
+
+In Rust the data crate is a release build with no `--features fk/fkgc`, **in its own cargo invocation**, and both artifacts land under the workspace's target directory rather than at the project root. A cdylib is named after the `[lib]` name with dashes mapped to underscores, which is the one part of these paths nobody guesses:
+
+```sh
+(cd guest/rust && cargo build --release --target wasm32-unknown-unknown \
+    -p my-mod-guest --features fk/fkgc)
+(cd guest/rust && cargo build --release --target wasm32-unknown-unknown -p my-mod-data)
+fklua mod guest/rust/target/wasm32-unknown-unknown/release/my_mod_guest.wasm
+```
+
+with:
+
+```toml
+[fklua]
+api = "2.0.77"
+data_module = "guest/rust/target/wasm32-unknown-unknown/release/my_mod_data.wasm"
+```
+
+The separate invocation is the load-bearing part. Cargo's v2 resolver unifies features across every package built in one command, so a control guest built `--features fk/fkgc` in the same invocation turns the collector on for the data crate too, silently and only for that build. Two commands, one per module, keeps the two apart. There is no source difference between the two arms: the `fk` crate owns the single `#[global_allocator]` site and the feature chooses what backs it.
+
+A project that declares both languages still has one data stage, so `data_module` takes the first language in `lang` order and the other artifact rides beside it as a comment. Both packaging commands then package the module the key names, whichever control guest they name. Each language's recipe therefore builds the module the key names rather than the one that language produces, so the same data build appears in both recipes and either three-line recipe works on its own. To ship the other language's data module, point the key at the path in the comment beside it.
+
+Without the key, `--data-module` says the same thing on the command line. In the Go layout:
+
+```sh
+fklua mod my-mod.wasm --data-module my-mod-data.wasm
+```
+
+and in the Rust one, where both paths sit under the target directory:
+
+```sh
+fklua mod guest/rust/target/wasm32-unknown-unknown/release/my_mod_guest.wasm \
+    --data-module guest/rust/target/wasm32-unknown-unknown/release/my_mod_data.wasm
 ```
 
 ## A mod with no control stage at all
@@ -91,7 +122,7 @@ data_module = "dist/data.wasm"
 The control guest is optional. A mod that is only prototypes is an ordinary Factorio mod, so leave the positional argument out and package the data module on its own:
 
 ```sh
-fklua mod --data-module dist/data.wasm --name my-shim --version 1.0.0 --author me
+fklua mod --data-module my-shim-data.wasm --name my-shim --version 1.0.0 --author me
 ```
 
 The result ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua`, `fk_data_module.map.json` and one file per stage hook, plus whatever `--include` carries. There is no `control.lua`, no `fk_module.lua` and no `fk_api_gen.lua`; `fk_abi.lua` stays because `fk_data.lua` requires it for the codec. The map is the data module's [debug map](generated-files.md), on the same terms as the control stage's, and `--no-map` leaves it out.

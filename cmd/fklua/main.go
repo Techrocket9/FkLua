@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,7 +77,12 @@ Usage:
                         exit 0 nothing this guest uses breaks, 1 something does
                         or the scan could not see everything, 2 the check could
                         not be run. --json writes one verdict object to stdout
-  fklua init <mod-name> [--lang go,rust] [--api VERSION]
+  fklua init <mod-name> [--lang go,rust] [--api VERSION] [--data]
+      --data            also scaffold the DATA-STAGE guest, in every language
+                        ` + "`lang`" + ` declares: a second wasm module for Factorio's
+                        settings and data stages, plus the ` + "`data_module`" + ` key
+                        that names it. It is built in its own command and
+                        without a collector; the scaffold's comments say why
   fklua init --library <name> [--data] [--lang go|rust] [--guest-module PATH]
                         scaffold a guest LIBRARY (a package a consumer's guest
                         imports), with the composition contract in its comments.
@@ -134,13 +140,15 @@ how fkipc's version floor works, so a GA-pinned mod gets the whole IPC library
 on a newer engine with no rebuild.
 
 ` + "`--data-module`" + ` gives the mod a SETTINGS and DATA stage written in Go or
-Rust: a second wasm module, compiled from its own main package, that reaches
+Rust: a second wasm module, built from its own package or crate, that reaches
 data.raw through the fkdata library. fklua writes a stage file for each hook the
 module exports -- fk_settings, fk_data, fk_data_updates, fk_data_final_fixes --
 and ` + "`--stage KEY=a,@guest,b`" + ` (or ` + "`[stages]`" + ` in fklua.toml) says what
 order that file loads things in while hand-written Lua is still in the chain.
 A data module must not import the generated fkapi bindings: those stages have no
-runtime API, and packaging refuses one that does. See docs/data-stage.md.
+runtime API, and packaging refuses one that does -- nor carry a collector, since
+it runs once at load and nothing there drives one. ` + "`fklua init <name> --data`" + `
+scaffolds the whole shape. See docs/data-stage.md.
 
 ` + "`bench`" + ` measures FkLua-style generated Lua against the Lua a mod author
 would write by hand. ` + "`spectest`" + ` runs the official WebAssembly conformance
@@ -1493,7 +1501,7 @@ func runModWith(args []string, rep *modReport) error {
 	// be recovered from the value. See the override below.
 	var deps []string
 	depsFromFlag := false
-	// THE DATA STAGE. A second wasm module, compiled from its own main package,
+	// THE DATA STAGE. A second wasm module, built from its own package or crate,
 	// that runs at Factorio's settings and data stages -- see
 	// internal/factorio/stage.go. It travels the way every other manifest-backed
 	// setting here does: the file is the default, the flag is the override, and
@@ -1501,6 +1509,14 @@ func runModWith(args []string, rep *modReport) error {
 	// default, because the empty string is a meaningful value ("no data guest").
 	dataModule := ""
 	dataFromFlag := false
+	// WHERE THE PATH CAME FROM, kept because the path alone is not enough to
+	// act on. `fklua init --data` writes data_module into every project it
+	// scaffolds, so an author who runs the printed build lines out of order
+	// meets a missing data artifact before anything else -- and a bare "open
+	// x-data.wasm: no such file or directory" names neither the key that
+	// produced the path nor the fact that a data module has a build line of its
+	// own. This is the same reason gcFrom and pinSource exist.
+	dataFrom := "--data-module"
 	// The [stages] chains. Nil until something declares one, because an ABSENT
 	// key and a key declared as an empty list mean different things and a map
 	// that invented entries would erase the difference.
@@ -1732,6 +1748,7 @@ func runModWith(args []string, rep *modReport) error {
 		// overrides one chain without silently discarding the other three.
 		if proj.DataModule != "" && !dataFromFlag {
 			dataModule = proj.DataModule
+			dataFrom = projectFile + ", [fklua] data_module"
 		}
 		for key, chain := range proj.Stages {
 			if stages == nil {
@@ -1853,7 +1870,35 @@ func runModWith(args []string, rep *modReport) error {
 		var id string
 		im, id, err = loadModuleID(in, apiVersion)
 		if err != nil {
-			return err
+			// NAMED BY WHERE IT CAME FROM, the same way the data module's
+			// failure is, and for the same reason one door over: `fklua init
+			// --data` prints a THREE-line recipe and scaffolds it into both
+			// data guests' headers, so an author who pastes part of it -- or
+			// runs the lines out of order -- meets this before anything else.
+			// A bare "open my-mod.wasm: no such file or directory" names
+			// neither where the path was typed nor the fact that a control
+			// guest has a build line of its own.
+			//
+			// THE POSITIONAL HAS NO OTHER SOURCE, which is why this needs no
+			// dataFrom of its own: there is no manifest key for the control
+			// module, and that asymmetry is exactly what the scaffolded
+			// headers are explaining when they say the control guest is the
+			// argument and the data module is the key.
+			//
+			// THE REMEDY IS FOR A MISSING FILE AND THE PROVENANCE IS FOR ALL OF
+			// THEM. "build it before packaging" is false advice for a path that
+			// exists and is not a wasm module: `bad wasm magic` needs a
+			// different answer, and appending this one to it tells an author to
+			// re-run a build that already produced the file they are looking
+			// at.
+			where := "  the path is `fklua mod`'s positional argument; there " +
+				"is no manifest key for it"
+			if errors.Is(err, fs.ErrNotExist) {
+				where += "\n  a control guest is built by the line `fklua " +
+					"init` prints above the packaging one; build it before " +
+					"packaging, or point the argument at the build you have"
+			}
+			return fmt.Errorf("control module: %w\n%s", err, where)
 		}
 		// Resolve --persist=auto HERE rather than inside the emitter, so the
 		// choice can be printed. An automatic decision the author cannot see is
@@ -1918,7 +1963,18 @@ func runModWith(args []string, rep *modReport) error {
 	if dataModule != "" {
 		dim, err := loadModule(dataModule)
 		if err != nil {
-			return err
+			// NAMED BY WHERE IT CAME FROM, not just by what failed. See dataFrom.
+			// The remedy is gated on the file being MISSING, exactly as the
+			// control module's is one door over: a path that exists and is not
+			// a wasm module has already been built.
+			where := fmt.Sprintf("  the path comes from %s", dataFrom)
+			if errors.Is(err, fs.ErrNotExist) {
+				where += "\n  a data module is a SECOND wasm module with a " +
+					"build line of its own, printed beside the control " +
+					"guest's by `fklua init --data`; build it before " +
+					"packaging, or point that at the build you have"
+			}
+			return fmt.Errorf("data module: %w\n%s", err, where)
 		}
 		var imports, exports []string
 		for _, im := range dim.Source.Imports {

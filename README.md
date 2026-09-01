@@ -69,6 +69,8 @@ cd .. && mkdir my-mod && cd my-mod
 fklua init my-mod --guest-module /path/to/fklua
 ```
 
+Add `--data` to that last line for a mod with a settings and data stage: it scaffolds the second guest as well and declares it in the manifest.
+
 `init` writes into the **current directory** and creates no `my-mod/` of its own; the name argument is the mod's identity. `--guest-module` points the scaffolded guest at a local FkLua checkout; leave it off and run `go mod tidy` in `guest/go/` once the guest module is fetchable where you are. It writes `fklua.toml` (the mod's identity, dependencies, API pin, guest language and GC mode) and a guest that already builds under `guest/go/`: its own Go module, the collector import in `gc.go`, and `fk_on_init` and `fk_on_tick` wired in `main.go`. It also writes a `.gitignore` covering the build output the steps below produce, when the directory does not already have one; `fklua.lock` is not in it, because the lock is meant to be committed. What every generated file is for, key by key, is [`docs/generated-files.md`](docs/generated-files.md). Then:
 
 ```sh
@@ -119,7 +121,7 @@ The scaffold uses the two simplest hooks: `fk_on_init` once per save and `fk_on_
 
 `guest/go/examples/` holds twenty-eight more, each aimed at one thing: `array` and `dict` for marshalling, `callback` for commands and remote interfaces, `retain` for a handle that outlives its event, [`handles`](guest/go/examples/handles/main.go) for the three handle spaces and the rules for owning a slot, `gcsave` for the collector across a save, `migrate` for a rebuilt guest, [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](guest/go/fkipc/README.md), and [`datastage`](guest/go/examples/datastage/main.go) for a mod's settings and data stages. `guest/rust/examples/` mirrors thirteen of them line for line.
 
-A mod's **settings and data stages** can be a guest too, as a second wasm module packaged beside the control one. It defines prototypes, reads and patches `data.raw`, and clones a base prototype without marshalling it through the guest, which is what keeps the untouched fields exactly as the source shipped them. There is no runtime API at those stages, so a data module imports `fkdata` and never `fkapi`, and packaging refuses one that does. See [`docs/data-stage.md`](docs/data-stage.md).
+A mod's **settings and data stages** can be a guest too, as a second wasm module packaged beside the control one. It defines prototypes, reads and patches `data.raw`, and clones a base prototype without marshalling it through the guest, which is what keeps the untouched fields exactly as the source shipped them. There is no runtime API at those stages, so a data module imports `fkdata` and never `fkapi`, and packaging refuses one that does; it also refuses one built with a collector, because it runs once at load and nothing there drives one. `fklua init <mod-name> --data` scaffolds it in every language the project declares. See [`docs/data-stage.md`](docs/data-stage.md).
 
 ---
 

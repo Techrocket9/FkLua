@@ -61,15 +61,36 @@ type Project struct {
 	// the DATA STAGE: data.lua, prototypes/, graphics/, locale/. The default
 	// for `fklua mod --include`, which is the mechanism; see Package.Include.
 	Data string
-	// DataModule is a second wasm module, compiled from its own main package,
-	// that runs at Factorio's SETTINGS and DATA stages. The default for
-	// `fklua mod --data-module`, which is the mechanism.
+	// DataModule is a second wasm module, built from its own package or crate --
+	// a Go main package, a Rust cdylib -- that runs at Factorio's SETTINGS and
+	// DATA stages. The default for `fklua mod --data-module`, which is the
+	// mechanism.
+	//
+	// NAMING BOTH LANGUAGES IS LOAD-BEARING. The main-package-only phrasing
+	// this replaces was right while Go was the only language that could have a
+	// data module, and `fklua init --lang rust --data` is what made it wrong:
+	// a Rust project has no main package, and this sentence is copied verbatim
+	// into the manifest that scaffold writes. It has five copies -- here, the
+	// manifest text below, `fklua mod --help`, runModWith's data-stage comment
+	// and mod.go's DataChunk -- and a test holds all five to a phrasing that
+	// names both, which is also why the superseded wording is not quoted
+	// anywhere in them.
 	//
 	// EMPTY IS "no data guest", and every project written before this key
 	// existed has no line for it -- so `fklua mod` over one emits exactly what
 	// it emitted before, which is the same backward-compatibility rule `gc`
 	// follows and is gated by a byte-identity test.
 	DataModule string
+	// DataModuleAlt is the OTHER language's data artifact, written as a COMMENT
+	// beside data_module and never as a key.
+	//
+	// WRITE-ONLY, and deliberately. A mod has one data stage, so the manifest
+	// has one `data_module`; what a two-language project needs is not a second
+	// key but a note saying where the other build lands, so that swapping which
+	// one ships is editing a line the file already carries. ParseProject never
+	// sets it -- reading a comment back would invent a second declaration out of
+	// one -- so `fklua meta` reports the key and not this.
+	DataModuleAlt string
 	// Stages is the [stages] section: an ordered list of require paths per
 	// stage, one entry of which may be "@guest".
 	//
@@ -344,11 +365,24 @@ func (p Project) TOML() string {
 	}
 	if p.DataModule != "" {
 		b.WriteString("\n# A SECOND wasm module, run at Factorio's settings and data stages.\n")
-		b.WriteString("# It is compiled from its own main package and must not import the\n")
-		b.WriteString("# generated fkapi bindings: those stages have no runtime API.\n")
+		b.WriteString("# It is built from its own package or crate -- a Go main package, a\n")
+		b.WriteString("# Rust cdylib -- and must not import the generated fkapi bindings:\n")
+		b.WriteString("# those stages have no runtime API.\n")
 		b.WriteString("# fklua generates a stage file for each hook the module exports:\n")
 		b.WriteString("#   fk_settings -> settings.lua           fk_data -> data.lua\n")
 		b.WriteString("#   fk_data_updates -> data-updates.lua   fk_data_final_fixes -> data-final-fixes.lua\n")
+		b.WriteString("# It is also compiled --persist=none and -gc=leaking whatever the control\n")
+		b.WriteString("# guest uses: it runs once at load and dies with the Lua state that built\n")
+		b.WriteString("# it. `fklua mod` refuses a data module that carries a collector.\n")
+		if p.DataModuleAlt != "" {
+			// ONE KEY, HOWEVER MANY LANGUAGES, because a mod has one data
+			// stage. The other artifact is named rather than dropped, so
+			// switching which language ships is editing this line instead of
+			// working the path out again.
+			b.WriteString("# This project declares more than one guest language and a mod has ONE\n")
+			b.WriteString("# data stage, so the key names one build. The other lands at:\n")
+			fmt.Fprintf(&b, "#   %s\n", p.DataModuleAlt)
+		}
 		fmt.Fprintf(&b, "data_module = %q\n", p.DataModule)
 	}
 	if len(p.Scenarios) > 0 {

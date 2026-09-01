@@ -285,10 +285,16 @@ func TestTheZipCarriesTheSameMapAsTheDirectory(t *testing.T) {
 // tries to read a map, which is the worst way to find it.
 func TestTheScaffoldedRustProfileCarriesTheDebugKey(t *testing.T) {
 	const key = `debug = "line-tables-only"`
-	scaffolded := rustWorkspaceCargo("a-mod", "")
-	if !strings.Contains(scaffolded, key) {
-		t.Errorf("the scaffolded workspace manifest does not carry %s:\n%s", key, scaffolded)
+	// Both arms of --data, because the profile is what a release build reads
+	// and neither the data crate nor the control one may lose it.
+	for _, data := range []bool{false, true} {
+		scaffolded := rustWorkspaceCargo("a-mod", "", data)
+		if !strings.Contains(scaffolded, key) {
+			t.Errorf("the scaffolded workspace manifest (data=%v) does not carry "+
+				"%s:\n%s", data, key, scaffolded)
+		}
 	}
+	scaffolded := rustWorkspaceCargo("a-mod", "", false)
 	committed, err := os.ReadFile(filepath.Join("..", "..", "guest", "rust", "Cargo.toml"))
 	if err != nil {
 		t.Fatal(err)

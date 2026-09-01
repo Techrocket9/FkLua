@@ -60,7 +60,7 @@ func runInit(args []string) error {
 			if err != nil {
 				return err
 			}
-			p.Langs, i = strings.Split(v, ","), next
+			p.Langs, i = dedupeLangs(strings.Split(v, ",")), next
 		case args[i] == "--api":
 			if i+1 >= len(args) {
 				return fmt.Errorf("--api needs a version")
@@ -102,13 +102,20 @@ func runInit(args []string) error {
 	}
 	if p.Name == "" {
 		return fmt.Errorf("usage: fklua init <mod-name> [--lang go,rust] [--api VERSION] " +
-			"[--guest-module PATH] [--no-guest], or fklua init --library <name> " +
-			"[--lang go|rust] [--guest-module PATH]")
+			"[--data] [--guest-module PATH] [--no-guest], or fklua init --library " +
+			"<name> [--data] [--lang go|rust] [--guest-module PATH]")
 	}
-	if !library && dataFlavor {
-		return fmt.Errorf("--data is --library's flavor flag: a MOD's data stage " +
-			"is declared with [fklua] data_module or --data-module on fklua mod, " +
-			"not at init")
+	if dataFlavor && !library && noGuest {
+		// The data guest is a SECOND wasm module in the SAME tree as the
+		// control one -- a main package inside guest/go's module, a member of
+		// guest/rust's workspace -- so there is nowhere to put it in a project
+		// whose guest lives somewhere else entirely. Refused rather than half
+		// done, the way --library and --no-guest are.
+		return fmt.Errorf("--data and --no-guest contradict: a data guest is a " +
+			"second module in the SAME tree as the control guest (a main package " +
+			"under guest/go, a member of guest/rust's workspace), so there is " +
+			"nothing to scaffold it beside. Declare an existing one with [fklua] " +
+			"data_module instead")
 	}
 	if library {
 		// A library has no manifest, no pin and no gc key, so the mod-only
@@ -149,6 +156,30 @@ func runInit(args []string) error {
 	// guest that carries a collector, which is what scaffoldRustGuest is for.
 	p.GC = "collected"
 
+	// --data: the mod gets a DATA-STAGE guest per language, and the manifest
+	// gets the key that names the artifact.
+	//
+	// ONE KEY, HOWEVER MANY LANGUAGES. `data_module` is a path to one wasm,
+	// because a mod HAS one data stage -- so a two-language project's key names
+	// the first language in `lang` order and the other artifact rides beside it
+	// as a comment, which is exactly the choice `fklua mod <guest>.wasm` already
+	// makes for the control module. Swapping languages is then editing one line
+	// in a file that already tells you what to put there.
+	var dataModuleLang, dataModuleAltLang string
+	if dataFlavor {
+		arts := dataArtifacts(p.Name, p.Langs)
+		if len(arts) == 0 {
+			return fmt.Errorf("--data has no language to scaffold for: lang is %q, "+
+				"and a data guest is written in go or rust", strings.Join(p.Langs, ","))
+		}
+		p.DataModule = arts[0].path
+		dataModuleLang = arts[0].lang
+		if len(arts) > 1 {
+			p.DataModuleAlt = arts[1].path
+			dataModuleAltLang = arts[1].lang
+		}
+	}
+
 	// Refuse rather than overwrite. A manifest is hand-written and losing one
 	// to a re-run of init is not a recoverable mistake.
 	if _, err := os.Stat(projectFile); err == nil {
@@ -188,15 +219,33 @@ func runInit(args []string) error {
 		if err != nil {
 			return err
 		}
+		if dataFlavor {
+			wrote, err := scaffoldGoDataGuest(p.Name, p.Langs)
+			for _, f := range wrote {
+				fmt.Printf("wrote %s\n", f)
+			}
+			if err != nil {
+				return err
+			}
+		}
 		scaffolded = true
 	}
 	if hasLang(p.Langs, "rust") && !noGuest {
-		wrote, err := scaffoldRustGuest(p.Name, rustSubstrateDir(guestModule))
+		wrote, err := scaffoldRustGuest(p.Name, rustSubstrateDir(guestModule), dataFlavor)
 		for _, f := range wrote {
 			fmt.Printf("wrote %s\n", f)
 		}
 		if err != nil {
 			return err
+		}
+		if dataFlavor {
+			wrote, err := scaffoldRustDataGuest(p.Name, p.Langs)
+			for _, f := range wrote {
+				fmt.Printf("wrote %s\n", f)
+			}
+			if err != nil {
+				return err
+			}
 		}
 		scaffoldedRust = true
 	}
@@ -212,28 +261,81 @@ func runInit(args []string) error {
 			fmt.Printf("  (cd %s && go mod tidy)\n", guestDir)
 		}
 		fmt.Printf("  fklua gen-bindings && fklua lock\n")
+		// ONE DERIVATION FOR THE PRINTED BLOCK AND THE SCAFFOLDED ONE, which is
+		// the whole of why these lines are no longer written out here. A
+		// `--data` project's recipe has to build the data module `data_module`
+		// NAMES, which in a two-language project is the OTHER language's, and
+		// that rule was taught to the scaffolded headers alone: init went on
+		// printing each language's own data build, so pasting the non-key
+		// block's three lines ended on `fklua mod: data module: open <path>:
+		// no such file or directory` -- an open error naming a wasm nothing in
+		// the block had built, the very failure the headers' own paragraph
+		// says a recipe must not produce. Both now render
+		// initRecipeCommands, so the block on screen and the block in the
+		// author's editor cannot disagree about it.
 		if scaffolded {
-			fmt.Printf("  (cd %s && tinygo build -target=wasm-unknown -scheduler=none \\\n", guestDir)
-			fmt.Printf("      -gc=custom -opt=2 -o ../../%s.wasm .)\n", p.Name)
-			fmt.Printf("  fklua mod %s.wasm\n", p.Name)
+			printRecipe(initRecipeCommands(p.Name, "go", p.Langs, dataFlavor))
 		}
 		if scaffoldedRust {
-			// --features fk/fkgc is the collector and there is no second half:
-			// no import, no -gc flag. It is passed here rather than declared in
-			// the guest's Cargo.toml because Cargo's v2 resolver would unify it
-			// across every crate in the same build.
-			fmt.Printf("  (cd %s && cargo build --release \\\n", rustGuestDir)
-			fmt.Printf("      --target wasm32-unknown-unknown --features fk/fkgc)\n")
-			fmt.Printf("  fklua mod %s\n", filepath.Join(rustGuestDir, "target",
-				"wasm32-unknown-unknown", "release", RustGuestArtifact(p.Name)))
+			printRecipe(initRecipeCommands(p.Name, "rust", p.Langs, dataFlavor))
 		}
 	} else {
 		fmt.Printf("  fklua gen-bindings && fklua lock\n")
 		fmt.Printf("  fklua mod <your-guest>.wasm\n")
 	}
 	fmt.Printf("\n`fklua mod` reads %s, so it needs no flags -- not for identity,\n", projectFile)
+	// `data` IS THE ASSET DIRECTORY AND `data_module` IS THE WASM, and this
+	// line used to call the first one "a data stage" -- one sentence above a
+	// --data project being told it has a DATA STAGE already, declared as
+	// data_module. Two different things under one name in one screen of output
+	// is a first-time author reading the wrong key twice, so this one says what
+	// it copies rather than what stage it belongs to.
 	fmt.Printf("not for dependencies, and not for --gc. Add `data = \"mod-data\"` under\n")
-	fmt.Printf("[mod] to ship a data stage.\n")
+	fmt.Printf("[mod] to ship files alongside the guest -- graphics, locale, a\n")
+	fmt.Printf("changelog, hand-written Lua -- copied into the package as they are.\n")
+
+	if dataFlavor {
+		// THE TWO CARGO INVOCATIONS ARE NOT A STYLE, said here because the
+		// printed commands above are what an author copies and the reason they
+		// are two is invisible in them.
+		fmt.Printf("\nThis project has a DATA STAGE: a SECOND wasm module, run at Factorio's\n")
+		fmt.Printf("settings and data stages, declared as `data_module` in %s.\n", projectFile)
+		fmt.Printf("It is compiled --persist=none and -gc=leaking whatever the control guest\n")
+		fmt.Printf("uses, because it runs once at load and dies with the Lua state that built\n")
+		fmt.Printf("it -- no tick to pace a collection from, and no state to survive. `fklua\n")
+		fmt.Printf("mod` REFUSES a data module that carries a collector, or that imports the\n")
+		fmt.Printf("generated fkapi bindings: there is no runtime API at those stages.\n")
+		if scaffoldedRust {
+			// -p RATHER THAN A LINE COUNT, because how many cargo lines are
+			// printed depends on which language holds the key: a project whose
+			// data module is the Go one prints ONE cargo line in the Rust
+			// block, and "the two cargo lines above" was then a sentence about
+			// a block that did not exist. What is true in every arm is that no
+			// printed cargo line builds the workspace whole.
+			fmt.Printf("On the Rust side that is why every cargo line above names its package\n")
+			fmt.Printf("with -p: cargo's v2 resolver unifies --features fk/fkgc across every\n")
+			fmt.Printf("package built in ONE invocation, so a bare build over the workspace\n")
+			fmt.Printf("would collect the data crate too.\n")
+		}
+		if len(p.Langs) > 1 && p.DataModuleAlt != "" {
+			// WHICH BUILD THE KEY NAMES, said in the language's own name. Two
+			// languages print two `fklua mod` lines, one per control guest, and
+			// BOTH of them package the data module this key names -- so an
+			// author who builds only the other language's half meets a missing
+			// artifact whichever line they ran. "One of them" left that to be
+			// worked out from a path.
+			fmt.Printf("Both languages were scaffolded and a mod has ONE data stage, so\n")
+			fmt.Printf("`data_module` names the %s build (%s). Every `fklua\n",
+				langName(dataModuleLang), p.DataModule)
+			fmt.Printf("mod` line above packages that one, whichever control guest it names,\n")
+			fmt.Printf("which is why the same data build appears in both blocks: each block is\n")
+			fmt.Printf("a complete recipe, so the three lines for the guest you are shipping\n")
+			fmt.Printf("work on their own. To ship the %s data module instead, point the\n",
+				langName(dataModuleAltLang))
+			fmt.Printf("key at the path in the comment beside it (%s).\n", p.DataModuleAlt)
+		}
+		fmt.Printf("See docs/data-stage.md in the FkLua repo for the library.\n")
+	}
 
 	if p.GC == "collected" {
 		// WHAT THE DEFAULT BOUGHT, in the two numbers that decide it. Both are
@@ -282,6 +384,286 @@ func runInit(args []string) error {
 		fmt.Printf("See agents/guests.md, \"the guest heap budget\".\n")
 	}
 	return nil
+}
+
+// dataArtifacts is where a `--data` scaffold's data module lands, one entry per
+// declared language, IN THE ORDER `lang` declares them.
+//
+// The order is the whole of the two-language rule: `data_module` takes the
+// first and the rest ride beside it as comments, so which language a project
+// packages by default is a fact about its own manifest rather than about an
+// alphabetisation nobody chose. Unknown languages are skipped here and rejected
+// where they always were, in buildLock.
+//
+// SKIPPING RATHER THAN REFUSING HAS ONE VISIBLE CONSEQUENCE AND IT IS LEFT
+// ALONE DELIBERATELY. `--lang go,zig --data` writes `lang = ["go", "zig"]` and
+// then, because only one entry survives this switch, a scaffolded note reading
+// "`lang` declares one language". That sentence is wrong about the manifest
+// three lines above it -- and the project it is wrong in cannot be built at
+// all: `fklua gen-bindings`, which is init's own next printed step, exits with
+// `no generator for lang "zig"`, and so does `fklua lock`. Nobody reaches the
+// note in anger. Deciding here that a language is unknown would make this a
+// SECOND place that decides which languages exist, and two of those is the
+// drift shape the rest of this file is written to avoid; the one place is the
+// generator table buildLock consults.
+func dataArtifacts(modName string, langs []string) []dataArtifact {
+	var out []dataArtifact
+	for _, l := range langs {
+		switch lang := strings.TrimSpace(l); lang {
+		case "go":
+			out = append(out, dataArtifact{lang, GoDataArtifact(modName)})
+		case "rust":
+			out = append(out, dataArtifact{lang, rustReleaseWasm(RustDataArtifact(modName))})
+		}
+	}
+	return out
+}
+
+// dataRecipeCommands is the build-and-package recipe a scaffolded data guest's
+// header carries, one element per command and one string per physical line,
+// GENERATED FROM dataArtifacts for the same reason dataModuleKeyNote is.
+//
+// The three commands are: build the control guest OF THIS FILE'S OWN LANGUAGE,
+// because the packaging line takes its wasm as the positional; build the data
+// module `data_module` NAMES, which in a two-language project is the OTHER
+// language's; and package the two. Writing the whole block in one language was
+// right while a project had one, and `--lang go,rust --data` is what made it
+// wrong: the key takes the FIRST language, so the non-key-holding header's
+// second line built a module the packaging line never reads and the packaging
+// line then opened a wasm nothing in the block had built. That is the very
+// failure the block's own paragraph says a recipe must not produce.
+//
+// A one-language project is unaffected, because there the key's language and
+// the file's language are the same one.
+func dataRecipeCommands(modName, thisLang string, langs []string) [][]string {
+	keyLang := thisLang
+	if arts := dataArtifacts(modName, langs); len(arts) > 0 {
+		keyLang = arts[0].lang
+	}
+	// No trailing `# ...` note on the packaging line. A Rust control artifact's
+	// path is already 84 characters under the block's indent, and the sentence
+	// a note would carry -- that the data module comes from the key rather than
+	// from the argument -- is the paragraph directly under the block in both
+	// templates.
+	return [][]string{
+		controlBuildCommand(modName, thisLang),
+		dataBuildCommand(modName, keyLang),
+		{"fklua mod " + shellArg(controlWasm(modName, thisLang))},
+	}
+}
+
+// initRecipeCommands is the build-and-package block `fklua init` prints for one
+// scaffolded language, and for a `--data` project it IS dataRecipeCommands --
+// the same function the two data-guest headers render, from the same
+// dataArtifacts fact `data_module` is filled in from.
+//
+// That identity is the point. The two-language rule -- the recipe builds the
+// data module the KEY names, not the one this language happens to produce --
+// reached the scaffolded headers first and the printed steps not at all, so
+// init went on printing each language's own data build and a literal paste of
+// the non-key block ended on `fklua mod: data module: open <path>: no such
+// file or directory`. Two statements of one fact drifting is this repo's most
+// repeated failure shape; there is one statement now.
+//
+// A two-language `--data` project therefore prints the SAME data build in both
+// blocks, on purpose: each block is a complete recipe, so an author who runs
+// only the one for the guest they are shipping still builds what the packaging
+// line reads. Building it twice is a cached no-op; not building it is the open
+// error above.
+//
+// Without --data there is no data module and the block is the two lines it has
+// always been. The Rust one is deliberately NOT controlBuildCommand's: with no
+// data crate in the workspace there is nothing to disambiguate, and the
+// unqualified `cargo build --features fk/fkgc` is what this command has always
+// printed for a one-member workspace.
+func initRecipeCommands(modName, thisLang string, langs []string, data bool) [][]string {
+	if data {
+		return dataRecipeCommands(modName, thisLang, langs)
+	}
+	if thisLang == "rust" {
+		return [][]string{
+			{
+				"(cd " + rustGuestDir + " && cargo build --release \\",
+				"    --target wasm32-unknown-unknown --features fk/fkgc)",
+			},
+			{"fklua mod " + shellArg(controlWasm(modName, thisLang))},
+		}
+	}
+	return [][]string{
+		controlBuildCommand(modName, thisLang),
+		{"fklua mod " + shellArg(controlWasm(modName, thisLang))},
+	}
+}
+
+// printRecipe writes a recipe to stdout under init's own two-space indent, one
+// physical line per element, which is the shape an author copies.
+func printRecipe(cmds [][]string) {
+	for _, cmd := range cmds {
+		for _, line := range cmd {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+}
+
+// controlBuildCommand and dataBuildCommand are the two build lines, per
+// language. A continuation carries the four spaces a reader sees under the
+// block's own indent; the caller adds the comment marker and that indent.
+//
+// --features fk/fkgc IS THE COLLECTOR AND THERE IS NO SECOND HALF on the Rust
+// side: no import, no -gc flag. It is a command-line flag rather than a key in
+// the guest's Cargo.toml because cargo's v2 resolver would unify it across
+// every crate in the same build.
+//
+// AND THAT IS WHY THE RUST LINE CARRIES -p. This function is reached only from
+// a recipe that has a data crate in the workspace, and an unqualified
+// `cargo build --features fk/fkgc` builds every member -- so the same
+// unification that makes the feature a flag would hand the data module a
+// collector. `fklua mod` refuses that, so it would be a build error rather
+// than a silent one, but the command printed for an author to paste should not
+// be the one that provokes it. A project with no data crate has nothing to
+// disambiguate and gets the unqualified line; see initRecipeCommands.
+func controlBuildCommand(modName, lang string) []string {
+	if lang == "rust" {
+		return []string{
+			"(cd " + rustGuestDir + " && cargo build --release \\",
+			"    --target wasm32-unknown-unknown -p " + rustCrateName(modName) +
+				" --features fk/fkgc)",
+		}
+	}
+	return []string{
+		"(cd " + guestDir + " && tinygo build -target=wasm-unknown -scheduler=none \\",
+		"    -gc=custom -opt=2 -o ../../" + shellArg(GoGuestArtifact(modName)) + " .)",
+	}
+}
+
+func dataBuildCommand(modName, lang string) []string {
+	if lang == "rust" {
+		return []string{
+			"(cd " + rustGuestDir + " && cargo build --release \\",
+			"    --target wasm32-unknown-unknown -p " + rustDataCrateName(modName) + ")",
+		}
+	}
+	// -gc=leaking, and it is the flag that differs from the control guest's
+	// line: a data module runs once and dies with the Lua state that built it,
+	// and packaging refuses one that carries a collector.
+	return []string{
+		"(cd " + guestDir + " && tinygo build -target=wasm-unknown -scheduler=none \\",
+		"    -gc=leaking -opt=2 -o ../../" + shellArg(GoDataArtifact(modName)) + " ./data)",
+	}
+}
+
+// controlWasm is where a language's CONTROL guest build lands, which is what
+// the packaging line takes as its positional.
+func controlWasm(modName, lang string) string {
+	if lang == "rust" {
+		return rustReleaseWasm(RustGuestArtifact(modName))
+	}
+	return GoGuestArtifact(modName)
+}
+
+// dataRecipeBlock renders that recipe as the indented comment block a header
+// carries: marker is the file's doc-comment marker and indent is what the
+// language's formatter renders as a code block under it.
+func dataRecipeBlock(modName, thisLang string, langs []string, marker, indent string) string {
+	var b strings.Builder
+	for _, cmd := range dataRecipeCommands(modName, thisLang, langs) {
+		for _, line := range cmd {
+			b.WriteString(marker + indent + line + "\n")
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// dataModuleKeyNote is the paragraph a scaffolded data guest carries about
+// WHICH data module `data_module` names, GENERATED FROM dataArtifacts -- the
+// same fact the printed steps above are generated from.
+//
+// It is generated because the sentence it replaces was a constant in a
+// template and could not be right in every project: `data_module` takes the
+// FIRST language in `lang` order, so a Go template asserting "it names this
+// module" is false in every `--lang rust,go --data` project and a Rust one is
+// false in every `--lang go,rust`. That is this repo's most repeated failure
+// shape -- two statements of one fact drifting -- and the printed steps were
+// taught the rule in the same change that left both scaffolded files
+// asserting. One derivation cannot disagree with itself.
+//
+// thisLang is the language of the file the note is going into. An unknown one
+// cannot happen from the scaffolders, which are only reached for a language
+// dataArtifacts knows, and is answered with the rule rather than with a claim
+// about a path that was never computed.
+func dataModuleKeyNote(modName, thisLang string, langs []string) string {
+	arts := dataArtifacts(modName, langs)
+	// The FIRST match, because the key's own rule is the first in `lang` order:
+	// a loop that kept the last would answer a different question from the one
+	// `data_module` was filled in by.
+	//
+	// BELT AND BRACES, and it is worth saying which: arts can hold two entries
+	// of one language only if p.Langs does, and dedupeLangs removes that at
+	// the only call site that reaches the scaffolders -- so removing this
+	// break changes no output any command here can produce and reddens
+	// nothing. It is what would hold if a HAND-EDITED manifest reached this
+	// code, which ParseProject neither refuses nor de-duplicates.
+	mine := -1
+	for i, a := range arts {
+		if a.lang == thisLang {
+			mine = i
+			break
+		}
+	}
+	if len(arts) == 0 || mine < 0 {
+		return "`data_module` names ONE data module, and a project declaring " +
+			"two languages gives the key the FIRST in `lang` order. Check the " +
+			"key: it is the module `fklua mod` packages, whichever control " +
+			"guest the command names."
+	}
+	if len(arts) == 1 {
+		return "IN THIS PROJECT THE KEY NAMES THIS MODULE, at " + arts[0].path +
+			". `lang` declares one language, so there is nothing else it could " +
+			"name -- but the key is still the whole of the choice, and a " +
+			"project that later declares two gives it the FIRST in `lang` order."
+	}
+	other := arts[1]
+	if mine != 0 {
+		other = arts[mine]
+		return "IN THIS PROJECT THE KEY DOES NOT NAME THIS MODULE. Both " +
+			"languages were scaffolded and a mod has ONE data stage, so " +
+			"`data_module` takes the FIRST in `lang` order, which is " +
+			langName(arts[0].lang) + ": the key holds " + arts[0].path +
+			" and this module's own path rides in a comment beside it. Every " +
+			"`fklua mod` line packages the key's module whichever control " +
+			"guest it names, so build that one too -- or point the key at " +
+			other.path + " to ship this one instead."
+	}
+	return "IN THIS PROJECT THE KEY NAMES THIS MODULE, at " + arts[0].path +
+		". Both languages were scaffolded and a mod has ONE data stage, so " +
+		"`data_module` takes the FIRST in `lang` order, which is " +
+		langName(arts[0].lang) + "; the " + langName(other.lang) +
+		" data module builds to " + other.path + " and rides in a comment " +
+		"beside the key. Point the key there to ship that one instead."
+}
+
+// langName is a declared language spelled the way prose spells it, so a printed
+// sentence reads "the Go build" rather than "the go build".
+func langName(lang string) string {
+	switch lang {
+	case "go":
+		return "Go"
+	case "rust":
+		return "Rust"
+	}
+	return lang
+}
+
+// dataArtifact is one language's data-module build: the language that produces
+// it, and where that language's printed build line leaves it.
+//
+// The LANGUAGE travels with the path because the next-steps block has to say
+// which build `data_module` names. A two-language project prints two
+// `fklua mod` lines, one per control guest, and both of them package the same
+// data module -- the key's -- so "one of them" is not enough to act on.
+type dataArtifact struct {
+	lang string
+	path string
 }
 
 const gitignoreFile = ".gitignore"
@@ -345,9 +727,25 @@ func gitignoreBody(p factorio.Project) string {
 	fmt.Fprintf(&b, "# to be COMMITTED: it records which API description the bindings were\n")
 	fmt.Fprintf(&b, "# generated from, and `fklua lock --check` is the CI gate that reads it.\n")
 	if hasLang(p.Langs, "go") {
-		fmt.Fprintf(&b, "\n# The Go guest's wasm, where init's own `tinygo build -o ../../%s.wasm`\n", p.Name)
+		// THE QUOTED FORM IN THE COMMENT AND THE BARE FORM IN THE PATTERN, and
+		// the two differ on purpose. The comment QUOTES A SHELL COMMAND, which
+		// is the one init prints, so a name carrying a space is quoted there
+		// exactly as it is there; the pattern below is read by git, which
+		// matches it literally and would take a quote as a character in the
+		// filename. See shellArg.
+		fmt.Fprintf(&b, "\n# The Go guest's wasm, where init's own `tinygo build -o ../../%s`\n", shellArg(GoGuestArtifact(p.Name)))
 		fmt.Fprintf(&b, "# puts it and where `fklua mod` then reads it from.\n")
-		fmt.Fprintf(&b, "/%s.wasm\n", p.Name)
+		fmt.Fprintf(&b, "/%s\n", GoGuestArtifact(p.Name))
+		// THE DATA MODULE IS A SECOND ARTIFACT AT THE SAME PLACE, so it needs
+		// its own line: the pattern above is anchored and exact, not a glob.
+		// Keyed on `data_module` rather than on a flag, because the key IS the
+		// statement that this project has a data stage. The Rust arm needs
+		// nothing, since its whole target tree is already ignored below.
+		if p.DataModule != "" {
+			fmt.Fprintf(&b, "\n# The Go DATA guest's wasm, beside it, from the second `tinygo build`\n")
+			fmt.Fprintf(&b, "# line init prints.\n")
+			fmt.Fprintf(&b, "/%s\n", GoDataArtifact(p.Name))
+		}
 	}
 	if hasLang(p.Langs, "rust") {
 		fmt.Fprintf(&b, "\n# Cargo's build tree for the Rust guest; the release wasm is inside it.\n")
@@ -358,6 +756,38 @@ func gitignoreBody(p factorio.Project) string {
 	fmt.Fprintf(&b, "/%s_*/\n", p.Name)
 	fmt.Fprintf(&b, "/%s_*.zip\n", p.Name)
 	return b.String()
+}
+
+// dedupeLangs drops a language `--lang` names twice, keeping the FIRST spelling
+// and the declared order.
+//
+// `--lang go,go` is a typo rather than a usage, and it used to reach the
+// manifest whole: `lang = ["go", "go"]` made a ONE-language project look like a
+// two-language one to everything downstream, which is where it stopped being
+// harmless. `data_module` takes the first entry and the "other" artifact rides
+// beside it as a comment, so the key and the comment named the same file, and
+// the scaffolded note read "THE KEY DOES NOT NAME THIS MODULE" about a key
+// holding that module's own path -- every sentence in it false. Removing the
+// duplicate HERE rather than at each reader is what makes one language stay one
+// language everywhere: the manifest, the printed steps, the scaffolders, the
+// artifact list and the note all read `lang`.
+//
+// An UNKNOWN language is not this function's business and is still written
+// through: it is refused where it always was, by the generators, and turning a
+// typo into a different message here would be a second place that decides which
+// languages exist.
+func dedupeLangs(langs []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range langs {
+		key := strings.TrimSpace(l)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, l)
+	}
+	return out
 }
 
 func hasLang(langs []string, want string) bool {

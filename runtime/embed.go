@@ -54,7 +54,7 @@ func ABI() string { return abi }
 //
 // A third hand-written file rather than part of fk_mod.lua, because the two
 // stages share nothing: this one has no `game`, no `script`, no `storage`, no
-// events and no persistence, and the module it instantiates is a different wasm
-// module compiled from a different main package. It requires fk_abi.lua for the
-// tier-2 codec and binds only what that needs.
+// events and no persistence, and the module it instantiates is a SECOND wasm
+// module, built from its own package or crate and by a build line of its own.
+// It requires fk_abi.lua for the tier-2 codec and binds only what that needs.
 func DataStage() string { return dataStage }

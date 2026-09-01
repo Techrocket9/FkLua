@@ -193,7 +193,7 @@ type Package struct {
 	extraFrom map[string]string
 
 	// DataChunk is the generated Lua for the DATA-STAGE module, if this mod has
-	// one. A second wasm module compiled from its own main package -- see
+	// one. A second wasm module built from its own package or crate -- see
 	// stage.go, and agents/datastage.md for why it is a second module rather
 	// than another export of the first.
 	//

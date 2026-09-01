@@ -6,14 +6,16 @@ FkLua writes files at three points in a project's life: `fklua init` scaffolds t
 |---|---|---|
 | `fklua.toml` | `fklua init`, once | yes; it is the manifest |
 | `guest/go/go.mod`, `gc.go`, `main.go` | `fklua init` | yes (keep `gc.go`'s import; see below) |
-| `guest/rust/Cargo.toml`, `guest/rust/<name>/` | `fklua init` | yes |
+| `guest/rust/Cargo.toml`, `guest/rust/<name>-guest/` | `fklua init` | yes |
+| `guest/go/data/main.go` | `fklua init --data` | yes |
+| `guest/rust/<name>-data/` | `fklua init --data` | yes |
 | `.gitignore` | `fklua init`, only when none exists | yes |
 | `guest/go/fkapi/` | `fklua gen-bindings` | no; regenerate |
 | `guest/rust/fkapi/` | `fklua gen-bindings` | no; regenerate |
 | `fklua.lock` | `fklua lock` | no; rerun `fklua lock` |
 | `<name>_<version>/` or `.zip` | `fklua mod` | no; disposable output, repackage |
 
-`init` refuses to overwrite anything it once wrote, per file, so a re-run after deleting one file restores that file and nothing else. `.gitignore` is the exception: an existing one is left exactly as it is and reported as a notice rather than refused, because it is normally the author's own file rather than something `init` wrote.
+`init` scaffolds the data-stage files only when it is given `--data`; without the flag it writes what it has always written, and a project with no data stage is byte for byte what it was. `init` refuses to overwrite anything it once wrote, per file, so a re-run after deleting one file restores that file and nothing else. `.gitignore` is the exception: an existing one is left exactly as it is and reported as a notice rather than refused, because it is normally the author's own file rather than something `init` wrote.
 
 ## fklua.toml: the manifest
 
@@ -35,6 +37,7 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 | `api` | the API pin: which committed `runtime-api.json` the bindings and the packaged member table come from. See [the version axes](factorio-api.md) |
 | `lang` | the guest language(s) to generate bindings for: `["go"]`, `["rust"]`, or both |
 | `gc` | how the guest heap is managed: `"collected"` (what `init` writes) or `"leaking"`. This key must agree with how the guest was built; a mismatch is a refusal at package time that names both sides. An absent key means "nobody said", which keeps pre-existing projects byte-for-byte unchanged. See [Memory, the collector and the save](memory.md) |
+| `data_module` | the second wasm module that runs at Factorio's settings and data stages, written by `fklua init --data`. A mod has one data stage, so this is one path; a two-language project's other artifact is named in a comment beside the key. The default for `fklua mod --data-module`. See [the data stage from a guest](data-stage.md) |
 
 `[scenarios]` names the scenarios the mod ships, one key per scenario directory. It is optional, and a project without it packages exactly what it packaged before.
 
@@ -51,20 +54,22 @@ Derived, never hand-edited. `fklua lock` records the API version, a hash of the 
 - **`go.mod`**: the guest is its own Go module because `//go:wasmimport` is rejected outside `GOARCH=wasm`, so guest source cannot live in a module the host toolchain also builds. The default flow is one `go mod tidy`; `--guest-module PATH` at init time writes a `replace` onto a local FkLua checkout instead.
 - **`gc.go`**: the collector import. Under any `-gc` except `custom` the `fkgc` package is empty (no symbols, no state) and this file costs a leaking build nothing, which is why the import is unconditional. Under `-gc=custom` it is what supplies the seven runtime hooks TinyGo's custom-GC seam requires: delete it and a `-gc=custom` build fails to link with `missing core function "runtime.free"`, an error that names neither this file nor the flag. Keep the import.
 - **`main.go`**: yours from the first minute. It shows the two simplest hooks (`fk_on_init`, `fk_on_tick`), allocates something so the collector is observable, and paces the collector with one `fkgc.CollectIfNeeded()` call per tick. Its comments answer the questions this page raises abstractly; read them before deleting them.
+- **`data/main.go`**, with `--data`: the data-stage guest, a second `main` package inside the same module. One module and two `main` packages is what lets a table both stages need live in an ordinary sibling package that each imports, and that package may import neither `fkapi` nor `fkdata`. There is deliberately no `gc.go` beside it: a data module is compiled `-gc=leaking` whatever the control guest uses, and packaging refuses one that carries a collector. Its wasm lands at the project root as `<name>-data.wasm`, beside the control guest's.
 
 ## The Rust guest scaffold
 
-`fklua init --lang rust` writes `guest/rust/` as a two-member cargo workspace: the generated `fkapi` crate and your guest crate beside it.
+`fklua init --lang rust` writes `guest/rust/` as a two-member cargo workspace: the generated `fkapi` crate and your guest crate beside it. With `--data` there is a third member, the data-stage crate.
 
 - The workspace `Cargo.toml` lists `fkapi` as a member **before it exists**. `fklua gen-bindings` writes that crate, and it is the next step `init` prints; until you run it, the member is a directory that is not there. This is deliberate: a stub crate that compiles is a stub somebody ships.
 - The collector is a cargo feature on the `fk` crate, passed on the command line (`cargo build --features fk/fkgc`) rather than declared in the guest's `Cargo.toml`. Cargo's v2 resolver unifies declared features across every crate built in one invocation, so a declared feature would silently turn the collector on for other crates in the same build. There is no import to add and no second flag; `fk` owns the single `#[global_allocator]` site and the feature chooses what backs it. [Why a Rust guest has a garbage collector at all](memory.md) is its own section.
 - `src/lib.rs` is yours, on the same terms as the Go `main.go`.
+- With `--data`, `<name>-data/` is the data-stage crate: it depends on `fkdata` and nothing else, and `fkdata` and `fklog` are added to `[workspace.dependencies]` beside `fk`. **Build it with `-p <name>-data`, in a cargo invocation of its own and without `--features fk/fkgc`.** Cargo's v2 resolver unifies features across every package built in one command, so building it alongside a control guest that carries `--features fk/fkgc` turns the collector on for the data module too. That is a refusal at package time rather than a silent cost, and it is why the data build line `init` prints names one package with `-p` rather than building the workspace. In a project that declares two languages, `data_module` names the first language's data build, and both the printed steps and the scaffolded headers build that one.
 - The release profile ships with `panic = "abort"` (nothing can unwind across the wasm boundary), `opt-level = "s"` and `lto = true` (module size is game load time, and LTO is what lets event-id constants reach `fk.subscribe` so the packaged event table can be pruned). They are requirements, not preferences.
 - The same profile carries `debug = "line-tables-only"`, which is what puts your source file and line into the debug map described below. It costs wasm size and no generated Lua at all: rustc emits the same code section either way, and the debug information rides in custom sections the compiler reads and discards. Measured on the scaffolded guest: 24,599 bytes without the key, 82,959 with it (3.37x), and the emitted `fk_module.lua` identical to the byte. `debug = true` instead covers every function rather than most of them, at 531,423 bytes (21.6x); set it if you want the fuller coverage and do not mind the build artifact.
 
 ## .gitignore
 
-`fklua init` writes a `.gitignore` when the directory has none, covering the build output the commands `init` itself prints produce: `<name>.wasm` at the project root for a Go guest, `guest/rust/target/` for a Rust guest, and the `<name>_<version>/` package directory and `<name>_<version>.zip` that `fklua mod` writes. The per-language lines follow the manifest's `lang`; the package patterns are always there, because that output accumulates however the guest is built. Every pattern is anchored with a leading `/` so it matches at the project root only, and a nested directory named like the mod is left alone. The version is a glob because the version moves.
+`fklua init` writes a `.gitignore` when the directory has none, covering the build output the commands `init` itself prints produce: `<name>.wasm` at the project root for a Go guest, `<name>-data.wasm` beside it when the project has a data stage, `guest/rust/target/` for a Rust guest, and the `<name>_<version>/` package directory and `<name>_<version>.zip` that `fklua mod` writes. The per-language lines follow the manifest's `lang`; the package patterns are always there, because that output accumulates however the guest is built. Every pattern is anchored with a leading `/` so it matches at the project root only, and a nested directory named like the mod is left alone. The version is a glob because the version moves.
 
 `fklua.lock` is deliberately not ignored, and the generated file says so in a comment. The lock is generated, and it is meant to be committed: it records which API description the bindings came from, and `fklua lock --check` is the CI gate that reads it. It is the one generated file in a project that a reflexive "ignore what is generated" rule gets wrong.
 
@@ -133,7 +138,7 @@ The file is a few percent of the module it sits beside (12,429 bytes against 373
 Factorio requires `info.json` and nothing else, so a mod that is only prototypes is an ordinary mod: a compatibility shim, a stand-in, anything whose whole job is `data.raw`. The control guest is optional whenever the mod has a data module, so leave the positional argument out:
 
 ```sh
-fklua mod --data-module dist/data.wasm --name my-shim --version 1.0.0 --author me
+fklua mod --data-module my-shim-data.wasm --name my-shim --version 1.0.0 --author me
 ```
 
 or, with `data_module` in the manifest, `fklua mod` on its own. Such a package ships `info.json`, `fk_abi.lua`, `fk_data.lua`, `fk_data_module.lua`, `fk_data_module.map.json`, one file per stage hook, and whatever `--include` carries. `control.lua`, `fk_module.lua` and `fk_api_gen.lua` are the three files that describe a running program, and none of them appears; neither does `fk_module.map.json`, which is a map of a file that is not there. `fk_abi.lua` does appear, because `fk_data.lua` requires it for the codec that carries a prototype table across the boundary.

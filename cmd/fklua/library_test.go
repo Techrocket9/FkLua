@@ -228,12 +228,20 @@ func TestInitLibraryRefusals(t *testing.T) {
 	if err := runInit([]string{"--library", "my-lib", "--no-guest"}); err == nil {
 		t.Errorf("--no-guest was not refused")
 	}
-	// --data belongs to --library; a MOD's data stage is declared elsewhere,
-	// and the refusal says where.
-	if err := runInit([]string{"my-mod", "--data"}); err == nil ||
-		!strings.Contains(err.Error(), "data_module") {
-		t.Errorf("--data without --library was not refused with the redirect: %v", err)
-	}
+	// --data IS NO LONGER LIBRARY-ONLY, and this is the assertion that says so
+	// from the library's side: it used to be refused for a mod with a redirect
+	// to the manifest key, and now it scaffolds the mod's data guest. Run in
+	// its own directory so the refusal below still meets a clean tree. What the
+	// mod arm actually writes is TestInitDataScaffoldsADataGuestInEveryLanguage.
+	func() {
+		modDir := t.TempDir()
+		modBack := chdir(t, modDir)
+		defer modBack()
+		if err := runInit([]string{"my-mod", "--lang", "go", "--data"}); err != nil {
+			t.Errorf("--data on a MOD is the data-stage scaffold now, not a "+
+				"library-only flag: %v", err)
+		}
+	}()
 	// Refuse rather than overwrite, per file: a half-written library is
 	// recoverable, an overwritten one is not.
 	if err := os.WriteFile("go.mod", []byte("module x\n"), 0o644); err != nil {

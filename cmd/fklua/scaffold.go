@@ -108,6 +108,16 @@ func scaffoldGuest(modName, guestModule string) ([]string, error) {
 // name rather than a domain, because a scaffolded guest is not published and a
 // fake domain in a go.mod is a lie that outlives the scaffold.
 func guestModulePath(modName string) string {
+	return sanitisedModName(modName) + "-guest"
+}
+
+// sanitisedModName is the identifier half of that, shared with the DATA crate's
+// name so the two cannot sanitise the same mod name differently. A mod named
+// `My Mod` gives a control crate `my-mod-guest` and a data crate `my-mod-data`,
+// which is the pairing a reader expects; deriving the second by appending to
+// the FIRST would give `my-mod-guest-data`, a name that reads as a guest's
+// guest.
+func sanitisedModName(modName string) string {
 	var b strings.Builder
 	for _, r := range modName {
 		switch {
@@ -123,7 +133,7 @@ func guestModulePath(modName string) string {
 	if s == "" {
 		s = "guest"
 	}
-	return s + "-guest"
+	return s
 }
 
 // GuestSubstrateModule is the module a guest imports for fk and fkgc. Spelled
@@ -430,7 +440,12 @@ const RustSubstrateGit = "https://github.com/Techrocket9/fklua"
 
 // scaffoldRustGuest writes the Rust guest source tree. Refuses rather than
 // overwrites, per file, exactly as scaffoldGuest does and for the same reason.
-func scaffoldRustGuest(modName, guestModule string) ([]string, error) {
+//
+// `data` reaches the WORKSPACE manifest and nothing else here: the data crate
+// is a third member with two more workspace dependencies behind it, and the
+// crate itself is scaffoldRustDataGuest's. Split that way because the workspace
+// is written once whatever the project has in it.
+func scaffoldRustGuest(modName, guestModule string, data bool) ([]string, error) {
 	crate := rustCrateDir(modName)
 	if err := os.MkdirAll(filepath.Join(crate, "src"), 0o755); err != nil {
 		return nil, err
@@ -438,7 +453,7 @@ func scaffoldRustGuest(modName, guestModule string) ([]string, error) {
 	files := []struct{ name, body string }{
 		// The workspace comes first so that a failure part-way leaves the
 		// directory obviously incomplete rather than subtly wrong.
-		{filepath.Join(rustGuestDir, "Cargo.toml"), rustWorkspaceCargo(modName, guestModule)},
+		{filepath.Join(rustGuestDir, "Cargo.toml"), rustWorkspaceCargo(modName, guestModule, data)},
 		{filepath.Join(crate, "Cargo.toml"), rustGuestCargo(modName)},
 		{filepath.Join(crate, "src", "lib.rs"), rustGuestLib(modName)},
 	}
@@ -495,34 +510,70 @@ func RustGuestArtifact(modName string) string {
 	return strings.ReplaceAll(rustCrateName(modName), "-", "_") + ".wasm"
 }
 
-// rustWorkspaceCargo is guest/rust/Cargo.toml: the two-member workspace.
+// rustWorkspaceCargo is guest/rust/Cargo.toml: the two-member workspace, three
+// with `--data`.
 //
 // `fkapi` is a member that DOES NOT EXIST YET when init runs -- `fklua
 // gen-bindings` writes it, which is the very next step init prints. That
 // ordering is deliberate rather than an oversight: the alternative is for init
 // to scaffold a stub crate that gen-bindings then overwrites, and a stub that
 // compiles is a stub somebody ships.
-func rustWorkspaceCargo(modName, guestModule string) string {
+func rustWorkspaceCargo(modName, guestModule string, data bool) string {
 	var b strings.Builder
+	members := []string{"fkapi", rustCrateName(modName)}
+	count := "TWO"
+	if data {
+		members = append(members, rustDataCrateName(modName))
+		count = "THREE"
+	}
 	fmt.Fprintf(&b, "# The guest workspace.\n#\n")
-	fmt.Fprintf(&b, "# TWO MEMBERS, AND THE PATHS ARE NOT NEGOTIABLE. `fkapi` is written by\n")
+	fmt.Fprintf(&b, "# %s MEMBERS, AND THE PATHS ARE NOT NEGOTIABLE. `fkapi` is written by\n", count)
 	fmt.Fprintf(&b, "# `fklua gen-bindings` into guest/rust/fkapi/, a path that command hard-codes\n")
 	fmt.Fprintf(&b, "# and `fklua lock` hashes by exact name -- so the crate lives there and the\n")
 	fmt.Fprintf(&b, "# guest lives beside it. Run `fklua gen-bindings` before the first build:\n")
 	fmt.Fprintf(&b, "# until you do, the fkapi member is a directory that does not exist.\n")
-	fmt.Fprintf(&b, "[workspace]\nresolver = \"2\"\nmembers = [\"fkapi\", %q]\n\n",
-		rustCrateName(modName))
+	if data {
+		fmt.Fprintf(&b, "#\n")
+		fmt.Fprintf(&b, "# The third member is the DATA-STAGE guest, a second wasm module that runs\n")
+		fmt.Fprintf(&b, "# at Factorio's settings and data stages. It is a workspace member so it\n")
+		fmt.Fprintf(&b, "# shares this lockfile and can import a crate the control guest also\n")
+		fmt.Fprintf(&b, "# imports -- but it is BUILT IN ITS OWN cargo invocation, never in the\n")
+		fmt.Fprintf(&b, "# same one as the control guest. See its src/lib.rs for why.\n")
+	}
+	var qs []string
+	for _, m := range members {
+		qs = append(qs, fmt.Sprintf("%q", m))
+	}
+	fmt.Fprintf(&b, "[workspace]\nresolver = \"2\"\nmembers = [%s]\n\n", strings.Join(qs, ", "))
 	fmt.Fprintf(&b, "[workspace.dependencies]\n")
+	// THE SUBSTRATE CRATES ARE ALL WRITTEN THE SAME WAY, git or path, because
+	// they all come out of one FkLua checkout: a project that resolved `fk`
+	// from a local tree and `fkdata` from git would be building two copies of
+	// the substrate, which is a duplicate #[global_allocator] link error.
+	dep := func(name string) string {
+		if guestModule == "" {
+			return fmt.Sprintf("%s = { git = %q }\n", name, RustSubstrateGit)
+		}
+		return fmt.Sprintf("%s = { path = %q }\n", name,
+			filepath.ToSlash(filepath.Join(guestModule, name)))
+	}
 	if guestModule == "" {
 		fmt.Fprintf(&b, "# `fk` is not published to crates.io, so this is a git dependency rather\n")
 		fmt.Fprintf(&b, "# than a version. `--guest-module PATH` writes a path onto a local FkLua\n")
 		fmt.Fprintf(&b, "# checkout instead, which is what a contributor wants.\n")
-		fmt.Fprintf(&b, "fk = { git = %q }\n", RustSubstrateGit)
 	} else {
 		fmt.Fprintf(&b, "# --guest-module: a LOCAL FkLua checkout. Replace with\n")
 		fmt.Fprintf(&b, "# fk = { git = %q } to build against the published tree.\n", RustSubstrateGit)
-		fmt.Fprintf(&b, "fk = { path = %q }\n",
-			filepath.ToSlash(filepath.Join(guestModule, "fk")))
+	}
+	b.WriteString(dep("fk"))
+	if data {
+		fmt.Fprintf(&b, "# `fkdata` is the DATA stage's whole library: data.raw through eight host\n")
+		fmt.Fprintf(&b, "# calls, and no runtime API, because there is none at that stage.\n")
+		b.WriteString(dep("fkdata"))
+		fmt.Fprintf(&b, "# `fklog` is a zero-allocation log line builder. Declared here rather than\n")
+		fmt.Fprintf(&b, "# left to be discovered, because every guest past its first week wants\n")
+		fmt.Fprintf(&b, "# one; add `fklog = { workspace = true }` to whichever crate needs it.\n")
+		b.WriteString(dep("fklog"))
 	}
 	fmt.Fprintf(&b, "fkapi = { path = \"fkapi\" }\n\n")
 	fmt.Fprintf(&b, "# NOT PREFERENCES. panic=abort because nothing can unwind across the wasm\n")
@@ -722,5 +773,404 @@ fn push_u32(s: &mut String, mut v: u32) {
         v /= 10;
     }
     s.push_str(core::str::from_utf8(&buf[i..]).unwrap_or("?"));
+}
+`
+
+// ---------------------------------------------------------------------------
+// The DATA-STAGE guest, in either language: `fklua init NAME --data`.
+//
+// A mod's settings and data stages are a SECOND wasm module, and until this
+// existed `init` scaffolded no part of it: the string `fkdata` appeared in none
+// of the five files it wrote, so an author who wanted a data stage hand-wrote
+// the crate or package, hand-added it to the workspace, and discovered the
+// build shape on their own. Filed by WormholeBelts, whose Rust data crate is
+// exactly this and took one attempt -- which is also the measure of how cheap
+// it was to scaffold.
+//
+// IT IS SCAFFOLDED FOR EVERY LANGUAGE THE PROJECT DECLARES, because both halves
+// of a `--lang go,rust` project want one and the manifest key that names the
+// artifact is the only thing that has to pick.
+//
+// THE ONE RULE BOTH TEMPLATES CARRY IN THEIR COMMENTS: a data module is
+// compiled --persist=none --gc=leaking whatever the control guest uses, and
+// `fklua mod` refuses one that carries a collector or imports fkapi. Both
+// refusals are load-bearing at scaffold time rather than later, because both
+// mistakes are reachable by doing the obvious thing -- copying the control
+// guest's build line.
+// ---------------------------------------------------------------------------
+
+// goDataGuestDir is the Go data guest: a SECOND main package inside the SAME
+// module as the control guest, not a second module and not a build tag.
+//
+// One module because //go:wasmimport needs GOARCH=wasm for both guests, because
+// `fklua lock` hashes exactly one bindings tree, and because a mod's two stages
+// share real logic -- a table of categories, a version branch -- which then
+// travels as an ordinary import from a sibling package rather than as a second
+// copy that can disagree. Build tags were the alternative and produce one
+// binary that is two programs, with the wrong -gc for one of them.
+const goDataGuestDir = guestDir + "/data"
+
+// GoGuestArtifact and GoDataArtifact are where init's printed `tinygo build`
+// lines put the two Go modules: both at the project root, under the mod's own
+// name. Spelled once each because they appear in a build line, in .gitignore,
+// in the scaffolded guest's own header comment and -- for the data one -- in
+// the manifest key.
+//
+// The control one earns a function for the same reason the data one has: the
+// data guest's header comment prints the `fklua mod` command that packages the
+// two together, and that command takes the CONTROL wasm positionally. A comment
+// that named it independently of the line init prints is two halves of one
+// instruction with nothing holding them together.
+func GoGuestArtifact(modName string) string { return modName + ".wasm" }
+
+func GoDataArtifact(modName string) string { return modName + "-data.wasm" }
+
+// rustDataCrateName and rustDataCrateDir are the Rust data crate. The name is
+// the mod's, sanitised, with `-data` where the control crate has `-guest`.
+func rustDataCrateName(modName string) string {
+	return sanitisedModName(modName) + "-data"
+}
+
+func rustDataCrateDir(modName string) string {
+	return filepath.Join(rustGuestDir, rustDataCrateName(modName))
+}
+
+// RustDataArtifact is the cdylib a release build of the data crate produces --
+// the [lib] name with dashes mapped to underscores, the one part of the path
+// nobody guesses right.
+func RustDataArtifact(modName string) string {
+	return strings.ReplaceAll(rustDataCrateName(modName), "-", "_") + ".wasm"
+}
+
+// rustReleaseWasm is where cargo leaves a release cdylib for the guest
+// workspace, in the forward-slash form a manifest and a printed command want.
+func rustReleaseWasm(artifact string) string {
+	return filepath.ToSlash(filepath.Join(rustGuestDir, "target",
+		"wasm32-unknown-unknown", "release", artifact))
+}
+
+// commentWidth is where a generated comment block wraps, prefix included. The
+// hand-written comments around it wrap near 78 and a generated paragraph that
+// wrapped anywhere else would announce itself as generated.
+const commentWidth = 78
+
+// wrapComment renders one paragraph as a comment block: greedily filled to
+// width characters INCLUDING the prefix, no trailing newline, so the template
+// that interpolates it owns the blank lines on either side.
+//
+// A word longer than the line is left to overflow rather than broken. Nothing
+// this is called with can produce one -- the longest token is a wasm path --
+// and a hyphenation rule for a case that does not arise is a rule nobody can
+// check.
+func wrapComment(prefix string, width int, text string) string {
+	var b strings.Builder
+	line, first := prefix, true
+	for _, w := range strings.Fields(text) {
+		switch {
+		case first:
+			line, first = line+w, false
+		case len(line)+1+len(w) <= width:
+			line += " " + w
+		default:
+			b.WriteString(strings.TrimRight(line, " ") + "\n")
+			line = prefix + w
+		}
+	}
+	b.WriteString(strings.TrimRight(line, " "))
+	return b.String()
+}
+
+// shellArg renders a path as ONE argument for the shell an author pastes into.
+//
+// A mod name is matched by factorio.nameRE, `^[A-Za-z0-9][A-Za-z0-9 _-]*$`, so
+// it may carry interior SPACES -- and `fklua init "my mod"` then printed
+// `fklua mod my mod.wasm`, which the command refuses as two positionals. The
+// same string is written into a scaffolded header that says it is what init
+// prints, and into a test that reads the command back out of that header, so
+// an unquoted space is three halves of one instruction disagreeing rather
+// than one.
+//
+// QUOTING RATHER THAN SANITISING, and the choice is between two whole
+// behaviours. Sanitising the artifact the way the Rust CRATE name is
+// sanitised would also lowercase it -- sanitisedModName maps `MyMod` to
+// `mymod` -- so a mod with a capital letter would get a wasm whose name is not
+// its own, in the manifest key and the gitignore as well as here. Quoting
+// changes nothing for a name that needs none.
+//
+// .gitignore IS DELIBERATELY NOT QUOTED, which is the one place this is not
+// applied: git matches a pattern literally, spaces included, and a quote there
+// would be a character in the filename rather than around it. See
+// gitignoreBody, whose own header says the same thing about glob escaping.
+func shellArg(s string) string {
+	safe := s != ""
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.', r == '/':
+		default:
+			safe = false
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// scaffoldGoDataGuest writes guest/go/data/. Refuses rather than overwrites,
+// per file, exactly as the control scaffold does.
+func scaffoldGoDataGuest(modName string, langs []string) ([]string, error) {
+	if err := os.MkdirAll(goDataGuestDir, 0o755); err != nil {
+		return nil, err
+	}
+	p := filepath.Join(goDataGuestDir, "main.go")
+	if _, err := os.Stat(p); err == nil {
+		return nil, fmt.Errorf("%s already exists; delete it first if you meant "+
+			"to start over", p)
+	}
+	if err := os.WriteFile(p, []byte(goDataMainFile(modName, langs)), 0o644); err != nil {
+		return nil, err
+	}
+	return []string{p}, nil
+}
+
+// scaffoldRustDataGuest writes guest/rust/<name>-data/. The workspace manifest
+// that lists it as a member is scaffoldRustGuest's; see there.
+func scaffoldRustDataGuest(modName string, langs []string) ([]string, error) {
+	crate := rustDataCrateDir(modName)
+	if err := os.MkdirAll(filepath.Join(crate, "src"), 0o755); err != nil {
+		return nil, err
+	}
+	files := []struct{ name, body string }{
+		{filepath.Join(crate, "Cargo.toml"), rustDataCargo(modName)},
+		{filepath.Join(crate, "src", "lib.rs"), rustDataLib(modName, langs)},
+	}
+	var wrote []string
+	for _, f := range files {
+		if _, err := os.Stat(f.name); err == nil {
+			return wrote, fmt.Errorf("%s already exists; delete it first if you "+
+				"meant to start over", f.name)
+		}
+		if err := os.WriteFile(f.name, []byte(f.body), 0o644); err != nil {
+			return wrote, err
+		}
+		wrote = append(wrote, f.name)
+	}
+	return wrote, nil
+}
+
+func goDataMainFile(modName string, langs []string) string {
+	return fmt.Sprintf(goDataMainTemplate, modName,
+		dataRecipeBlock(modName, "go", langs, "//", "\t"),
+		wrapComment("// ", commentWidth, dataModuleKeyNote(modName, "go", langs)))
+}
+
+const goDataMainTemplate = `// Command data is %[1]s's DATA-STAGE guest: a SECOND wasm module, run at
+// Factorio's settings and data stages, packaged beside the control guest.
+//
+// Build BOTH modules, then package them together. These three lines are what
+// ` + "`fklua init`" + ` prints for this guest; a project that declares two languages
+// gets one such block per language, and every one of them -- printed or
+// scaffolded -- is rendered from the same function, so no two of them can
+// disagree about which data module the packaging line reads:
+//
+%[2]s
+//
+// THE CONTROL GUEST'S BUILD LINE IS THE FIRST OF THE THREE, and it is here
+// because the third one takes its output. THE SECOND IS THE DATA MODULE
+// ` + "`data_module`" + ` NAMES, which in a two-language project is the OTHER
+// language's -- the block is generated from the same fact the key is, so what
+// it builds is what the packaging line reads rather than what this file's own
+// language happens to produce. A recipe that builds ONE module and packages TWO
+// fails on the argument, and what a literal paste of it produces is an open
+// error naming a wasm nothing in the block ever built.
+//
+// THE CONTROL GUEST IS THE POSITIONAL AND THE DATA MODULE IS THE KEY. fklua.toml
+// has one module key, ` + "`data_module`" + `, because a mod has ONE data stage;
+// there is no key for the control guest, so its wasm is the argument.
+// ` + "`fklua mod`" + ` with no argument is not an error -- a mod that is only
+// prototypes is an ordinary Factorio mod -- so leaving it out packages a
+// data-stage-only mod, with no control.lua and exit 0.
+//
+%[3]s
+//
+// -gc=leaking AND NOT -gc=custom, which is the one flag that differs from the
+// control guest's line. A data stage runs ONCE, at load, and dies with the Lua
+// state that built it: there is no tick to pace a collection from and no state
+// to survive, so there is nothing for a collector to do. That is why there is no
+// gc.go here beside main.go -- the control guest has one and this package
+// deliberately does not. ` + "`fklua mod`" + ` REFUSES a data module that carries a
+// collector, naming the flag, so the mistake is a build error rather than a few
+// percent of Lua the game parses at every load for machinery that can never run.
+//
+// NEVER IMPORT fkapi. There is no game, no script, no storage and no events at
+// these stages, so the runtime API has nothing to reach -- and ` + "`fklua mod`" + `
+// refuses a data module that imports it, because fk_data.lua binds fkdata and
+// env and nothing else, which would otherwise be a mod that will not load with a
+// message about a wasm module name.
+//
+// A SHARED PACKAGE IMPORTS NEITHER. This guest and the control guest are two
+// main packages in ONE Go module, so a table both stages need -- a list of
+// categories, a name prefix, a version branch -- goes in an ordinary sibling
+// package that they both import. It may import neither fkapi nor fkdata, and
+// that constraint is what makes it work for both.
+//
+// The four hooks are fk_settings, fk_data, fk_data_updates and
+// fk_data_final_fixes; ` + "`fklua mod`" + ` generates a stage file for each one this
+// module exports and none for the rest. See docs/data-stage.md in the FkLua
+// repo for the whole library.
+package main
+
+import "github.com/Techrocket9/fklua/guest/go/fkdata"
+
+//go:wasmexport fk_data
+func onData() {
+	// THE PREFIX COMES FROM THE PACKAGER, not from a constant here. Prototype
+	// and setting names are GLOBAL namespaces, and when two mods declare the
+	// same name of the same type the engine keeps whichever loaded last, with
+	// no warning. fkdata.ModName() is this mod's own name, written into the
+	// generated stage file by ` + "`fklua mod`" + ` because the data stage's Lua
+	// environment has no "current mod" anywhere.
+	prefix := fkdata.ModName() + "-"
+
+	fkdata.Log("%[1]s: data stage")
+
+	// data:extend, with one item. Replace it with your mod.
+	fkdata.Extend(fkdata.Obj(
+		fkdata.KVs("type", fkdata.Str("item")),
+		fkdata.KVs("name", fkdata.Str(prefix+"token")),
+		fkdata.KVs("icon", fkdata.Str("__core__/graphics/empty.png")),
+		fkdata.KVs("icon_size", fkdata.Num(1)),
+		fkdata.KVs("stack_size", fkdata.Num(50)),
+	))
+}
+`
+
+func rustDataCargo(modName string) string {
+	var b strings.Builder
+	name := rustDataCrateName(modName)
+	fmt.Fprintf(&b, "# The DATA-STAGE crate. A release build here produces the second wasm\n")
+	fmt.Fprintf(&b, "# `fklua mod` packages as this mod's settings and data stages.\n")
+	fmt.Fprintf(&b, "[package]\nname = %q\nversion = \"0.1.0\"\nedition = \"2021\"\n\n", name)
+	fmt.Fprintf(&b, "[lib]\nname = %q\ncrate-type = [\"cdylib\"]\n\n",
+		strings.ReplaceAll(name, "-", "_"))
+	fmt.Fprintf(&b, "# fkdata AND NOT fkapi, and that is enforced rather than advised: there is\n")
+	fmt.Fprintf(&b, "# no runtime API at a data stage, and `fklua mod` REFUSES a data module\n")
+	fmt.Fprintf(&b, "# that imports one. `fk` comes in behind fkdata for the allocator, which is\n")
+	fmt.Fprintf(&b, "# declared exactly once in a module graph.\n")
+	fmt.Fprintf(&b, "#\n")
+	fmt.Fprintf(&b, "# THERE IS NO FEATURE TO ADD HERE AND ONE TO KEEP OUT: never `fk/fkgc`.\n")
+	fmt.Fprintf(&b, "# A data module is compiled --gc=leaking whatever the control guest uses,\n")
+	fmt.Fprintf(&b, "# and packaging refuses one that carries a collector. See src/lib.rs.\n")
+	fmt.Fprintf(&b, "[dependencies]\nfkdata = { workspace = true }\n")
+	return b.String()
+}
+
+func rustDataLib(modName string, langs []string) string {
+	return fmt.Sprintf(rustDataLibTemplate, modName,
+		dataRecipeBlock(modName, "rust", langs, "//!", "     "),
+		RustDataArtifact(modName), rustGuestDir,
+		wrapComment("//! ", commentWidth, dataModuleKeyNote(modName, "rust", langs)))
+}
+
+const rustDataLibTemplate = `//! %[1]s's DATA-STAGE guest: a SECOND wasm module, run at Factorio's settings
+//! and data stages, packaged beside the control guest.
+//!
+//! Build BOTH modules, NEVER IN ONE CARGO INVOCATION, then package them
+//! together. These three lines are what ` + "`fklua init`" + ` prints for this guest; a
+//! project that declares two languages gets one such block per language, and
+//! every one of them -- printed or scaffolded -- is rendered from the same
+//! function, so no two of them can disagree about which data module the
+//! packaging line reads:
+//!
+%[2]s
+//!
+//! THE CONTROL GUEST'S BUILD LINE IS THE FIRST OF THE THREE, and it is here
+//! because the third one takes its output. THE SECOND IS THE DATA MODULE
+//! ` + "`data_module`" + ` NAMES, which in a two-language project is the OTHER
+//! language's, and is then a build line of that language rather than a cargo
+//! one -- the block is generated from the same fact the key is, so what it
+//! builds is what the packaging line reads. A recipe that builds ONE module and
+//! packages TWO fails on the argument, and what a literal paste of it produces
+//! is an open error naming a wasm nothing in the block ever built.
+//!
+//! THE CONTROL GUEST IS THE POSITIONAL AND THE DATA MODULE IS THE KEY. fklua.toml
+//! has one module key, ` + "`data_module`" + `, because a mod has ONE data stage;
+//! there is no key for the control guest, so its wasm is the argument. Each
+//! build line is a SUBSHELL for a reason of its own: fklua.toml is looked up in
+//! the working directory and it lives at the project root, not in the workspace,
+//! so a bare cd into it would leave the packaging command with no manifest.
+//!
+%[5]s
+//!
+//! THE -p IS THE LOAD-BEARING PART, and it is the one thing about this crate
+//! that is not obvious. The control guest's line above is built
+//! ` + "`--features fk/fkgc`" + `, and cargo's v2 resolver unifies features across every
+//! package built in ONE invocation, so a bare ` + "`cargo build --features fk/fkgc`" + `
+//! over the workspace would build THIS crate in the same command and turn the
+//! collector on here too, silently and only for that build. The -p is what
+//! holds a build to one package, which is why the control line above carries
+//! one in every arm of this recipe; and when the data module the recipe builds
+//! is the Rust one, its own line names this package and passes no feature at
+//! all. So the two are never one cargo command, whichever language
+//! ` + "`data_module`" + ` names, which is what the opening sentence says and what the
+//! block above shows. There is no source difference between a collected build
+//! and a leaking one: the fk crate owns the single #[global_allocator] site
+//! and the feature chooses what backs it.
+//!
+//! A data module is compiled --persist=none --gc=leaking whatever the control
+//! guest uses, because it runs ONCE, at load, and dies with the Lua state that
+//! built it: no tick to pace a collection from, and no state to survive.
+//! ` + "`fklua mod`" + ` REFUSES a data module that carries a collector, so the
+//! unified build is a refusal naming the feature rather than a few percent of
+//! Lua the game parses at every load for machinery that can never run.
+//!
+//! NEVER DEPEND ON fkapi. There is no game, no script, no storage and no events
+//! at these stages, so the runtime API has nothing to reach -- and packaging
+//! refuses a data module that imports it, because fk_data.lua binds fkdata and
+//! env and nothing else. A crate BOTH guests import may depend on neither.
+//!
+//! The four hooks are fk_settings, fk_data, fk_data_updates and
+//! fk_data_final_fixes; ` + "`fklua mod`" + ` generates a stage file for each one
+//! this module exports and none for the rest. See docs/data-stage.md in the
+//! FkLua repo for the whole library.
+//!
+//! A release build of this crate lands at:
+//!
+//!     %[4]s/target/wasm32-unknown-unknown/release/%[3]s
+//!
+//! which is the path fklua.toml either holds in data_module or carries in the
+//! comment beside it, per the note above -- the one part of this layout nobody
+//! guesses, which is why it is written down rather than left to be derived from
+//! the crate name.
+
+#![no_std]
+
+extern crate alloc;
+
+use alloc::string::String;
+use fkdata::{num, obj, str_};
+
+#[no_mangle]
+pub extern "C" fn fk_data() {
+    // THE PREFIX COMES FROM THE PACKAGER, not from a constant here. Prototype
+    // and setting names are GLOBAL namespaces, and when two mods declare the
+    // same name of the same type the engine keeps whichever loaded last, with
+    // no warning. fkdata::mod_name() is this mod's own name, written into the
+    // generated stage file by ` + "`fklua mod`" + ` because the data stage's Lua
+    // environment has no "current mod" anywhere.
+    let mut name = String::from(fkdata::mod_name());
+    name.push_str("-token");
+
+    fkdata::log("%[1]s: data stage");
+
+    // data:extend, with one item. Replace it with your mod.
+    fkdata::extend(&[obj(&[
+        ("type", str_("item")),
+        ("name", str_(&name)),
+        ("icon", str_("__core__/graphics/empty.png")),
+        ("icon_size", num(1.0)),
+        ("stack_size", num(50.0)),
+    ])]);
 }
 `
