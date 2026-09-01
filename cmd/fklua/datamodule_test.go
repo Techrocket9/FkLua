@@ -204,6 +204,63 @@ data_final_fixes = ["@guest"]
 	}
 }
 
+// A COLLECTOR-INFECTED DATA MODULE IS REFUSED AT PACKAGE TIME, and it used to
+// package with exit 0 and no line saying so.
+//
+// A data module is compiled `--persist=none --gc=leaking` whatever the control
+// guest uses, and nothing at any data-family stage drives a collector: there is
+// no tick to pace one from and no state to survive. So the three exports that
+// ARE the collector to the host say the build went wrong -- and getting it
+// wrong takes no typo in Rust, where cargo's v2 resolver unifies
+// `--features fk/fkgc` across every package built in one invocation. Measured
+// on this repository's own example data guest built both ways: 599,178 bytes of
+// generated Lua against 676,282, +12.9%, all of it parsed at every load for a
+// collector nothing can pace behind an allocator the stage does not need. The
+// figures come from `fklua compile --persist=none --gc=leaking` over each build
+// and need no game; the collected arm cannot be measured through `fklua mod`
+// any more, because this is what refuses it.
+//
+// The export list comes from factorio.CollectorSurface() rather than being
+// spelled here, which is what stops this test and the check drifting apart --
+// so the surface being empty is the vacuity hazard, asserted first.
+func TestADataModuleCarryingACollectorIsRefusedAtPackageTime(t *testing.T) {
+	surface := factorio.CollectorSurface()
+	if len(surface) == 0 {
+		t.Fatal("factorio.CollectorSurface() is empty, so this test would " +
+			"package a module with nothing to refuse")
+	}
+	doc, _, err := runModReport(t, tinyGuest(t),
+		"--data-module", dataGuest(t, append([]string{"fk_data"}, surface...)...))
+	if err == nil {
+		t.Fatal("a data module built with the collector was packaged happily")
+	}
+	// The kind is contract: a driving tool switches on it, and this refusal is
+	// about the data module rather than about the gc mode of a control guest.
+	if got := at(t, doc, "refusal", "kind"); got != "data_module" {
+		t.Errorf("refusal.kind = %v, want \"data_module\"", got)
+	}
+	msg := at(t, doc, "refusal", "message").(string)
+	// -gc=custom rather than -gc=leaking: the latter is a substring of the
+	// `--gc=leaking` this message already carries in its "what a data module
+	// is" sentence, so it would leave the Go remedy line deletable with this
+	// test green. -gc=custom appears once, inside that line.
+	for _, want := range append(append([]string{}, surface...),
+		"--persist=none", "-gc=custom", "fk/fkgc") {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, msg)
+		}
+	}
+
+	// THE OTHER ARM, because a refusal that fires on everything is not a check:
+	// the same module without those three exports packages.
+	if err := runMod([]string{tinyGuest(t),
+		"--data-module", dataGuest(t, "fk_data"),
+		"--name", "a-mod", "--version", "0.1.0", "--author", "someone",
+		"-o", t.TempDir()}); err != nil {
+		t.Fatalf("a collector-free data module was refused: %v", err)
+	}
+}
+
 // A data module that reaches the runtime API is refused at PACKAGE time, which
 // is the enforceable form of a rule that would otherwise be a comment.
 //

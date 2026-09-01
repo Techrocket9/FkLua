@@ -235,8 +235,9 @@ func TestADeclaredButEmptyChainStillGeneratesTheFile(t *testing.T) {
 	}
 }
 
-// THE DATA GUEST MUST NOT IMPORT fkapi, and the check has two properties
-// because they catch the same mistake at different distances.
+// THE DATA GUEST MUST NOT IMPORT fkapi, and TWO of CheckDataModule's three
+// properties are about that one mistake, caught at different distances. The
+// third is the collector, and it has its own test below.
 //
 // The import set is the direct one, and it is also the honest report of a
 // harder failure underneath: fk_data.lua binds `fkdata` and `env` and nothing
@@ -271,6 +272,97 @@ func TestTheDataGuestDoesNotImportFkapi(t *testing.T) {
 	// has to be refused for the same reason: nothing binds it here.
 	if err := CheckDataModule(append(ok, "wasi_snapshot_preview1.fd_write"), nil); err == nil {
 		t.Error("a data module importing the WASI shim should be refused")
+	}
+}
+
+// A DATA MODULE MUST NOT CARRY A COLLECTOR, and the same three exports that are
+// a PRECONDITION for a control guest are a refusal here.
+//
+// The mistake needs no typo in Rust: cargo's v2 resolver unifies
+// `--features fk/fkgc` across every package built in one invocation, so a
+// workspace-wide build of a collected control guest carries the data crate with
+// it. In Go it is `-gc=custom` plus an fkgc import left in a data guest copied
+// from a control one. Either way the module packaged with exit 0 and nothing
+// said so, for +12.9% of generated Lua the game parses at every load and no
+// tick anywhere to pace a collection from.
+//
+// The list is read from CollectorSurface() rather than spelled here, so this
+// test cannot drift from the check the way two spellings of one export set
+// always do. That makes the surface's own emptiness the vacuity hazard, which
+// is why it is asserted first.
+func TestADataModuleCarryingACollectorIsRefused(t *testing.T) {
+	surface := CollectorSurface()
+	if len(surface) == 0 {
+		t.Fatal("CollectorSurface() is empty, so every assertion below would " +
+			"pass over a check that can never fire")
+	}
+	imports := []string{"fkdata.get", "fkdata.set", "env.fk_log"}
+
+	// THE POSITIVE CONTROL, and it is what makes the rest mean anything: an
+	// ordinary data module exports its stage hook and the allocator ABI, and
+	// none of that may be mistaken for a collector.
+	if err := CheckDataModule(imports, []string{"_initialize", "fk_data",
+		"fk_alloc", "fk_free", "fk_scratch_base", "fk_scratch_size"}); err != nil {
+		t.Fatalf("a collector-free data module was refused: %v", err)
+	}
+
+	// The whole surface, which is what a real infected build carries.
+	err := CheckDataModule(imports, append([]string{"fk_data"}, surface...))
+	if err == nil {
+		t.Fatal("a data module exporting the whole collector surface was accepted")
+	}
+	for _, name := range surface {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("the message does not name %s, so an author cannot tell "+
+				"which exports it means:\n%v", name, err)
+		}
+	}
+	// BOTH REMEDIES, BY LANGUAGE. A message that named one toolchain's fix
+	// would send the other's author to a flag that does not exist for them.
+	// -gc=custom AND NOT -gc=leaking. The latter is a substring of the
+	// `--gc=leaking` already in the "what a data module is" sentence, so
+	// asserting it leaves the whole Go remedy line deletable with this test
+	// still green -- which it was, until a reviewer deleted the line and
+	// watched nothing go red. -gc=custom occurs once, inside the Go remedy.
+	for _, want := range []string{"-gc=custom", "fk/fkgc", "cargo"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the message does not name %q as part of the remedy:\n%v",
+				want, err)
+		}
+	}
+
+	// ANY ONE OF THE THREE IS ENOUGH. control.lua binds all three or none, so a
+	// module carrying one was built with the collector however the rest of it
+	// was dead-code eliminated -- and accepting two-thirds of an infected build
+	// would be a check with a hole the shape of the emitter's own pruning.
+	for _, one := range surface {
+		if err := CheckDataModule(imports, []string{"fk_data", one}); err == nil {
+			t.Errorf("a data module exporting %s alone was accepted", one)
+		}
+	}
+
+	// THE ORDER IS THE BEHAVIOUR FOR A MODULE THAT IS WRONG TWICE, and nothing
+	// pinned it: moving the collector check to either side of its neighbours
+	// changes which message an author reads, and every other assertion here
+	// stays green. Most specific first, which is what CheckDataModule's header
+	// argues -- the import check is the catch-all and goes last, the pin stamp
+	// names one export and goes first.
+	both := append([]string{"fk_data"}, surface...)
+	err = CheckDataModule(append(imports, "fk.gc"), both)
+	if err == nil {
+		t.Fatal("a module with a forbidden import AND a collector was accepted")
+	}
+	if !strings.Contains(err.Error(), "carries a guest collector") {
+		t.Errorf("a module that is wrong twice should read the SHARPER message "+
+			"first; the collector check is ahead of the import catch-all:\n%v", err)
+	}
+	err = CheckDataModule(imports, append(both, "fk_api_pin_2_0_77"))
+	if err == nil {
+		t.Fatal("a module with a pin stamp AND a collector was accepted")
+	}
+	if !strings.Contains(err.Error(), "fk_api_pin_2_0_77") {
+		t.Errorf("the pin stamp is the sharpest of the three and goes first: a "+
+			"module carrying it should not be diagnosed as merely collected:\n%v", err)
 	}
 }
 

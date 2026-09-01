@@ -248,11 +248,20 @@ var DataModuleImports = map[string]bool{"fkdata": true, "env": true}
 
 // CheckDataModule refuses a data module that is really a control guest.
 //
-// Two properties, because they catch the same mistake at different distances.
-// The import set is the direct one. The `fk_api_pin_` export is the one that
-// survives dead-code elimination: it is a //go:wasmexport, so it is a root by
-// definition, and a guest that imports fkapi carries it whether or not it ever
-// calls a member.
+// THREE properties. The import set is the direct one. The `fk_api_pin_` export
+// is the one that survives dead-code elimination: it is a //go:wasmexport, so
+// it is a root by definition, and a guest that imports fkapi carries it whether
+// or not it ever calls a member. The COLLECTOR SURFACE is the third, and it
+// catches a different mistake entirely -- see collectorInDataModule.
+//
+// THE ORDER IS LOAD-BEARING AND IS PINNED BY A TEST: pin stamp, then collector,
+// then imports. It is MOST SPECIFIC FIRST. The pin stamp names one export and
+// one cause; the collector surface names up to three and one cause; the import
+// check is the CATCH-ALL, right about many mistakes and specific about none
+// ("imports the host module(s) X, and a data stage binds only fkdata and env").
+// A module that is wrong in two ways therefore gets the sharper message first
+// and the vaguer one only if it is still wrong after that fix, rather than
+// being told the general thing while the exact thing was available.
 func CheckDataModule(imports []string, exports []string) error {
 	var bad []string
 	seen := map[string]bool{}
@@ -276,6 +285,9 @@ func CheckDataModule(imports []string, exports []string) error {
 				"to reach there; import guest/go/fkdata instead", e)
 		}
 	}
+	if err := collectorInDataModule(exports); err != nil {
+		return err
+	}
 	if len(bad) > 0 {
 		hint := ""
 		for _, m := range bad {
@@ -289,6 +301,85 @@ func CheckDataModule(imports []string, exports []string) error {
 			strings.Join(sortedKeys(DataModuleImports), " and "), hint)
 	}
 	return nil
+}
+
+// collectorInDataModule refuses a data module built with the guest collector.
+//
+// THE SAME EXPORT SET MEANS THE OPPOSITE THING HERE. For a control guest,
+// CollectorSurface() is a PRECONDITION: `--gc=collected` is refused unless the
+// module exports all three, because the mode is not inert without them. A data
+// module is compiled `--persist=none --gc=leaking` whatever the control guest
+// uses, and nothing at any data-family stage drives a collector -- there is no
+// tick to pace one from and no state to survive -- so the same three exports
+// say the build went wrong.
+//
+// IT IS EASY TO DO BY ACCIDENT IN BOTH LANGUAGES, which is why this is a
+// refusal and not a comment. In Rust it takes no mistake at all beyond building
+// the whole workspace at once: cargo's v2 resolver unifies `--features fk/fkgc`
+// across every package in one invocation, so a control guest built collected
+// carries the data crate with it. In Go it is `-gc=custom` plus the fkgc import
+// left in a data guest copied from a control one.
+//
+// Nothing said so before, and the artefact is not free. The cost is not only
+// dead code either: in Rust the feature swaps `fk`'s single #[global_allocator]
+// and in Go -gc=custom routes every allocation through fkgc, so the stage runs
+// under a heavier allocator it has no use for, behind a collector nothing can
+// ever pace. Measured on this repository's own example data guest built both
+// ways: 599,178 bytes of generated Lua against 676,282, +12.9%, both packaged
+// with exit 0 and no line saying so before this check existed. To re-measure,
+// which needs no game: build `-p datastage` with and without
+// `--features fk/fkgc` and run `fklua compile --persist=none --gc=leaking` on
+// each, that being the flag set a data module is emitted with here. Read the
+// size off compile rather than off mod, since the collected arm is now refused
+// by this very function; on the clean arm the two agree to the byte. The
+// share depends on the guest -- the filing mod measured +3.1% on its own --
+// so the message says "several percent" and cites the example for the
+// figure. (The wasm sizes are not quoted anywhere, deliberately: `debug =
+// "line-tables-only"` embeds the absolute build path, so they move with the
+// length of the checkout's path.)
+//
+// The names come from CollectorSurface() rather than from a list here, for the
+// reason that function's own header gives: two spellings of one export set
+// drift, and the direction that drifts is always the unchecked one.
+func collectorInDataModule(exports []string) error {
+	have := make(map[string]bool, len(exports))
+	for _, e := range exports {
+		have[e] = true
+	}
+	var found []string
+	for _, name := range CollectorSurface() {
+		if have[name] {
+			found = append(found, name)
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	// BOTH SIDES NAMED, THEN THE REMEDY PER LANGUAGE, which is the shape the
+	// --gc refusals use: the two facts a mismatch is made of are what the
+	// artefact is and what the thing being built has to be, and a message that
+	// gives one without the other sends a reader looking for a flag they may
+	// never have typed.
+	return fmt.Errorf("this data module carries a guest collector.\n"+
+		"  what the module says: it exports %s, and those exports ARE the "+
+		"collector as far as the host can tell -- so it was built WITH one\n"+
+		"  what a data module is: compiled --persist=none --gc=leaking whatever "+
+		"the control guest uses. It runs once and dies with the Lua state that "+
+		"built it, and nothing at any data-family stage drives a collector -- "+
+		"there is no tick to pace one from -- so what you have is a collector "+
+		"nothing can ever pace, behind an allocator the stage does not need, and "+
+		"the game parses all of it at every load. Several percent of generated "+
+		"Lua: +12.9%% on this repository's own example data guest\n"+
+		"Build the DATA module without one:\n"+
+		"  Go:   -gc=leaking rather than -gc=custom, and no fkgc import in the "+
+		"data guest's own package.\n"+
+		"  Rust: build the data crate in its OWN cargo invocation, with no "+
+		"--features fk/fkgc. Cargo's v2 resolver unifies features across every "+
+		"package built in one invocation, so a control guest built collected in "+
+		"the same command turns the collector on here too.\n"+
+		"The control guest is unaffected either way: `gc` in fklua.toml and "+
+		"--gc on the command line describe it alone.",
+		strings.Join(found, ", "))
 }
 
 func sortedKeys(m map[string]bool) []string {
