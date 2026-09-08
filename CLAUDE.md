@@ -1082,8 +1082,9 @@ scripts/            the in-game and corpus tooling, five families: run-* (guest,
                     what the INSTALLED engine is, which is a different axis
                     from the API pin, and the one place that derivation lives
 scratchpad/         COMMITTED measurement harnesses (the GC arc's Python models,
-                    round 4's design benches, round 3's in-game probes, each
-                    with its RESULTS) — not scratch despite the name; the
+                    round 4's design benches, round 3's in-game probes, and
+                    storeline/, the bytecode comparison behind the opener-line
+                    store, each with its RESULTS) — not scratch despite the name; the
                     git-ignored scratch dir is scratch_tmp/ below. A guest kept
                     here is a .go.txt so `go build ./...` does not walk it
 bench/kernels/      hand-written Lua: the performance ceiling

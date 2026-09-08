@@ -27,7 +27,11 @@ func TestEveryBytePairRoundTripsThroughTheLiteral(t *testing.T) {
 	b.WriteString("  if #s ~= 2 or s:byte(1) ~= b1 or s:byte(2) ~= b2 then\n")
 	b.WriteString("    bad = bad + 1\n")
 	b.WriteString("    if bad <= 8 then print(string.format('MISMATCH b1=%d b2=%d len=%d g1=%s g2=%s',\n")
-	b.WriteString("      b1, b2, #s, tostring(s:byte(1)), tostring(s:byte(2)))) end\n")
+	// `or 'none'`, because s:byte(2) on a one-byte string returns NO values and
+	// tostring() with none raises "value expected" before the line can print:
+	// the designed MISMATCH message was unreachable for the likeliest wrong
+	// answer, a mis-read escape swallowing the byte after it.
+	b.WriteString("      b1, b2, #s, tostring(s:byte(1) or 'none'), tostring(s:byte(2) or 'none'))) end\n")
 	b.WriteString("  end\nend\n")
 	// One function per high byte: constants are per-function in Lua, and a
 	// single 65,536-constant chunk is a different thing to be measuring.
