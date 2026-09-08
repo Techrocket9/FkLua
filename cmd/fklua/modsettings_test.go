@@ -166,6 +166,19 @@ func TestModSettingsRefusalsNameTheByteOrTheKey(t *testing.T) {
 		want string
 	}{
 		{
+			// The one refusal whose absence looked like nothing: encoding/json
+			// would have read this file to the end and put U+FFFD where the
+			// byte was, and the self-check (decode what was encoded) cannot
+			// see a substitution made before the encoder ran.
+			name: "a JSON row holding a byte that is not UTF-8",
+			run: func() error {
+				return runModSettingsWrite([]string{
+					"--from", writeFile("not-utf8.json", "{\"version\":[2,0,77,0],\"startup\":{\"a-setting\":\"caf\xe9 latte\"}}"),
+					"--out", filepath.Join(dir, "never.dat")})
+			},
+			want: "byte 49 of the JSON is not UTF-8",
+		},
+		{
 			name: "a JSON row naming a section nothing knows",
 			run: func() error {
 				return runModSettingsWrite([]string{

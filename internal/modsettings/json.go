@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // The three stages a mod-settings.dat carries, in the order the engine writes
@@ -44,6 +45,26 @@ var stageOrder = []string{"startup", "runtime-global", "runtime-per-user"}
 // instead: what the JSON says first is what the dat holds first, which is what
 // makes a byte comparison against a written file mean anything.
 func ParseJSON(data []byte) (Document, error) {
+	// THE BYTES ARE CHECKED BEFORE THE DECODER SEES THEM, because the decoder
+	// cannot refuse. encoding/json replaces every byte that is not UTF-8 with
+	// U+FFFD and reads on, and a lone surrogate escape (a \ud800 with no low
+	// half behind it) becomes the same U+FFFD; by the time a token comes back
+	// the substitution is valid UTF-8, so a check on the token would pass and
+	// the file would carry three bytes the author never wrote. Both are
+	// refused here naming the byte, which is the sentence the render half
+	// already writes for the same bytes going the other way: JSON cannot carry
+	// them, and a writer that cannot carry a value says so rather than
+	// substituting one.
+	if i := invalidUTF8At(data); i >= 0 {
+		return Document{}, fmt.Errorf("modsettings: byte %d of the JSON is not UTF-8, "+
+			"and JSON has no way to carry it: the decoder would have replaced it with "+
+			"U+FFFD in silence", i)
+	}
+	if i := loneSurrogateAt(data); i >= 0 {
+		return Document{}, fmt.Errorf("modsettings: the escape at byte %d of the JSON is "+
+			"a lone surrogate, which names no character: the decoder would have "+
+			"replaced it with U+FFFD in silence", i)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 
@@ -124,6 +145,80 @@ func ParseJSON(data []byte) (Document, error) {
 	}
 	doc.Root = root
 	return doc, nil
+}
+
+// invalidUTF8At is the offset of the first byte that begins no UTF-8 sequence,
+// or -1. A literal U+FFFD in the file decodes as a three-byte RuneError and is
+// what the author wrote, so only the one-byte RuneError is a refusal.
+func invalidUTF8At(data []byte) int {
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size == 1 {
+			return i
+		}
+		i += size
+	}
+	return -1
+}
+
+// loneSurrogateAt is the offset of the first \uXXXX escape naming a surrogate
+// half that is not part of a pair, or -1. A pair (\ud83d\ude00) is one
+// character and passes; a high half with anything but a low half after it, or
+// a low half on its own, names nothing, and encoding/json would decode it as
+// U+FFFD without a word. An escaped backslash is stepped over so that \\u0080
+// (a backslash, then the text u0080) is not read as an escape; a malformed
+// escape is left for the decoder, which refuses it in its own words.
+func loneSurrogateAt(data []byte) int {
+	for i := 0; i+1 < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		if data[i+1] != 'u' {
+			i++ // \\, \", \n and the rest: skip the escaped character
+			continue
+		}
+		code, ok := hex4(data, i+2)
+		if !ok {
+			i++
+			continue
+		}
+		switch {
+		case code >= 0xD800 && code <= 0xDBFF:
+			if i+7 < len(data) && data[i+6] == '\\' && data[i+7] == 'u' {
+				if lo, ok := hex4(data, i+8); ok && lo >= 0xDC00 && lo <= 0xDFFF {
+					i += 11
+					continue
+				}
+			}
+			return i
+		case code >= 0xDC00 && code <= 0xDFFF:
+			return i
+		}
+		i += 5
+	}
+	return -1
+}
+
+func hex4(data []byte, at int) (int, bool) {
+	if at+4 > len(data) {
+		return 0, false
+	}
+	n := 0
+	for _, c := range data[at : at+4] {
+		var d int
+		switch {
+		case c >= '0' && c <= '9':
+			d = int(c - '0')
+		case c >= 'a' && c <= 'f':
+			d = int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = int(c-'A') + 10
+		default:
+			return 0, false
+		}
+		n = n*16 + d
+	}
+	return n, true
 }
 
 // readSection reads one stage's object of setting name to value, and wraps each

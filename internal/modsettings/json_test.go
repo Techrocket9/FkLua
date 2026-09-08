@@ -120,6 +120,15 @@ func TestParseJSONRefusesWhatItDoesNotUnderstand(t *testing.T) {
 		{"a comment that is not a string", `{"comment":3,"version":[2,0,77,0]}`, "a comment is a string"},
 		{"two documents", `{"version":[2,0,77,0],"startup":{}} {"version":[2,0,77,0]}`, "more than one document"},
 		{"not an object", `[1,2]`, "the document begins with"},
+		// The four the decoder would have read without a word, substituting
+		// U+FFFD for what it could not carry. The check is on the document's
+		// own bytes and escapes, because the substitution is valid UTF-8 by
+		// the time a token comes back.
+		{"a value holding a byte that is not UTF-8", "{\"version\":[2,0,77,0],\"startup\":{\"a\":\"x\x80y\"}}", "byte 39 of the JSON is not UTF-8"},
+		{"a name holding a byte that is not UTF-8", "{\"version\":[2,0,77,0],\"startup\":{\"a\x80b\":\"v\"}}", "byte 35 of the JSON is not UTF-8"},
+		{"a lone high surrogate escape", `{"version":[2,0,77,0],"startup":{"a":"x\ud800y"}}`, "escape at byte 39 of the JSON is a lone surrogate"},
+		{"a lone low surrogate escape", `{"version":[2,0,77,0],"startup":{"a":"x\udc00y"}}`, "escape at byte 39 of the JSON is a lone surrogate"},
+		{"a high surrogate escape followed by a non-surrogate escape", `{"version":[2,0,77,0],"startup":{"a":"\ud800\u0041"}}`, "escape at byte 38 of the JSON is a lone surrogate"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -234,5 +243,38 @@ func TestTheFlippedRowEncodesTheSameWayTwice(t *testing.T) {
 	}
 	if !bytes.Equal(Encode(first), Encode(second)) {
 		t.Errorf("two parses of the committed flipped row encoded to different bytes")
+	}
+}
+
+// The guard above is "what JSON cannot carry" and not "anything unusual": every
+// one of these is a value the author really wrote, and each reaches the bytes
+// unchanged. The escaped backslash is the case a naive scan for \u gets wrong.
+func TestParseJSONCarriesEveryStringJSONCanSay(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a literal U+FFFD", "{\"version\":[2,0,77,0],\"startup\":{\"a\":\"x\xef\xbf\xbdy\"}}", "x\uFFFDy"},
+		{"an escaped U+FFFD", `{"version":[2,0,77,0],"startup":{"a":"x\ufffdy"}}`, "x\uFFFDy"},
+		{"an escaped NUL", `{"version":[2,0,77,0],"startup":{"a":"x\u0000y"}}`, "x\x00y"},
+		{"a surrogate pair", `{"version":[2,0,77,0],"startup":{"a":"\ud83d\ude00"}}`, "\U0001F600"},
+		{"an escaped backslash before the letters u0080", `{"version":[2,0,77,0],"startup":{"a":"\\u0080"}}`, "\\u0080"},
+		{"an escaped backslash before the letters ud800", `{"version":[2,0,77,0],"startup":{"a":"\\ud800"}}`, "\\ud800"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			doc, err := ParseJSON([]byte(c.in))
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			back, err := Decode(Encode(doc))
+			if err != nil {
+				t.Fatalf("the encoding did not read back: %v", err)
+			}
+			got := back.Root.Dict[0].Value.Dict[0].Value.Dict[0].Value.Str
+			if got != c.want {
+				t.Errorf("the value came through as %q, want %q", got, c.want)
+			}
+		})
 	}
 }
