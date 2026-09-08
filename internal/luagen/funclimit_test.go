@@ -90,13 +90,13 @@ func TestAnOverlongJumpSpanIsRefusedAtPackageTime(t *testing.T) {
 		t.Fatalf("the fixture's span is only %d bytes against a threshold of %d, so "+
 			"there is nothing here to refuse", sp.bytes, maxJumpSpanBytes)
 	}
-	if out, ok := relayJumps(body); ok || out != body {
+	if out, n := relayJumps(body); n > 0 || out != body {
 		t.Fatalf("the relay claims it can break up a span with no body-level "+
 			"statement inside it, so this fixture no longer tests the backstop "+
-			"(changed=%v, %d bytes -> %d)", ok, len(body), len(out))
+			"(%d stations, %d bytes -> %d)", n, len(body), len(out))
 	}
 
-	_, err := relayOrRefuse("big", body)
+	_, _, err := relayOrRefuse("big", body)
 	if err == nil {
 		t.Fatal("a function whose jump crosses more than the threshold, and which " +
 			"the relay cannot help, was accepted")
@@ -642,8 +642,8 @@ func TestATrampolineLabelCannotCollideWithAnother(t *testing.T) {
 // Nothing this repo emits is anywhere near the threshold -- the widest span is
 // 38% of it -- so the relay must be a byte-for-byte no-op on all of it. Called
 // directly rather than through EmitModuleWith, because through the emitter the
-// relay is never reached at all and the test would be asserting the early-out in
-// checkJumpSpan rather than the transform.
+// relay is never reached at all and the test would be asserting the threshold
+// comparison in relayOrRefuse rather than the transform.
 //
 // BOTH TOOLCHAINS, for the reason the jump-limit corpus test gives: the widest
 // span in the whole corpus is a Rust one.
@@ -675,15 +675,15 @@ func TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay(t *testing.T) {
 			return
 		}
 		audited++
-		if out, changed := relayJumps(src); changed || out != src {
+		if out, n := relayJumps(src); n > 0 || out != src {
 			t.Errorf("%s at -opt=3: the relay rewrote a chunk that is under the "+
-				"threshold (changed=%v, %d bytes -> %d)", name, changed, len(src), len(out))
+				"threshold (%d stations, %d bytes -> %d)", name, n, len(src), len(out))
 		}
 		for _, fn := range strings.Split(src, "\nend\n") {
 			funcs++
-			if out, changed := relayJumps(fn); changed || out != fn {
+			if out, n := relayJumps(fn); n > 0 || out != fn {
 				t.Errorf("%s at -opt=3: the relay rewrote a function that is under "+
-					"the threshold (changed=%v)", name, changed)
+					"the threshold (%d stations)", name, n)
 			}
 		}
 	}
@@ -730,14 +730,15 @@ func TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay(t *testing.T) {
 // is the only test here that runs the relay over code the emitter really writes.
 //
 // TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay proves the transform is a
-// no-op at the shipped threshold, which is a statement about the early-out. It
-// says nothing about what the relay does when it FIRES, and every fixture that
-// does fire it is a four-line hand-written WAT: one block, one br_if, no nested
-// `if`, no `do return end`, no branch table, no loop guard, no spilled frame. But
-// insertionPoints' three rules -- depth exactly 1, never before a block closer,
-// never inside the prologue -- exist for exactly those shapes, and being wrong
-// about one of them emits Lua that does not parse. That failure is loud, and it
-// is loud at PACKAGE TIME for the one author the feature exists for.
+// no-op at the shipped threshold, which is a statement about the threshold
+// comparison. It says nothing about what the relay does when it FIRES, and every
+// fixture that does fire it is a four-line hand-written WAT: one block, one
+// br_if, no nested `if`, no `do return end`, no branch table, no loop guard, no
+// spilled frame. But insertionPoints' three rules -- depth exactly 1, never
+// before a block closer, never inside the prologue -- exist for exactly those
+// shapes, and being wrong about one of them emits Lua that does not parse. That
+// failure is loud, and it is loud at PACKAGE TIME for the one author the feature
+// exists for.
 //
 // So the threshold is driven DOWN until the relay fires on every guest in the
 // corpus, and each result is handed to the real parser.
@@ -906,20 +907,27 @@ func ladderChunk(hops, fill int, sep string) string {
 // and being under one by a rounding error is a test that quietly stops testing.
 func longJumpOps(n int) int { return n/20 + 1000 }
 
-// emitLongJump builds the shape the downstream failure has: a br_if near the
-// top of a long block, and the block's end label sitting on the trap.
-func emitLongJump(t *testing.T, ops int) (string, error) {
-	t.Helper()
+// longJumpWAT is the shape the downstream failure has: a br_if near the top of a
+// long block, and the block's end label sitting on the trap. Everything in it is
+// at function-body level once emitted, which is what makes it the shape the
+// relay CAN break up -- blockyWAT above is the one it cannot.
+func longJumpWAT(ops int) string {
 	var body strings.Builder
 	for i := 0; i < ops; i++ {
 		body.WriteString(" (local.set 1 (i32.add (local.get 1) (i32.const 1)))")
 	}
-	return emitWAT(t, `(module (memory 1) (func $big (export "big") (param i32) (result i32)
+	return `(module (memory 1) (func $big (export "big") (param i32) (result i32)
 		(local i32)
 		(block $out
-		  (br_if $out (local.get 0))`+body.String()+`
+		  (br_if $out (local.get 0))` + body.String() + `
 		  (return (local.get 1)))
-		(unreachable)))`)
+		(unreachable)))`
+}
+
+// emitLongJump is that shape through the emitter.
+func emitLongJump(t *testing.T, ops int) (string, error) {
+	t.Helper()
+	return emitWAT(t, longJumpWAT(ops))
 }
 
 func emitWAT(t *testing.T, src string) (string, error) {
@@ -933,4 +941,463 @@ func emitWAT(t *testing.T, src string) (string, error) {
 		t.Fatalf("ir: %v", err)
 	}
 	return EmitModule(im)
+}
+
+// ============================================================================
+// What the relay COST, and the ceiling it has left -- the measurement half
+// ============================================================================
+
+// TestTheBlockMeasureIsTheRelaysOwnCeiling is the theorem relayPlan's comment
+// states, checked rather than argued.
+//
+// The block is only worth reporting if it IS the relay's precondition rather
+// than a proxy for it: the greedy walk must succeed exactly when the widest
+// block fits in a hop. relayPlan derives the two independently -- the block from
+// the gaps between insertion points, ok from the walk itself -- so this can
+// require them to agree over a corpus of shapes rather than over the one the
+// emitter happens to produce.
+//
+// Red-proven: dropping `prev = p` from the gap walk (so every piece is measured
+// from the start of the span, which is the obvious wrong way to write it) makes
+// the block read as the whole span and fails this ten times over, first at
+//
+//	pts=[100 200 300 400 500 600 700 800 900] from=0 to=1000 hop=100: the walk
+//	says ok=true and the block says 1000 <= 100 is false
+//
+// which is the message this test really emits rather than a paraphrase of it.
+func TestTheBlockMeasureIsTheRelaysOwnCeiling(t *testing.T) {
+	// Point sets chosen for the ways a plan can fail: evenly spaced, one wide
+	// gap at the front, one in the middle, one at the back, and none at all.
+	// The last two put a point exactly ON a span end for the spans below, which
+	// is the boundary relayPlan's `inside` filter decides with `<=` and `>=`:
+	// a station AT the goto relays nothing and a station AT the label is where
+	// the jump already lands, so both must be excluded and the piece they would
+	// have cut must stay whole.
+	//
+	// EVERY SET IS SORTED, and that is a precondition rather than an omission --
+	// see relayPlan, where it is stated and where the construction that meets it
+	// is named. An unsorted set here would assert a behaviour no caller can
+	// produce and that the walk is not written to have.
+	sets := [][]int{
+		{},
+		{100},
+		{100, 200, 300, 400, 500, 600, 700, 800, 900},
+		{700, 800, 900},
+		{100, 200, 800, 900},
+		{100, 200, 300},
+		{50, 60, 70, 80, 90, 950},
+		{0, 1000},
+		{450, 550},
+	}
+	cases := 0
+	for _, pts := range sets {
+		for _, hop := range []int{10, 100, 250, 300, 500, 1000, 5000} {
+			for _, span := range [][2]int{{0, 1000}, {1000, 0}, {0, 5}, {450, 550}} {
+				_, block, ok := relayPlan(pts, span[0], span[1], hop)
+				cases++
+				if ok != (block <= hop) {
+					t.Errorf("pts=%v from=%d to=%d hop=%d: the walk says ok=%v and "+
+						"the block says %d <= %d is %v -- the number reported to an "+
+						"author is not the number the relay decided on",
+						pts, span[0], span[1], hop, ok, block, hop, block <= hop)
+				}
+			}
+		}
+	}
+	t.Logf("%d span/point/hop combinations, block and walk agree on every one", cases)
+}
+
+// blockyWAT is the shape the relay CANNOT help, built from real wasm rather than
+// hand-written Lua: a counted loop with an early exit, whose body the optimizer
+// has made enormous.
+//
+// The emitter renders it as `for fk4 = ... do` at body level, the whole run of
+// filler and the `br_if` that leaves the loop INSIDE it at depth 2, and the
+// label that br_if reaches at body level after the loop's `end`. So the span
+// crosses the entire loop body and there is nowhere in it for a station: a
+// trampoline is a label, and a label inside a `for` body is a label a body-level
+// goto may not enter.
+//
+// This is the shape the design named before the relay was built and that had
+// never been observed. It is what a large data guest meets: not the sBx offset,
+// which the relay handles, but a block longer than one hop.
+func blockyWAT(fill int) string {
+	var b strings.Builder
+	b.WriteString(`(module (memory 1)
+  (func $blocky (export "blocky") (local $i i32) (local $s i32) (local $n i32)
+    (local.set $n (i32.const 4))
+    (block $out
+      (block $done
+        (loop $top
+          (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+          (br_if $out (i32.eq (local.get $i) (i32.const 3)))`)
+	for i := 0; i < fill; i++ {
+		b.WriteString("\n          (local.set $s (i32.add (local.get $s) (i32.const 1)))")
+	}
+	b.WriteString(`
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $top))))
+    (drop (local.get $s))))`)
+	return b.String()
+}
+
+// TestASpanInsideOneBlockIsRefusedWithTheDistanceThatRefusedIt is the backstop's
+// message, on a fixture that is emitted from wasm rather than written by hand.
+//
+// TestAnOverlongJumpSpanIsRefusedAtPackageTime asserts the same refusal on
+// hand-written Lua, which says nothing about whether the emitter can produce the
+// shape. This one goes through the real pipeline at -opt=3 and then checks that
+// the fixture is what it claims: the goto is deeper than body level, its label is
+// at body level, and the run between them with no insertion point in it is
+// essentially the whole span.
+//
+// Red-proven twice. Constructing the JumpSpanError with Block: 0 fails it at
+// "the refusal quotes a block of 0 bytes"; measuring the block over the whole
+// FUNCTION instead of over the span fails the shape assertion, because the
+// prologue and the tail supply points the span does not contain.
+func TestASpanInsideOneBlockIsRefusedWithTheDistanceThatRefusedIt(t *testing.T) {
+	m, err := wasm.DecodeWAT(blockyWAT(30000))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	im, err := ir.BuildModule(m)
+	if err != nil {
+		t.Fatalf("ir: %v", err)
+	}
+
+	// With the threshold raised the check passes and the relay never runs, which
+	// is the only way to get the text this fixture is a fixture OF.
+	saved := maxJumpSpanBytes
+	maxJumpSpanBytes = 1 << 30
+	raw, err := EmitModuleWith(im, Options{Opt: analysis.O3})
+	maxJumpSpanBytes = saved
+	if err != nil {
+		t.Fatalf("emit with the threshold raised: %v", err)
+	}
+
+	var body string
+	var worst funcSpan
+	for _, fn := range strings.Split(raw, "\nend\n") {
+		if sp := maxJumpSpan(fn); sp.bytes > worst.bytes {
+			worst, body = sp, fn
+		}
+	}
+	if worst.bytes <= maxJumpSpanBytes {
+		t.Fatalf("the fixture's widest span is only %d bytes against a threshold of "+
+			"%d, so there is nothing here to refuse", worst.bytes, maxJumpSpanBytes)
+	}
+
+	// The fixture is the NESTED shape and not merely a long one.
+	lines := scanLuaLines(body)
+	var gotoDepth, labelDepth = -1, -1
+	for _, l := range lines {
+		if l.off == worst.from {
+			gotoDepth = l.depth
+		}
+		if l.off == worst.to {
+			labelDepth = l.depth
+		}
+	}
+	if gotoDepth <= 1 {
+		t.Fatalf("the widest span's goto is at depth %d, so it is at body level and "+
+			"this fixture is an ordinary long jump the relay would break up", gotoDepth)
+	}
+	if labelDepth != 1 {
+		t.Fatalf("the widest span's label is at depth %d; the emitter writes every "+
+			"label at body level and the relay's own rule depends on it", labelDepth)
+	}
+
+	_, f, err := relayOrRefuse("$blocky", body)
+	if err == nil {
+		t.Fatal("a span with no body-level statement inside it was accepted")
+	}
+	var js *JumpSpanError
+	if !errors.As(err, &js) {
+		t.Fatalf("the refusal is not a *JumpSpanError: %T %v", err, err)
+	}
+	if js.Block <= js.Hop {
+		t.Fatalf("the refusal quotes a block of %d bytes against a hop of %d; if the "+
+			"block really fit in a hop the relay would have succeeded", js.Block, js.Hop)
+	}
+	if js.Block != f.BlockBytes || js.Hop != relayHopBytes() {
+		t.Errorf("the error quotes block=%d hop=%d and the facts say block=%d hop=%d",
+			js.Block, js.Hop, f.BlockBytes, relayHopBytes())
+	}
+	if f.RoomBytes >= 0 {
+		t.Errorf("the room left is %d bytes and the function was refused; the room "+
+			"goes negative exactly when the relay cannot help", f.RoomBytes)
+	}
+	// Almost the whole span is one run: what separates the two is the handful of
+	// bytes between the loop's `end` and the label the jump reaches.
+	if js.Block*100 < js.Bytes*99 {
+		t.Errorf("the block is %d bytes of a %d-byte span, so most of the span is "+
+			"NOT one run and the fixture no longer shows the shape it claims",
+			js.Block, js.Bytes)
+	}
+	for _, want := range []string{
+		"no body-level statement boundary",
+		"one hop of the ladder covers",
+		"//go:noinline",
+		"#[inline(never)]",
+		"widest_block_bytes",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q:\n%v", want, err)
+		}
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(js.Block)) {
+		t.Errorf("the refusal does not carry the block distance %d:\n%v", js.Block, err)
+	}
+
+	// And the shipped path refuses it too, which is what a packaging does.
+	if _, err := EmitModuleWith(im, Options{Opt: analysis.O3}); err == nil {
+		t.Fatal("the emitter accepted the module at the shipped threshold")
+	}
+	t.Logf("span %d bytes, block %d, hop %d, room %d", js.Bytes, js.Block, js.Hop, f.RoomBytes)
+}
+
+// twoSpanFunction is a hand-written function carrying TWO over-threshold jumps:
+// a WIDE one at body level that the relay can carry, and a NARROWER one inside a
+// `while` body that it cannot.
+//
+// Hand-written rather than emitted, because the point is the arithmetic of the
+// refusal and not whether the emitter produces this pair -- and no wasm the
+// optimizer is likely to hand us puts the two arms this way round on purpose.
+// The wide arm is straight-line code at depth 1, so it has a statement boundary
+// every 28 bytes and can be relayed at any size; the nested arm is straight-line
+// code at depth 2, where a body-level label cannot go, so it has none at all.
+func twoSpanFunction(wide, nested int) string {
+	var b strings.Builder
+	b.WriteString("local function twospan()\n")
+	b.WriteString("  local s = 0\n")
+	b.WriteString("  goto LA\n")
+	for i := 0; i < wide; i++ {
+		b.WriteString("  s = s + 1 + 2 + 3 + 4 + 5\n")
+	}
+	b.WriteString("  ::LA::\n")
+	b.WriteString("  while s > 0 do\n")
+	b.WriteString("    goto LB\n")
+	for i := 0; i < nested; i++ {
+		b.WriteString("    s = s + 1 + 2 + 3 + 4 + 5\n")
+	}
+	b.WriteString("  end\n")
+	b.WriteString("  ::LB::\n")
+	b.WriteString("  return s\n")
+	return b.String()
+}
+
+// TestTheRefusalNamesTheSpanTheRelayCouldNotCarry is the arithmetic of a refusal
+// when a function has more than one over-threshold jump in it.
+//
+// relayJumps plans EVERY LABEL INDEPENDENTLY, so "the widest span" and "the span
+// that refused the function" are two different things the moment a function has
+// two long jumps and the relay can carry one of them. The refusal used to be
+// built from the widest, which made every number in the message describe a jump
+// the emitter had successfully relayed: the label of a carried span, a block of
+// 28 bytes, and 327,649 bytes of room quoted as the reason a function would not
+// fit. That contradicts the file's own sentence that the room goes negative
+// exactly when the relay cannot help, and it points the author at the wrong
+// code.
+//
+// Red-proven by deleting the worstUnrelayableSpan step from relayOrRefuse, so
+// the error is built from the widest span again. Five assertions fail, the first
+// being "the refusal names label \"LA\" and quotes a block of 28 bytes with
+// +327649 bytes of room; the relay CARRIED that span and gave up on \"LB\".
+func TestTheRefusalNamesTheSpanTheRelayCouldNotCarry(t *testing.T) {
+	src := twoSpanFunction(43000, 24000)
+	lines := scanLuaLines(src)
+	labels, chain := labelIndex(lines)
+	hop := relayHopBytes()
+
+	// The fixture is only a fixture if the two arms are the way round it claims.
+	wide := spanOver(lines, labels, chain)
+	if wide.label != "LA" || wide.bytes <= maxJumpSpanBytes {
+		t.Fatalf("the widest span is %d bytes reaching %q, against a threshold of %d; "+
+			"the fixture needs its WIDE arm over the threshold", wide.bytes, wide.label,
+			maxJumpSpanBytes)
+	}
+	if _, block, ok := relayPlan(insertionPointsIn(lines, wide.from, wide.to),
+		wide.from, wide.to, hop); !ok {
+		t.Fatalf("the wide span cannot be relayed either (block %d against a hop of %d), "+
+			"so this fixture no longer separates a carried span from a refused one",
+			block, hop)
+	}
+
+	from := -1
+	for _, l := range lines {
+		if n, ok := gotoOn(l.text); ok && n == "LB" {
+			from = l.off
+		}
+	}
+	if from < 0 {
+		t.Fatal("the fixture has no goto LB in it")
+	}
+	narrow := labels["LB"] - from
+	if narrow <= maxJumpSpanBytes || narrow >= wide.bytes {
+		t.Fatalf("the nested span is %d bytes against a threshold of %d and a wide span of "+
+			"%d; the fixture needs it over the threshold and UNDER the wide one",
+			narrow, maxJumpSpanBytes, wide.bytes)
+	}
+
+	// And the relay really does carry one and give up on the other, which is the
+	// situation the message has to describe.
+	out, n := relayJumps(src)
+	if n == 0 {
+		t.Fatal("the relay inserted no station at all, so nothing here was carried")
+	}
+	if post := maxJumpSpan(out); post.label != "LB" || post.bytes != narrow {
+		t.Fatalf("after the relay the widest span is %d bytes reaching %q; the fixture "+
+			"needs the carried span gone and the uncarried one left", post.bytes, post.label)
+	}
+
+	_, f, err := relayOrRefuse("twospan", src)
+	if err == nil {
+		t.Fatal("a function with an unrelayable span in it was accepted")
+	}
+	var js *JumpSpanError
+	if !errors.As(err, &js) {
+		t.Fatalf("the refusal is not a *JumpSpanError: %T %v", err, err)
+	}
+	if js.Label != "LB" {
+		t.Errorf("the refusal names label %q and quotes a block of %d bytes with %+d bytes "+
+			"of room; the relay CARRIED that span and gave up on \"LB\", so the message "+
+			"describes a jump that worked and sends the author to the wrong code",
+			js.Label, js.Block, js.Hop-js.Block)
+	}
+	if js.Bytes != narrow {
+		t.Errorf("the refusal quotes a span of %d bytes and the span it could not carry is "+
+			"%d", js.Bytes, narrow)
+	}
+	if js.Block <= js.Hop {
+		t.Errorf("the refusal quotes a block of %d bytes against a hop of %d; if the block "+
+			"really fitted in a hop the relay would have carried the span", js.Block, js.Hop)
+	}
+	if js.Block != narrow {
+		t.Errorf("the block reads %d over a %d-byte span; a run at depth 2 has no body-level "+
+			"boundary in it at all, so the block is the whole span", js.Block, narrow)
+	}
+	if js.Block != f.BlockBytes || f.RoomBytes != js.Hop-js.Block {
+		t.Errorf("the error quotes block=%d and the facts say block=%d room=%d; a report and "+
+			"a message that disagree are worse than either alone",
+			js.Block, f.BlockBytes, f.RoomBytes)
+	}
+	if f.RoomBytes >= 0 {
+		t.Errorf("the room left is %+d bytes and the function was refused; the room goes "+
+			"negative exactly when the relay cannot help", f.RoomBytes)
+	}
+	// The widest span is still reported as the widest span: it is a true fact
+	// about the function and the number an author steers by, and only the block
+	// measure follows the refusal.
+	if f.SpanBytes != wide.bytes || f.Label != wide.label {
+		t.Errorf("the facts report a widest span of %d bytes reaching %q and the widest span "+
+			"is %d reaching %q", f.SpanBytes, f.Label, wide.bytes, wide.label)
+	}
+	t.Logf("wide span %d bytes carried through %d station(s); refused on %q, span %d, "+
+		"block %d, hop %d, room %d", wide.bytes, n, js.Label, js.Bytes, js.Block, js.Hop,
+		f.RoomBytes)
+}
+
+// TestTheEmitterReportsWhatEveryFunctionsWidestJumpCost is the facts entry
+// point, on both arms: a module the relay carries and one it never touches.
+//
+// The numbers are the point. A relayed module's post-relay span is ABOUT ONE HOP
+// whatever its size, so reporting only that is reporting a constant; the
+// pre-relay span is what says how near the wall the guest is, and the block is
+// what says whether the relay can keep helping. All three have to come out of
+// one emission or a consumer cannot relate them.
+//
+// Red-proven by returning ModuleJumps{} from EmitModuleJumps, which fails at
+// "the module reports no function at all".
+func TestTheEmitterReportsWhatEveryFunctionsWidestJumpCost(t *testing.T) {
+	relayed := func(t *testing.T) ModuleJumps {
+		t.Helper()
+		m, err := wasm.DecodeWAT(longJumpWAT(longJumpOps(luaMaxJumpInstructions * 8)))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		im, err := ir.BuildModule(m)
+		if err != nil {
+			t.Fatalf("ir: %v", err)
+		}
+		_, _, j, err := EmitModuleJumps(im, Options{})
+		if err != nil {
+			t.Fatalf("a module the relay should have rescued was refused: %v", err)
+		}
+		return j
+	}(t)
+
+	if relayed.Funcs == 0 {
+		t.Fatal("the module reports no function at all, so nothing was measured")
+	}
+	if relayed.Stations == 0 || len(relayed.Relayed) == 0 {
+		t.Fatalf("the relay carried nothing (%d stations, %d functions), so this "+
+			"fixture measures the quiet path", relayed.Stations, len(relayed.Relayed))
+	}
+	if relayed.Widest.SpanBytes <= maxJumpSpanBytes {
+		t.Errorf("the widest PRE-relay span reads %d, under the %d-byte threshold -- "+
+			"it is being measured after the ladder went in, which is the reading "+
+			"this exists to make impossible", relayed.Widest.SpanBytes, maxJumpSpanBytes)
+	}
+	if relayed.AfterBytes > maxJumpSpanBytes {
+		t.Errorf("the widest span after the relay is %d, still over the threshold",
+			relayed.AfterBytes)
+	}
+	if relayed.AfterBytes >= relayed.Widest.SpanBytes {
+		t.Errorf("the relay did not shorten anything: %d before, %d after",
+			relayed.Widest.SpanBytes, relayed.AfterBytes)
+	}
+	if relayed.Widest.Func == "" {
+		t.Error("the widest span names no function, so the number points at nothing")
+	}
+	if got, want := relayed.Widest.RoomBytes, relayHopBytes()-relayed.Widest.BlockBytes; got != want {
+		t.Errorf("room is %d and hop - block is %d", got, want)
+	}
+	if relayed.Widest.BlockBytes > relayHopBytes() {
+		t.Errorf("the block is %d against a hop of %d, so the relay should have "+
+			"refused this rather than carried it", relayed.Widest.BlockBytes, relayHopBytes())
+	}
+	sum := 0
+	for _, f := range relayed.Relayed {
+		sum += f.Stations
+		if f.Stations == 0 {
+			t.Errorf("%s is listed as relayed with no station", f.Func)
+		}
+	}
+	if sum != relayed.Stations {
+		t.Errorf("the module totals %d stations and its functions total %d",
+			relayed.Stations, sum)
+	}
+
+	// The quiet arm: a module far under the threshold still reports its span,
+	// which is the whole reason every function is scanned.
+	m, err := wasm.DecodeWAT(longJumpWAT(2000))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	im, err := ir.BuildModule(m)
+	if err != nil {
+		t.Fatalf("ir: %v", err)
+	}
+	_, _, quiet, err := EmitModuleJumps(im, Options{})
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if quiet.Stations != 0 || len(quiet.Relayed) != 0 {
+		t.Fatalf("the small fixture was relayed (%d stations), so it is not the "+
+			"quiet path", quiet.Stations)
+	}
+	if quiet.Widest.SpanBytes == 0 {
+		t.Fatal("a module under the threshold reports no span at all, so an author " +
+			"only ever learns the distance once it has been crossed -- which is the " +
+			"gap this measurement exists to close")
+	}
+	if quiet.Widest.AfterBytes != quiet.Widest.SpanBytes {
+		t.Errorf("nothing was relayed and the before/after spans differ: %d and %d",
+			quiet.Widest.SpanBytes, quiet.Widest.AfterBytes)
+	}
+	t.Logf("relayed: %d bytes -> %d over %d stations, block %d of hop %d; "+
+		"quiet: %d bytes, block %d",
+		relayed.Widest.SpanBytes, relayed.AfterBytes, relayed.Stations,
+		relayed.Widest.BlockBytes, relayHopBytes(),
+		quiet.Widest.SpanBytes, quiet.Widest.BlockBytes)
 }

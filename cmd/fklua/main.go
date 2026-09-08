@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -903,7 +904,7 @@ func runCompile(args []string) error {
 	// `compile` writes the bare chunk, at no offset and beside nothing, so
 	// there is no packaged file for a map to be a map OF. The spans are
 	// discarded here on purpose.
-	src, _, err := emitWithDiagnostics(im, opts)
+	src, _, jumps, err := emitWithDiagnostics(im, opts)
 	if err != nil {
 		return err
 	}
@@ -916,6 +917,12 @@ func runCompile(args []string) error {
 		return err
 	}
 	fmt.Printf("wrote %s (%d bytes, NaN mode: %s, -opt=%s)\n", out, len(src), nan, opt)
+	// UNDER the `wrote` line, which is untouched to the byte. `compile` reports
+	// a chunk's SIZE and size is free; the jump span is the number that decides
+	// whether the chunk loads, so it belongs beside it.
+	for _, l := range jumpNote(jumps) {
+		fmt.Println(l)
+	}
 	return nil
 }
 
@@ -1395,10 +1402,12 @@ func decodeModule(path string, raw []byte) (*ir.Module, error) {
 // The line spans come back with the source because they are a byproduct of the
 // jump check the emitter already performs, and because the only way to get them
 // afterwards would be to re-derive function boundaries from the text.
-func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, []luagen.FuncSpan, error) {
-	src, spans, err := luagen.EmitModuleSpans(im, opts)
+func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, []luagen.FuncSpan, luagen.ModuleJumps, error) {
+	src, spans, jumps, err := luagen.EmitModuleJumps(im, opts)
 	if err != nil {
-		return "", nil, err
+		// The jump facts survive the error on purpose: a jump refusal names the
+		// function, and the report wants the distance that refused it.
+		return "", nil, jumps, err
 	}
 
 	// Functions the compiler could not handle at all are reported first: they
@@ -1419,7 +1428,87 @@ func emitWithDiagnostics(im *ir.Module, opts luagen.Options) (string, []luagen.F
 	if ds := luagen.Diagnose(im, opts); len(ds) > 0 {
 		fmt.Fprint(os.Stderr, luagen.FormatDiagnostics(ds))
 	}
-	return src, spans, nil
+	return src, spans, jumps, nil
+}
+
+// jumpNote is the line `compile` and `mod` print about Lua's jump limit, and it
+// exists because module SIZE was the only number either of them reported.
+//
+// WHAT EACH NUMBER IS, and why they are all named rather than left to be
+// inferred. A chunk's size is free; what is not free is one function's widest
+// jump, so the first number is that span and the limit is beside it. When the
+// relay carried the module the span the author would otherwise have met is gone,
+// and the span that is LEFT is about one hop whatever the guest's size -- which
+// is a property of the ladder and reads as a comfortable 50% for a module that
+// is nowhere near comfortable. So the line says what the hop is, and then gives
+// the number that really bounds the module: the widest run with nowhere at body
+// level to put a station, against the one hop a station has to be found within.
+// The first library on this substrate read the hop as headroom and reported
+// "83 percent of the limit" from it; that is the reading this line is worded to
+// make impossible.
+//
+// THE BLOCK IS ON EVERY ARM THAT HAS ONE, relayed or not. A module under the
+// span limit needed no relay today and may still be one the relay could never
+// have carried, and those are independent facts about it -- so the arm that
+// says "no relay needed" carries the block and the room as well, and adds a
+// second line when that room is negative. Anything else prints the reassuring
+// half of a number that is not reassuring. The only arm without them is the one
+// for a module with no jump at all, where there is no span to measure a run
+// inside.
+func jumpNote(j luagen.ModuleJumps) []string {
+	limit, hop := luagen.MaxJumpSpanBytes(), luagen.RelayHopBytes()
+	pct := func(n, of int) int {
+		if of == 0 {
+			return 0
+		}
+		return int(math.Round(100 * float64(n) / float64(of)))
+	}
+	if j.Widest.SpanBytes == 0 {
+		return []string{fmt.Sprintf("  jump span: no function carries a jump; "+
+			"the limit is %d bytes and no relay was needed", limit)}
+	}
+	if j.Stations == 0 {
+		// THE BLOCK IS PRINTED HERE TOO, and leaving it out was the hole this
+		// line existed to close. A module under the span limit needs no relay
+		// TODAY; whether the relay could carry it TOMORROW is the block, and
+		// those two are independent. A blocky guest at 15,000 filler statements
+		// reads 76% of the limit and needs no relay, and its block room is
+		// already -167,361 bytes: the span it is 24% away from crossing is one
+		// the ladder would not be able to break up. Printing only the span there
+		// is printing the reassuring half of a number that is not reassuring.
+		note := []string{fmt.Sprintf("  jump span: widest %d bytes in %s (%d%% of "+
+			"the %d-byte limit), no relay needed; widest block %d bytes against the "+
+			"%d one hop covers, so %d bytes of block room (%d%%)",
+			j.Widest.SpanBytes, j.Widest.Func, pct(j.Widest.SpanBytes, limit), limit,
+			j.Widest.BlockBytes, hop, j.Widest.RoomBytes, pct(j.Widest.RoomBytes, hop))}
+		if j.Widest.RoomBytes < 0 {
+			note = append(note, "  this module is under the span limit and the relay "+
+				"could NOT carry it if it crossed: the widest run with nowhere at body "+
+				"level to put a station is already longer than one hop. Lift that long "+
+				"straight-line run to the function's own body level rather than leaving "+
+				"it nested inside one if or loop body, and put //go:noinline (Go) or "+
+				"#[inline(never)] (Rust) on your section functions so no single "+
+				"function carries a block that long.")
+		}
+		return note
+	}
+	return []string{
+		fmt.Sprintf("  jump span: widest %d bytes in %s (%d%% of the %d-byte "+
+			"limit), relayed through %d station(s) in %d function(s); widest span "+
+			"after the relay %d bytes (%d%% of the limit); widest block %d bytes "+
+			"against the %d one hop covers, so %d bytes of block room (%d%%)",
+			j.Widest.SpanBytes, j.Widest.Func, pct(j.Widest.SpanBytes, limit), limit,
+			j.Stations, len(j.Relayed),
+			j.AfterBytes, pct(j.AfterBytes, limit),
+			j.Widest.BlockBytes, hop, j.Widest.RoomBytes, pct(j.Widest.RoomBytes, hop)),
+		"  the relay carried this module, so the number that bounds it is the " +
+			"block room and not the span: a station is a label, a label only goes " +
+			"at function body level, and the relay refuses when a run with none in " +
+			"it is longer than one hop. Keep a long straight-line run at the " +
+			"function's own body level rather than nested inside one if or loop " +
+			"body, and put //go:noinline (Go) or #[inline(never)] (Rust) on your " +
+			"section functions so no single function carries a block that long.",
+	}
 }
 
 // mapNote is one map's half of the line the packager prints about them.
@@ -1876,6 +1965,10 @@ func runModWith(args []string, rep *modReport) error {
 	// from a module that by design carries none.
 	var im *ir.Module
 	var src string
+	// What Lua's jump limit cost each module, kept until the lines are printed:
+	// the two modules are packaged hundreds of lines apart and each note goes
+	// directly under the line that names its module.
+	var controlJumps, dataJumps luagen.ModuleJumps
 	// What the one map line at the end of this command says, one entry per map
 	// written. Collected as it goes because the two modules are packaged
 	// hundreds of lines apart and the output belongs together.
@@ -1939,8 +2032,11 @@ func runModWith(args []string, rep *modReport) error {
 		rep.Build.GC = gc.String()
 		rep.Build.Persist = persist.String()
 		var spans []luagen.FuncSpan
-		src, spans, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
+		src, spans, controlJumps, err = emitWithDiagnostics(im, luagen.Options{NaN: nan, Opt: opt, Persist: persist, BuildID: id,
 			GC: gc, Fuel: fuel, Roots: hookNames()})
+		// BEFORE the error is checked: a jump refusal is exactly when a driving
+		// tool needs the numbers, and the emitter hands them back either way.
+		rep.Jumps.Control = jumpEntry(controlJumps)
 		if err != nil {
 			return refuse("emit", err)
 		}
@@ -2005,10 +2101,12 @@ func runModWith(args []string, rep *modReport) error {
 		if err := factorio.CheckDataModule(imports, exports); err != nil {
 			return refuse("data_module", fmt.Errorf("%s: %w", dataModule, err))
 		}
-		dsrc, dspans, err := emitWithDiagnostics(dim, luagen.Options{
+		dsrc, dspans, dj, err := emitWithDiagnostics(dim, luagen.Options{
 			NaN: nan, Opt: opt, Persist: luagen.PersistNone, GC: luagen.GCLeaking,
 			Roots: factorio.StageExportNames(),
 		})
+		dataJumps = dj
+		rep.Jumps.Data = jumpEntry(dj)
 		if err != nil {
 			return refuse("emit", err)
 		}
@@ -2066,6 +2164,13 @@ func runModWith(args []string, rep *modReport) error {
 	} else {
 		fmt.Printf("wrote %s (%d bytes of Lua, NaN mode: %s, -opt=%s, --persist=%s, --gc=%s)\n",
 			path, len(src), nan, opt, persist, gc)
+		// DIRECTLY UNDER THE MODULE IT IS ABOUT, and the `wrote` line above is
+		// untouched to the byte -- it is what every build in and outside this
+		// repo greps. Size is what that line reports and size is free; this is
+		// the number that decides whether the chunk loads.
+		for _, l := range jumpNote(controlJumps) {
+			fmt.Println(l)
+		}
 	}
 	// SAY WHICH ENGINE THE MOD CLAIMS, beside the `API <version>:` lines that
 	// say which description it was built from. The two are separate axes and
@@ -2101,6 +2206,12 @@ func runModWith(args []string, rep *modReport) error {
 	}
 	if dataModule != "" {
 		fmt.Printf("  data module %s (%d bytes of Lua)\n", dataModule, dataModuleSize)
+		// The data stage is the shape most likely to reach the limit, since it
+		// is a few hundred straight-line prototype definitions the optimizer
+		// concentrates into one function.
+		for _, l := range jumpNote(dataJumps) {
+			fmt.Println(l)
+		}
 	}
 	// ONE LINE, BELOW THE `wrote` LINE, and the `wrote` line itself is untouched
 	// to the byte -- it is what every build in and outside this repo greps, and

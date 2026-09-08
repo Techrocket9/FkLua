@@ -39,6 +39,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/Techrocket9/fklua/internal/luagen"
 )
 
 // refusalError tags an error a subcommand chose deliberately with a stable
@@ -79,6 +81,68 @@ type reportCount struct {
 	// at all (api.table_attached).
 	Shipped int `json:"shipped"`
 	Total   int `json:"total"`
+}
+
+// reportJumpFunc is one function's row in the jumps object: what its widest
+// jump cost and how much room the relay had inside it.
+type reportJumpFunc struct {
+	Function string `json:"function"`
+	// WidestSpanBytes is the widest goto-to-label distance in this function
+	// BEFORE the relay ran. It is the number that says how near Lua's wall the
+	// guest is; the one after the relay does not.
+	WidestSpanBytes int `json:"widest_span_bytes"`
+	Stations        int `json:"stations"`
+	// WidestSpanAfterRelayBytes is what the ladder left. For a relayed function
+	// it reads about one hop whatever the guest's size, because a hop is what
+	// the ladder was built to, so it is a property of the relay and not a
+	// headroom figure.
+	WidestSpanAfterRelayBytes int `json:"widest_span_after_relay_bytes"`
+	// WidestBlockBytes is the longest run with no body-level statement boundary
+	// in it, taken inside the span this function's fate turns on, and
+	// BlockRoomBytes is what is left of one hop over it. This pair is the
+	// relay's own ceiling: it goes negative exactly when the relay cannot help
+	// and the function is refused. The span it is taken in is the widest one
+	// while the relay can still carry the function, and on a refusal the span
+	// the relay could NOT carry -- which need not be the widest, because every
+	// label is planned on its own. See FuncJumps in internal/luagen.
+	WidestBlockBytes int `json:"widest_block_bytes"`
+	BlockRoomBytes   int `json:"block_room_bytes"`
+}
+
+// reportJumps is one module's entry in the jumps object.
+//
+// WHY THIS IS HERE AT ALL. `outputs.data_lua_bytes` and the "N bytes of Lua"
+// line say how big a module is, and module size is free: a chunk is parsed once
+// and never appears in a save. What is not free is CONCENTRATION inside one
+// function, and until this the only way an author learned they were near it was
+// the refusal. The first library built on this substrate transcribed the
+// emitter's scan into a script of its own to find out, and read the relay's hop
+// as a headroom figure because that is the number that was visible.
+//
+// LimitBytes and HopBytes are constants of the emitter rather than measurements
+// of this module, so they are filled in even for a module that is not there;
+// every measured number is 0 in that case and `relayed` is false.
+type reportJumps struct {
+	// LimitBytes is the span at which a function is refused, and HopBytes is how
+	// far one hop of the relay's ladder may reach.
+	LimitBytes int `json:"limit_bytes"`
+	HopBytes   int `json:"hop_bytes"`
+	// The widest PRE-relay span in the module, and the function carrying it.
+	WidestSpanBytes    int    `json:"widest_span_bytes"`
+	WidestSpanFunction string `json:"widest_span_function"`
+	// Stations is the module's total, over every function the relay carried.
+	Stations int `json:"stations"`
+	// WidestSpanAfterRelayBytes is the widest span left anywhere in the module.
+	WidestSpanAfterRelayBytes int `json:"widest_span_after_relay_bytes"`
+	// The block measure, taken in the function named by widest_span_function:
+	// inside its widest span while the relay can still carry that function, and
+	// inside the span that defeated the relay once one exists.
+	WidestBlockBytes int  `json:"widest_block_bytes"`
+	BlockRoomBytes   int  `json:"block_room_bytes"`
+	Relayed          bool `json:"relayed"`
+	// RelayedFunctions is every function the relay carried, in emission order.
+	// [] and never null.
+	RelayedFunctions []reportJumpFunc `json:"relayed_functions"`
 }
 
 type modReport struct {
@@ -150,8 +214,42 @@ type modReport struct {
 		DataLuaBytes    int    `json:"data_lua_bytes"`
 	} `json:"outputs"`
 
+	// Jumps is Lua's 18-bit jump limit, per module: how near each one came to
+	// it, what the relay did, and how much room the relay itself has left.
+	Jumps struct {
+		Control reportJumps `json:"control"`
+		Data    reportJumps `json:"data"`
+	} `json:"jumps"`
+
 	LuaMigrations []string `json:"lua_migrations"`
 	Inert         bool     `json:"inert"`
+}
+
+// jumpEntry renders one module's facts as its report entry.
+func jumpEntry(j luagen.ModuleJumps) reportJumps {
+	e := reportJumps{
+		LimitBytes:                luagen.MaxJumpSpanBytes(),
+		HopBytes:                  luagen.RelayHopBytes(),
+		WidestSpanBytes:           j.Widest.SpanBytes,
+		WidestSpanFunction:        j.Widest.Func,
+		Stations:                  j.Stations,
+		WidestSpanAfterRelayBytes: j.AfterBytes,
+		WidestBlockBytes:          j.Widest.BlockBytes,
+		BlockRoomBytes:            j.Widest.RoomBytes,
+		Relayed:                   j.Stations > 0,
+		RelayedFunctions:          []reportJumpFunc{},
+	}
+	for _, f := range j.Relayed {
+		e.RelayedFunctions = append(e.RelayedFunctions, reportJumpFunc{
+			Function:                  f.Func,
+			WidestSpanBytes:           f.SpanBytes,
+			Stations:                  f.Stations,
+			WidestSpanAfterRelayBytes: f.AfterBytes,
+			WidestBlockBytes:          f.BlockBytes,
+			BlockRoomBytes:            f.RoomBytes,
+		})
+	}
+	return e
 }
 
 // newModReport starts a report whose every list is non-nil, because a list is
@@ -178,6 +276,11 @@ func newModReport() *modReport {
 	r.Hooks.Control = []string{}
 	r.Hooks.Data = []string{}
 	r.LuaMigrations = []string{}
+	// A module that is not in this packaging still gets an entry, carrying the
+	// two constants and zeros: an absent module is not a module with no jump,
+	// and a consumer computing a percentage needs the denominator either way.
+	r.Jumps.Control = jumpEntry(luagen.ModuleJumps{})
+	r.Jumps.Data = jumpEntry(luagen.ModuleJumps{})
 	return r
 }
 

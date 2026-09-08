@@ -298,6 +298,10 @@ The Rust side of the shared-crate pattern is the same shape and is unverified he
 
 A data stage is usually a few hundred straight-line prototype definitions, and if you split them across section functions for readability the optimizer will inline those sections back into one. Past a certain size that produces a function Lua cannot parse, because a single jump inside it exceeds what Lua can encode. Packaging catches it and names the function, but the error is easiest to avoid up front: put `//go:noinline` (Go) or `#[inline(never)]` (Rust) on each section function. This is the guest shape most likely to reach that limit; see [Limits a generated guest can reach](lua-limits.md).
 
+An over-long jump is relayed rather than refused, so a large data guest usually packages without saying anything, and the number worth watching is not the jump. It is **block room**: how much of one relay hop is left over the longest straight-line run that sits inside a single `if` body or loop body. A station in the relay's ladder is a label, and a label only goes at the function's own body level, so a nested run longer than one hop is what the relay cannot break up. Packaging prints the distance under the data module's own line and `--report` carries it as `jumps.data.block_room_bytes`.
+
+Two things follow for a data guest that is getting large. A long straight-line run of `Extend` calls at the top level of a section function is free at any size, because it has a statement boundary every few bytes. The same run wrapped in one loop or one `if` is what eventually stops packaging, so keep the branch or the loop around the small part rather than around the section.
+
 ## Strings are bytes
 
 A Lua string is an arbitrary byte sequence, and so is every string that crosses this library: a stored setting value, a prototype field another mod wrote, a path element. **They cross byte-exact in both directions and the library never rewrites one.** That matters because the engine carries arbitrary bytes through: measured on Factorio 2.0.77, a startup setting whose stored value holds invalid UTF-8 or control characters arrives at the data stage unchanged.

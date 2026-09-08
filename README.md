@@ -136,7 +136,7 @@ Documentation for mod authors lives under [`docs/`](docs/):
 | [`docs/memory.md`](docs/memory.md) | guest memory, the garbage collector and why Rust has one, the tuning knobs, the leaking opt-out, `--persist`, and migrating a recompiled guest |
 | [`docs/factorio-api.md`](docs/factorio-api.md) | calling the API: handles, events, filters and field masks, commands and remote interfaces, `defines`, and the version axes |
 | [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` on declared or on player-chosen settings |
-| [`docs/lua-limits.md`](docs/lua-limits.md) | the two Lua limits a generated guest can reach, what each packaging error means, and the `//go:noinline` / `#[inline(never)]` remedy |
+| [`docs/lua-limits.md`](docs/lua-limits.md) | the two Lua limits a generated guest can reach, the relay that breaks a too-long jump into hops before anything is refused and the one condition it cannot get past, what each packaging error means, the `//go:noinline` / `#[inline(never)]` remedy, and the distance every packaging prints on stdout and carries in `--report`'s `jumps` object |
 | [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod, and running it on settings a player chose |
 | [`docs/library-parity.md`](docs/library-parity.md) | keeping a two-language guest library honest: the transcript-comparison recipe and the committed-golden pin |
 | [`docs/debugging.md`](docs/debugging.md) | making a guest say what it is doing: the log, `fk.LastError`, `Value.Dump`, the line builder, and driving a packaged mod under the Lua oracle |

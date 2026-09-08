@@ -231,6 +231,20 @@ func EmitModuleWith(m *ir.Module, opts Options) (string, error) {
 // EmitModuleWith has some seventy call sites and almost none of them wants an
 // answer to this question.
 func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
+	src, spans, _, err := EmitModuleJumps(m, opts)
+	return src, spans, err
+}
+
+// EmitModuleJumps is EmitModuleSpans plus what Lua's jump limit cost this
+// module: the widest span in it, what the relay did about it, and how much room
+// the relay's own precondition has left. See funclimit.go for what each number
+// is; `fklua mod --report` is the consumer this exists for.
+//
+// A THIRD ENTRY POINT RATHER THAN A WIDER SIGNATURE, for the reason
+// EmitModuleSpans is a second one: the chunk is identical either way, the facts
+// are a byproduct of the walk that already runs the relay, and almost none of
+// EmitModuleWith's call sites wants an answer to this question.
+func EmitModuleJumps(m *ir.Module, opts Options) (string, []FuncSpan, ModuleJumps, error) {
 	b := &builder{opts: opts, opt: opts.Opt, plans: map[uint32]*analysis.Spill{}}
 	for _, f := range m.Funcs {
 		if f.Unsupported != nil {
@@ -240,7 +254,7 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 			b.plans[f.Index] = sp
 			b.spilled = true
 		} else if f.NumSlots+1 > ir.MaxSlots {
-			return "", nil, &ir.TooManySlotsError{
+			return "", nil, ModuleJumps{}, &ir.TooManySlotsError{
 				Func: f.Name, Needed: f.NumSlots, Max: ir.MaxSlots,
 				Params: len(f.Params), Locals: len(f.Locals), MaxStack: f.MaxStack,
 			}
@@ -270,7 +284,7 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 	emitFrameStack(b)
 	emitImports(b, m)
 	if err := emitModuleState(b, m); err != nil {
-		return "", nil, err
+		return "", nil, ModuleJumps{}, err
 	}
 	emitBranchTables(b, m)
 	emitUpvalueDecls(b, m)
@@ -291,7 +305,7 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 	for _, f := range m.Funcs {
 		start := b.sb.Len()
 		if err := emitFunc(b, f); err != nil {
-			return "", nil, err
+			return "", nil, ModuleJumps{}, err
 		}
 		spans = append(spans, emitted{name: f.Name, index: f.Index, start: start, end: b.sb.Len()})
 		b.blank()
@@ -385,7 +399,7 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 
 	src := b.sb.String()
 	if err := checkChunkLocals(src, m); err != nil {
-		return "", nil, err
+		return "", nil, ModuleJumps{}, err
 	}
 	// Each function is measured against Lua's sBx limit, and one that is over it
 	// has its jump RELAYED through a ladder of trampolines before anything is
@@ -403,6 +417,9 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 	// and a rewrite touches only bytes the cursor has not reached yet -- so the
 	// whole map costs one pass over the chunk.
 	out := make([]FuncSpan, 0, len(spans))
+	// The jump facts ride the same walk. Relayed is [] and never nil because it
+	// leaves this package as a report field, where a list is [] and never null.
+	jumps := ModuleJumps{Relayed: []FuncJumps{}}
 	delta := 0
 	cursor, line := 0, 1
 	advance := func(to int) int {
@@ -417,9 +434,37 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 	for _, e := range spans {
 		start, end := e.start+delta, e.end+delta
 		body := src[start:end]
-		fixed, err := relayOrRefuse(e.name, body)
+		fixed, f, err := relayOrRefuse(e.name, body)
+		// The facts are recorded BEFORE the error is returned, and the refused
+		// function's own row is the one a caller most needs: a refusal is when
+		// the block measure stops being a headroom figure and becomes the
+		// diagnosis. The walk stops there, so on a refusal these facts cover the
+		// module up to and including the function that was refused.
+		jumps.Funcs++
+		if f.SpanBytes > jumps.Widest.SpanBytes {
+			jumps.Widest = f
+		}
+		if f.AfterBytes > jumps.AfterBytes {
+			jumps.AfterBytes = f.AfterBytes
+		}
+		if f.Stations > 0 {
+			jumps.Stations += f.Stations
+			jumps.Relayed = append(jumps.Relayed, f)
+		}
 		if err != nil {
-			return "", nil, err
+			// AND THE REFUSED FUNCTION'S ROW REPLACES THE WIDEST ONE, whatever
+			// its span. "Widest" is the right function to report while the
+			// module packages: it is the one nearest Lua's wall and the one an
+			// author steers by. It is the wrong one here, because the widest
+			// function and the refused one need not be the same -- the relay
+			// carries each label independently, so a 1.1 MB body-level span is
+			// carried while a 990 KB one inside a loop body is not -- and a
+			// refusal that reported the carried function's row would quote a
+			// comfortable block room for a build that had just stopped. On a
+			// refusal every number in this row describes ONE function, the one
+			// the build failed on.
+			jumps.Widest = f
+			return "", nil, jumps, err
 		}
 		if fixed != body {
 			src = src[:start] + fixed + src[end:]
@@ -432,7 +477,7 @@ func EmitModuleSpans(m *ir.Module, opts Options) (string, []FuncSpan, error) {
 		last := advance(end - 1)
 		out = append(out, FuncSpan{Name: e.name, Index: e.index, Start: first, End: last})
 	}
-	return src, out, nil
+	return src, out, jumps, nil
 }
 
 // maxChunkLocals is Lua's per-function local limit, which a chunk is subject to

@@ -112,9 +112,15 @@ const luaMinBytesPerInstruction = 5
 var maxJumpSpanBytes = luaMaxJumpInstructions * luaMinBytesPerInstruction
 
 // funcSpan is the widest goto-to-label distance in one emitted function.
+//
+// It carries the two ENDS as well as the distance, because the relay's own
+// precondition is measured over that interval and nothing else: see relayPlan,
+// which is the one walk the relay and the measurement share.
 type funcSpan struct {
 	bytes int    // the distance, in bytes of emitted Lua
 	label string // the label the jump crosses to, for the diagnostic
+	from  int    // the byte offset of the line the goto is on
+	to    int    // the byte offset of the label it resolves to
 }
 
 // maxJumpSpan reports the widest distance between a `goto L<n>` and its
@@ -207,7 +213,7 @@ func spanOver(lines []luaLine, labels map[string]int, chain map[string]string) f
 			d = -d
 		}
 		if d > worst.bytes {
-			worst = funcSpan{bytes: d, label: final}
+			worst = funcSpan{bytes: d, label: final, from: l.off, to: at}
 		}
 	}
 	return worst
@@ -344,16 +350,29 @@ func gotoOn(line string) (string, bool) {
 	return rest, true
 }
 
-// checkJumpSpan refuses a function whose widest jump would not fit in Lua's
-// sBx field.
+// JumpSpanError is what a refusal for the jump limit is, as a type.
 //
-// The remedy names the OPTIMIZER rather than the author, because that is where
-// the cause is. Nobody writes a function with a hundred thousand instructions
-// in it; LLVM at -opt=2 inlines a whole program's worth of sections into one,
-// and the fix is to tell it not to at the boundaries the author already thinks
-// of as sections. Measured on the reproduction: twenty section functions of
-// sixteen prototypes each are inlined into one whose jump crosses 1,556,741
-// bytes, and the same source with //go:noinline on those twenty packages.
+// Typed rather than an fmt.Errorf string because relayOrRefuse has to tell
+// "this function would have been refused, try the relay" apart from any other
+// failure, and a caller further out may want the same distinction without
+// matching on prose. The message is the whole of the user-facing diagnostic and
+// its wording is asserted by TestAnOverlongJumpSpanIsRefusedAtPackageTime and by
+// TestASpanInsideOneBlockIsRefusedWithTheDistanceThatRefusedIt.
+//
+// WHAT THE MESSAGE LEADS WITH CHANGED WHEN THE RELAY DID. Before the relay the
+// only thing to say was the span, and the remedy named the OPTIMIZER rather than
+// the author because that is where the cause is: nobody writes a function with a
+// hundred thousand instructions in it, LLVM at -opt=2 inlines a whole program's
+// worth of sections into one, and the fix is to tell it not to at the boundaries
+// the author already thinks of as sections. Measured on the reproduction: twenty
+// section functions of sixteen prototypes each are inlined into one whose jump
+// crosses 1,556,741 bytes, and the same source with //go:noinline on those
+// twenty packages. SINCE THE RELAY, the span alone is no longer the reason
+// anything is refused -- the relay breaks up a span, and what it cannot break up
+// is a BLOCK. So the message leads with Block against Hop, and the remedy has a
+// second half the first version could not have: nesting is what costs the
+// author, not length, and a long straight-line run at body level is fine at any
+// size.
 //
 // THE SIZE CLAIM IS ATTRIBUTED AND NOT GENERAL, which is why the message says
 // so in those words. The downstream guest that found this reported its module
@@ -362,32 +381,18 @@ func gotoOn(line string) (string, bool) {
 // 1,694,449 split, i.e. 0.2% the other way. Both are real; the win is a
 // property of a particular guest's shape rather than a rule, and an error
 // message that promised it would be wrong most of the time.
-func checkJumpSpan(name string, src string) error {
-	// A span cannot be longer than the text it sits in, so a function shorter
-	// than the threshold needs no scan at all. That is every function in every
-	// guest this repo has ever emitted -- the widest is 826 KB of chunk with a
-	// 249 KB span in it -- which is what keeps this off the emitter's cost.
-	if len(src) <= maxJumpSpanBytes {
-		return nil
-	}
-	sp := maxJumpSpan(src)
-	if sp.bytes <= maxJumpSpanBytes {
-		return nil
-	}
-	return &JumpSpanError{Func: name, Bytes: sp.bytes, Label: sp.label}
-}
-
-// JumpSpanError is what a refusal for the jump limit is, as a type.
-//
-// Typed rather than an fmt.Errorf string because relayOrRefuse has to tell "this
-// function would have been refused, try the relay" apart from any other failure,
-// and a caller further out may want the same distinction without matching on
-// prose. The message is the whole of the user-facing diagnostic and its wording
-// is asserted by TestAnOverlongJumpSpanIsRefusedAtPackageTime.
 type JumpSpanError struct {
 	Func  string // the emitted function's name
 	Bytes int    // the widest span in it, in bytes of generated Lua
 	Label string // the label that span crosses to
+	// Block is the longest run inside that span with no body-level statement
+	// boundary in it, and Hop is how far one hop of the ladder may reach. THESE
+	// TWO ARE WHAT ACTUALLY REFUSED THE FUNCTION: the span being over the limit
+	// is why the relay was asked, and Block > Hop is why it could not answer.
+	// Both are in bytes of generated Lua; see relayPlan for how Block is
+	// defined, and reportJumps for where an author reads it without a refusal.
+	Block int
+	Hop   int
 }
 
 func (e *JumpSpanError) Error() string {
@@ -398,14 +403,23 @@ func (e *JumpSpanError) Error() string {
 			"instructions. Lua reports this at the player's game start as "+
 			"\"control structure too long\", pointing into generated Lua and naming "+
 			"nothing in your source. The emitter already tried to RELAY that jump "+
-			"through a ladder of trampolines and could not: the whole span sits "+
-			"inside one basic block, so there is nowhere at body level to put one. "+
-			"Split the function: //go:noinline in Go, #[inline(never)] in Rust, on "+
-			"the boundaries you already think of as sections. The optimizer inlined "+
-			"a whole program into one function, and it is that concentration rather "+
-			"than anything you wrote that reaches the limit. (One guest also came "+
-			"out 27%% smaller for it; that is a property of its shape, not a rule.)",
-		e.Func, e.Bytes, maxJumpSpanBytes, luaMaxJumpInstructions)
+			"through a ladder of trampolines and could not, and the number that "+
+			"stopped it is not the span: a trampoline is a label, a label can only "+
+			"go at the function's own body level, one hop of the ladder covers %d "+
+			"bytes, and the longest run inside this span with no body-level "+
+			"statement boundary in it is %d bytes. That run is straight-line code "+
+			"nested inside one block (an `if` body, a loop body), where a body-level "+
+			"label cannot go. So keep a long straight-line run at the function's own "+
+			"body level rather than nested inside one, and split the sections you "+
+			"already think of as sections so that no single function carries a block "+
+			"longer than a hop: //go:noinline in Go, #[inline(never)] in Rust, on "+
+			"those boundaries. `fklua mod --report FILE` prints this distance for "+
+			"every module it packages, as jumps.<module>.widest_block_bytes, so you "+
+			"can watch it before it refuses. The optimizer inlined a whole program "+
+			"into one function, and it is that concentration rather than anything "+
+			"you wrote that reaches the limit. (One guest also came out 27%% smaller "+
+			"for it; that is a property of its shape, not a rule.)",
+		e.Func, e.Bytes, maxJumpSpanBytes, luaMaxJumpInstructions, e.Hop, e.Block)
 }
 
 // ============================================================================
@@ -492,52 +506,237 @@ type relayStation struct {
 	to    string // the label this hop jumps to
 }
 
-// relayOrRefuse is the shipping path: accept, or relay and accept, or refuse.
+// FuncJumps is what one emitted function's widest jump cost, measured on both
+// sides of the relay. It is what `fklua mod --report` reports and what the stdout
+// line names, and every field is BYTES OF EMITTED LUA except Stations.
 //
-// The relay runs only on a function the check has already refused, so a guest
-// under the threshold -- which is every guest this repo emits -- pays exactly
-// what it paid before: one length comparison. TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay
-// asserts the stronger form, that the transform is a byte-for-byte no-op on the
-// whole corpus even when called directly.
-func relayOrRefuse(name, src string) (string, error) {
-	err := checkJumpSpan(name, src)
-	if err == nil {
-		return src, nil
-	}
-	if out, ok := relayJumps(src); ok {
-		if checkJumpSpan(name, out) == nil {
-			return out, nil
-		}
-	}
-	return "", err
+// The four numbers answer four different questions, and conflating any two of
+// them is the mistake this type exists to stop. SpanBytes is how far the widest
+// jump in the function reaches BEFORE anything is done about it, and it is the
+// number that says whether the guest is anywhere near Lua's wall. AfterBytes is
+// what is left once the ladder is in place, and it is NOT a measure of the
+// guest: a relayed function reads about one hop whatever its size, because a hop
+// is what the ladder was built to. Stations is what the relay spent. BlockBytes
+// is the RELAY'S OWN CEILING, and it is the one a large data guest actually
+// meets -- see relayPlan, where it is defined.
+type FuncJumps struct {
+	// Func is the emitted function's name, as the diagnostic would name it.
+	Func string
+	// SpanBytes is the widest goto-to-label distance in the function before any
+	// relay ran, and Label is the label that jump resolves to (through a chain,
+	// if there is one).
+	SpanBytes int
+	Label     string
+	// Stations is how many trampolines the relay inserted in this function.
+	Stations int
+	// AfterBytes is the widest distance left afterwards. With no relay it equals
+	// SpanBytes.
+	AfterBytes int
+	// BlockBytes is the longest run with no body-level statement boundary in
+	// it, taken inside THE SPAN THIS FUNCTION'S FATE TURNS ON: the distance one
+	// hop has to cover, and the number the relay refuses on. RoomBytes is what
+	// is left of a hop over it, and it goes negative exactly when the relay
+	// cannot help.
+	//
+	// WHICH SPAN THAT IS, exactly, because it is not always the widest one.
+	// While the relay can still carry the function it is the widest span, which
+	// is the one that will cross the threshold first and so the one an author
+	// steers by. Once some span cannot be carried it is THAT span -- the widest
+	// unrelayable one -- because the function is refused for it and a headroom
+	// reading taken somewhere else would say the relay had room on a function it
+	// had just given up on. SpanBytes and Label are the widest span either way,
+	// so on a refusal these two need not describe the same jump as those two;
+	// the refusal message names the one they came from. See relayOrRefuse.
+	BlockBytes int
+	RoomBytes  int
 }
 
-// relayJumps breaks every over-long jump in one emitted function into hops.
+// ModuleJumps is one module's jump facts, aggregated over its functions.
 //
-// It reports whether it changed anything. A false return is not an error: it
-// means either that nothing was over the threshold, or that the span could not
-// be relayed -- a single basic block longer than the limit, where there is no
-// body-level statement between the goto and its label to hang a trampoline on.
-// The check is the backstop for that case and says so in its message.
+// It is produced by the same walk that runs the relay, so the numbers a report
+// carries are the ones the emitter decided on rather than a re-derivation.
+type ModuleJumps struct {
+	// Funcs is how many emitted functions were measured. Zero means the module
+	// had none, which is a different statement from "none had a jump".
+	Funcs int
+	// Widest is the function with the widest PRE-relay span, carrying all of its
+	// own numbers. It is the zero value for a module with no jump anywhere, and
+	// Func is "" there. ON A REFUSAL it is the REFUSED function instead,
+	// whatever its span: the walk stops at that function, the row is then the
+	// diagnosis rather than a headroom reading, and a row assembled from the
+	// widest function would quote room the relay does not have. See
+	// measureAndRelay in luagen.go.
+	Widest FuncJumps
+	// AfterBytes is the widest span left ANYWHERE in the module once every
+	// ladder is in place. It is a maximum over functions and so need not come
+	// from Widest, though on every guest measured so far it does.
+	AfterBytes int
+	// Stations is the module's total, over every function the relay carried.
+	Stations int
+	// Relayed is every function the relay carried, in emission order. Empty, and
+	// never nil, when it carried none.
+	Relayed []FuncJumps
+}
+
+// MaxJumpSpanBytes is the span at which a function is refused, in bytes of
+// emitted Lua, so a caller can print a measured distance beside the limit it is
+// a distance against rather than restating the constant.
+func MaxJumpSpanBytes() int { return maxJumpSpanBytes }
+
+// RelayHopBytes is how far one hop of the relay's ladder may reach. It is the
+// distance a station has to be found within, so it is the denominator the block
+// measure is read against and not a second version of the limit.
+func RelayHopBytes() int { return relayHopBytes() }
+
+// relayOrRefuse is the shipping path: accept, or relay and accept, or refuse.
 //
-// DETERMINISM. The transform is a pure function of the emitted text: labels are
-// visited in order of first appearance rather than in map order, stations are
-// planned by a greedy walk over line offsets, and the counter is per function.
-// Two builds of the same module produce the same bytes.
-func relayJumps(src string) (string, bool) {
+// Since the report it feeds, it MEASURES EVERY FUNCTION rather than only those
+// over the threshold. The early-out it used to take -- a span cannot be longer
+// than the text it sits in, so a function shorter than the threshold needs no
+// scan -- was what kept the check off the emitter's cost, and dropping it is
+// what makes a headroom number exist at all: a limit that is only ever reported
+// once it has been crossed is one nobody can steer by, which is what the first
+// library on this substrate reported. THE COST IS MEASURED, not assumed:
+// `fklua mod --data-module` over the two example data guests of FkRecipes, seven
+// runs each, median of the wall clock, before against after:
+//
+//	Go   3,915,886 bytes of Lua, 147 functions   0.47 s -> 0.48 s (min 0.46 -> 0.48)
+//	Rust 3,655,976 bytes of Lua, 254 functions   0.36 s -> 0.36 s (min 0.34 -> 0.35)
+//
+// One to two hundredths of a second, and an earlier round of the same shape on
+// a busier machine read 0.53 -> 0.54 and 0.35 -> 0.37, so the DELTA is stable
+// where the absolute figures are not. That is affordable for a number an author
+// can steer by before their mod stops loading, so every function is scanned and
+// none is exempt.
+//
+// TestEveryGuestThisRepoEmitsIsUnchangedByTheRelay asserts the transform itself
+// is still a byte-for-byte no-op on the whole corpus.
+//
+// ONE WALK, and the measurement is not a second opinion about it: the plan and
+// the block both come out of relayPlan, so a number an author reads and the
+// decision the emitter took cannot disagree. The facts come back on the refusal
+// path too, because a refusal is when the block stops being a headroom figure
+// and becomes the diagnosis.
+func relayOrRefuse(name, src string) (string, FuncJumps, error) {
 	lines := scanLuaLines(src)
 	labels, chain := labelIndex(lines)
-	if spanOver(lines, labels, chain).bytes <= maxJumpSpanBytes {
-		return src, false
+	sp := spanOver(lines, labels, chain)
+
+	f := FuncJumps{Func: name, SpanBytes: sp.bytes, Label: sp.label,
+		AfterBytes: sp.bytes}
+	hop := relayHopBytes()
+	if sp.bytes > 0 {
+		// Bounded to the widest span, which is the only interval the block
+		// measure is about: a point outside it can relay nothing.
+		_, block, _ := relayPlan(insertionPointsIn(lines, sp.from, sp.to), sp.from, sp.to, hop)
+		f.BlockBytes = block
+		f.RoomBytes = hop - block
+	}
+	if sp.bytes <= maxJumpSpanBytes {
+		return src, f, nil
 	}
 
-	pts := insertionPoints(lines)
-	if len(pts) == 0 {
-		return src, false
+	if out, n := relayJumps(src); n > 0 {
+		if post := maxJumpSpan(out); post.bytes <= maxJumpSpanBytes {
+			f.Stations, f.AfterBytes = n, post.bytes
+			return out, f, nil
+		}
 	}
 
-	// Every goto, grouped by the label it really reaches, in order of first
-	// appearance so the plan does not depend on Go's map iteration order.
+	// THE SPAN THAT REFUSED IS NOT ALWAYS THE WIDEST ONE, and quoting the widest
+	// one anyway is a defect that reads as correct: relayJumps plans every label
+	// independently, so a function whose widest span is carried can still be
+	// refused for a NARROWER one, and a message built from the widest then names
+	// a label that was relayed and a block that fits in a hop -- contradicting
+	// every sentence this file writes about the block being the thing that
+	// refuses. So the refusal is re-derived from the spans the relay actually
+	// failed on, and the block measure in the facts moves with it.
+	if bad, block, found := worstUnrelayableSpan(lines, labels, chain, hop); found {
+		sp = bad
+		f.BlockBytes, f.RoomBytes = block, hop-block
+	}
+	return "", f, &JumpSpanError{
+		Func: name, Bytes: sp.bytes, Label: sp.label,
+		Block: f.BlockBytes, Hop: hop,
+	}
+}
+
+// worstUnrelayableSpan is the widest over-threshold span in a function that the
+// relay cannot carry, with the block that is why.
+//
+// It exists because relayOrRefuse's error used to be built from spanOver's
+// widest span, which is the span the RELAY is asked about first and not
+// necessarily the one it fails on: relayJumps plans each label on its own, so a
+// 1.2 MB body-level span can be carried while a 715 KB one inside a `while` body
+// cannot, and the refusal named the first. Every number in that message was then
+// about a jump the emitter had successfully relayed, block and room included.
+//
+// THE UNIT IS THE ONE RELAYJUMPS PLANS: a label, and one direction, taken from
+// its furthest goto on that side -- the same grouping, through the same
+// gotosByLabel, so a span this refuses on is a span the relay really tried. A
+// candidate is unrelayable when relayPlan's walk fails, and by the theorem in
+// relayPlan that is exactly when its block is longer than a hop, so the room
+// this reports is negative on every refusal it explains.
+//
+// A LABEL BELOW BODY LEVEL NEEDS NO SEPARATE ARM, which is worth writing down
+// because relayJumps has one. Lua forbids a goto that ENTERS a block, so every
+// goto reaching a label at depth > 1 is inside that same block and so is every
+// line between them; the span therefore contains no depth-1 insertion point at
+// all, its block is the whole span, and the walk fails on it like any other.
+//
+// found is false when no candidate is over the threshold and unrelayable, which
+// is the residue: a relay whose own inserted bytes pushed a span that was just
+// under the threshold over it. The caller keeps the widest span's numbers there.
+func worstUnrelayableSpan(lines []luaLine, labels map[string]int,
+	chain map[string]string, hop int) (worst funcSpan, block int, found bool) {
+	byLabel, order := gotosByLabel(lines, labels, chain)
+	for _, name := range order {
+		at := labels[name]
+		// The furthest goto on each side, which is the one the ladder for that
+		// side is planned from.
+		fwd, back := -1, -1
+		for _, i := range byLabel[name] {
+			off := lines[i].off
+			switch {
+			case off >= at:
+				if back < 0 || off > back {
+					back = off
+				}
+			case fwd < 0 || off < fwd:
+				fwd = off
+			}
+		}
+		for _, from := range [2]int{fwd, back} {
+			if from < 0 {
+				continue
+			}
+			d := at - from
+			if d < 0 {
+				d = -d
+			}
+			if d <= maxJumpSpanBytes || d <= worst.bytes {
+				continue
+			}
+			_, b, ok := relayPlan(insertionPointsIn(lines, from, at), from, at, hop)
+			if ok {
+				continue
+			}
+			worst = funcSpan{bytes: d, label: name, from: from, to: at}
+			block, found = b, true
+		}
+	}
+	return worst, block, found
+}
+
+// gotosByLabel groups every goto in a function by the label it really reaches,
+// following label chains, and returns the labels in order of FIRST APPEARANCE.
+//
+// The order is the determinism guarantee: Go's map iteration is randomised per
+// run, and the relay's plan, its trampoline numbering and the span a refusal
+// names are all decided by walking this. Two builds of one module produce the
+// same bytes and the same message because of it.
+func gotosByLabel(lines []luaLine, labels map[string]int,
+	chain map[string]string) (map[string][]int, []string) {
 	byLabel := map[string][]int{}
 	var order []string
 	for i, l := range lines {
@@ -554,6 +753,38 @@ func relayJumps(src string) (string, bool) {
 		}
 		byLabel[final] = append(byLabel[final], i)
 	}
+	return byLabel, order
+}
+
+// relayJumps breaks every over-long jump in one emitted function into hops.
+//
+// It reports HOW MANY stations it inserted, and zero is not an error: it means
+// either that nothing was over the threshold, or that the span could not be
+// relayed -- a run longer than one hop with no body-level statement in it to
+// hang a trampoline on, which is what relayPlan measures and refuses. The check
+// is the backstop for that case and its message carries the two numbers.
+//
+// DETERMINISM. The transform is a pure function of the emitted text: labels are
+// visited in order of first appearance rather than in map order, stations are
+// planned by a greedy walk over line offsets, and the counter is per function.
+// Two builds of the same module produce the same bytes.
+func relayJumps(src string) (string, int) {
+	lines := scanLuaLines(src)
+	labels, chain := labelIndex(lines)
+	if spanOver(lines, labels, chain).bytes <= maxJumpSpanBytes {
+		return src, 0
+	}
+
+	pts := insertionPoints(lines)
+	if len(pts) == 0 {
+		return src, 0
+	}
+
+	// Every goto, grouped by the label it really reaches, in order of first
+	// appearance so the plan does not depend on Go's map iteration order. The
+	// grouping is shared with worstUnrelayableSpan, which is what makes the span
+	// a refusal names a span this loop really tried.
+	byLabel, order := gotosByLabel(lines, labels, chain)
 
 	hop := relayHopBytes()
 	next := 0 // the per-function trampoline counter
@@ -590,39 +821,27 @@ func relayJumps(src string) (string, bool) {
 					first = lines[i].off
 				}
 			}
-			if at-first > hop {
-				var plan []int
-				cur, ok := first, true
-				for at-cur > hop {
-					p := lastPointIn(pts, cur+1, cur+hop)
-					if p < 0 {
-						ok = false
-						break
+			plan, _, ok := relayPlan(pts, first, at, hop)
+			if ok && len(plan) > 0 {
+				base := next
+				next += len(plan)
+				for k, p := range plan {
+					to := name
+					if k+1 < len(plan) {
+						to = relayTrampolineName(base + k + 1)
 					}
-					plan = append(plan, p)
-					cur = p
+					stations = append(stations, relayStation{
+						line: lineAt(lines, p), off: p,
+						label: relayTrampolineName(base + k),
+						skip:  relaySkipName(base + k),
+						to:    to,
+					})
 				}
-				if ok {
-					base := next
-					next += len(plan)
+				for _, i := range fwd {
 					for k, p := range plan {
-						to := name
-						if k+1 < len(plan) {
-							to = relayTrampolineName(base + k + 1)
-						}
-						stations = append(stations, relayStation{
-							line: lineAt(lines, p), off: p,
-							label: relayTrampolineName(base + k),
-							skip:  relaySkipName(base + k),
-							to:    to,
-						})
-					}
-					for _, i := range fwd {
-						for k, p := range plan {
-							if p > lines[i].off {
-								rewrite[i] = relayTrampolineName(base + k)
-								break
-							}
+						if p > lines[i].off {
+							rewrite[i] = relayTrampolineName(base + k)
+							break
 						}
 					}
 				}
@@ -639,42 +858,30 @@ func relayJumps(src string) (string, bool) {
 					last = lines[i].off
 				}
 			}
-			if last-at > hop {
-				var plan []int
-				cur, ok := last, true
-				for cur-at > hop {
-					p := firstPointIn(pts, cur-hop, cur-1)
-					if p < 0 || p <= at {
-						ok = false
-						break
+			plan, _, ok := relayPlan(pts, last, at, hop)
+			if ok && len(plan) > 0 {
+				base := next
+				next += len(plan)
+				for k, p := range plan {
+					to := name
+					if k+1 < len(plan) {
+						to = relayTrampolineName(base + k + 1)
 					}
-					plan = append(plan, p)
-					cur = p
+					stations = append(stations, relayStation{
+						line: lineAt(lines, p), off: p,
+						label: relayTrampolineName(base + k),
+						skip:  relaySkipName(base + k),
+						to:    to,
+					})
 				}
-				if ok {
-					base := next
-					next += len(plan)
+				// plan runs from the goto BACK towards the label, so it is
+				// in decreasing offset order and the nearest station above
+				// a given goto is the first entry below it.
+				for _, i := range back {
 					for k, p := range plan {
-						to := name
-						if k+1 < len(plan) {
-							to = relayTrampolineName(base + k + 1)
-						}
-						stations = append(stations, relayStation{
-							line: lineAt(lines, p), off: p,
-							label: relayTrampolineName(base + k),
-							skip:  relaySkipName(base + k),
-							to:    to,
-						})
-					}
-					// plan runs from the goto BACK towards the label, so it is
-					// in decreasing offset order and the nearest station above
-					// a given goto is the first entry below it.
-					for _, i := range back {
-						for k, p := range plan {
-							if p < lines[i].off {
-								rewrite[i] = relayTrampolineName(base + k)
-								break
-							}
+						if p < lines[i].off {
+							rewrite[i] = relayTrampolineName(base + k)
+							break
 						}
 					}
 				}
@@ -683,7 +890,7 @@ func relayJumps(src string) (string, bool) {
 	}
 
 	if len(stations) == 0 {
-		return src, false
+		return src, 0
 	}
 
 	at := map[int][]relayStation{}
@@ -707,7 +914,96 @@ func relayJumps(src string) (string, bool) {
 		}
 		b.WriteString(raw)
 	}
-	return b.String(), true
+	return b.String(), len(stations)
+}
+
+// relayPlan is the greedy station plan for ONE span, and the measurement of how
+// much room that plan had. It is the whole of the relay's decision procedure and
+// the whole of the number an author reads, in one function, so the two cannot
+// disagree about what the ceiling is.
+//
+// THE PLAN. Walk from the goto towards the label, and at every step take the
+// FURTHEST insertion point one hop can reach; stop when the label itself is
+// within a hop. `from` may be either side of `to` -- Lua's own test is
+// abs(offset), so a loop back edge gets the same walk with the sign flipped.
+//
+// THE BLOCK MEASURE, defined exactly. Take the insertion points STRICTLY inside
+// the span and cut the span at each of them. The pieces are the run from the
+// goto to the first point, the runs between consecutive points, and the run from
+// the last point to the label; the widest of those pieces is the WIDEST BLOCK.
+// A span with no insertion point inside it is one piece, so its block is the
+// whole span. Strictly inside, because a station AT either end relays nothing:
+// the goto is already there and the label is where the jump lands.
+//
+// AND THE TWO ARE THE SAME FACT. The walk succeeds if and only if the widest
+// block is at most one hop. If every piece fits in a hop then every step finds a
+// point (the first piece bounds the first step, and from a point p the next
+// point is at most one piece away), and if some piece p_i..p_{i+1} is longer
+// than a hop then the walk cannot pass p_i -- nothing in (p_i, p_i + hop] exists
+// -- and stalls there with the label still further than a hop away. That is why
+// the block is the right thing to report: it is not a proxy for the refusal, it
+// IS the refusal, seen before it happens and with a distance attached.
+//
+// ok is returned from the walk rather than from the comparison, so the two
+// halves stay independently derived and TestTheBlockMeasureIsTheRelaysOwnCeiling
+// can require them to agree.
+//
+// PTS MUST BE SORTED ASCENDING. Nothing here checks it and everything here
+// depends on it: the `inside` filter stops at the first point past the span
+// rather than skipping it, and lastPointIn and firstPointIn both walk in order
+// and give up at the first point past their window, so an unsorted set would be
+// silently planned against a prefix of itself and would report a block measured
+// over that prefix. It is met by CONSTRUCTION and not by contract: every caller
+// gets its points from collectInsertionPoints, which appends `l.off` while
+// walking the lines in order at line 1079 of this file, and line offsets
+// ascend. TestTheBlockMeasureIsTheRelaysOwnCeiling passes only sorted sets for
+// the same reason.
+func relayPlan(pts []int, from, to, hop int) (plan []int, block int, ok bool) {
+	lo, hi := from, to
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	var inside []int
+	for _, p := range pts {
+		if p <= lo {
+			continue
+		}
+		if p >= hi {
+			break
+		}
+		inside = append(inside, p)
+	}
+	prev := lo
+	for _, p := range inside {
+		if p-prev > block {
+			block = p - prev
+		}
+		prev = p
+	}
+	if hi-prev > block {
+		block = hi - prev
+	}
+
+	if from < to {
+		for cur := from; to-cur > hop; {
+			p := lastPointIn(inside, cur+1, cur+hop)
+			if p < 0 {
+				return nil, block, false
+			}
+			plan = append(plan, p)
+			cur = p
+		}
+	} else {
+		for cur := from; cur-to > hop; {
+			p := firstPointIn(inside, cur-hop, cur-1)
+			if p < 0 {
+				return nil, block, false
+			}
+			plan = append(plan, p)
+			cur = p
+		}
+	}
+	return plan, block, true
 }
 
 // insertionPoints is every byte offset a trampoline may be inserted before.
@@ -734,6 +1030,31 @@ func relayJumps(src string) (string, bool) {
 // there is not one body-level `local` after a label in any function, so the
 // prologue really is one run and everything after it is fair game.
 func insertionPoints(lines []luaLine) []int {
+	return collectInsertionPoints(lines, 0, 1<<62)
+}
+
+// insertionPointsIn is the same set, restricted to one span.
+//
+// It exists so the block measure costs what the span costs rather than what the
+// function costs: every function is measured now, and a function with a fifty-
+// byte span has no business allocating a point for every statement in it. The
+// PREDICATE is shared with insertionPoints -- collectInsertionPoints is the one
+// definition -- so the measurement cannot recognise a boundary the relay would
+// not, which is the whole reason it is not a second scan.
+func insertionPointsIn(lines []luaLine, from, to int) []int {
+	if from > to {
+		from, to = to, from
+	}
+	return collectInsertionPoints(lines, from, to)
+}
+
+// collectInsertionPoints is the shared body: the prologue rule, then the three
+// per-line conditions, over the lines whose offsets fall in [lo, hi].
+//
+// The prologue is found over the WHOLE function whatever the window, because
+// Invariant B is a statement about the function and not about the window: a
+// point inside the prologue is illegal wherever the span happens to start.
+func collectInsertionPoints(lines []luaLine, lo, hi int) []int {
 	prologue := 0
 	for i, l := range lines {
 		if l.depth == 1 && strings.HasPrefix(l.text, "local ") {
@@ -743,6 +1064,12 @@ func insertionPoints(lines []luaLine) []int {
 	var out []int
 	for i := prologue; i < len(lines); i++ {
 		l := lines[i]
+		if l.off < lo {
+			continue
+		}
+		if l.off > hi {
+			break
+		}
 		if l.depth != 1 || l.text == "" || strings.HasPrefix(l.text, "--") {
 			continue
 		}
