@@ -16,5 +16,24 @@ crate-type = ["rlib"]
 # What it must NOT depend on is `fkapi`. A data stage has no runtime API, and
 # `fklua mod` refuses a data module that imports one -- see
 # internal/factorio/stage.go's CheckDataModule.
-[dependencies]
+#
+# THE DEPENDENCY IS TARGET-GATED, AND THAT IS WHAT MAKES `cargo test -p fkdata`
+# WORK AT ALL, exactly as fkipc/Cargo.toml gates `fkapi` for the same reason:
+# `fk` reaches straight into `core::arch::wasm32`, so a crate that depends on it
+# unconditionally cannot be built for a host target and can have no native test.
+# What is host-testable here is the VALUE MODEL and the byte type -- the half
+# two hand-written implementations get wrong, and the half that has nothing to
+# do with the wire. The wire itself is guest-only by construction: it addresses
+# linear memory with u32, which a 64-bit host pointer does not survive. So:
+#
+#	cargo test -p fkdata                                  # LuaStr and V
+#	cargo build -p fkdata --target wasm32-unknown-unknown  # the real thing
+#
+# -p is load-bearing on the first line: a bare `cargo test` at the workspace
+# root still cannot compile, because `fk` and `fkgc` are still there.
+#
+# NOTHING ABOUT A GUEST BUILD CHANGES. A data guest crate depends on `fk`
+# itself, for the single `#[global_allocator]`, and every guest builds for wasm,
+# where this dependency is present exactly as before.
+[target.'cfg(target_family = "wasm")'.dependencies]
 fk = { path = "../fk" }

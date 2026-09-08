@@ -53,6 +53,22 @@
 // [Keys] is sorted, [Mods] is sorted, and every dictionary a [Get] returns is
 // sorted by key at every nesting level. That is a property of the host shim
 // rather than a rule to follow -- see runtime/lua/fk_data.lua.
+//
+// # Strings are BYTES, and nothing here rewrites one
+//
+// A Lua string is an arbitrary byte sequence, and so is everything that crosses
+// this ABI as a string: a stored setting value the engine hands through
+// unchanged, a prototype field somebody else's mod wrote, a path element. EVERY
+// STRING CROSSES BYTE-EXACT IN BOTH DIRECTIONS, and neither this library nor
+// its Rust twin ever alters one.
+//
+// A Go string is already a byte string, so [V.String] and [Str] are byte-exact
+// by construction and there is nothing here to opt into. What follows from that
+// is the consumer's obligation: a string out of [V.String], [Keys], [Mods] or
+// [ModName] is NOT NECESSARILY VALID UTF-8, so anything that treats one as text
+// -- ranging over runes, lowercasing it, splitting it -- checks first, with
+// utf8.ValidString. The Rust twin cannot make that mistake silently: its V
+// carries a byte type and its string accessor answers an Option.
 package fkdata
 
 import "unsafe"
@@ -193,8 +209,10 @@ type V struct {
 	Tag  Tag
 	Bool bool
 	Num  float64
-	Str  string
-	Arr  []V
+	// Str is BYTES, not text. See the package comment: a Lua string is an
+	// arbitrary byte sequence and this one is byte-exact in both directions.
+	Str string
+	Arr []V
 	// Map is a SLICE of pairs rather than a Go map, for two reasons that both
 	// matter. A V holds slices and so cannot be a Go map key; and Go randomizes
 	// a map's iteration order by construction, which is exactly the per-client
@@ -212,7 +230,12 @@ func Nil() V { return V{Tag: TagNil} }
 // Num is a number.
 func Num(f float64) V { return V{Tag: TagNumber, Num: f} }
 
-// Str is a string.
+// Str is a string, and a string here is BYTES.
+//
+// Whatever bytes s holds are the bytes the engine receives: no validation, no
+// normalisation, no re-encoding. That is what lets a guest carry a value it
+// never inspects -- a stored setting, another mod's prototype field -- straight
+// back out unchanged.
 func Str(s string) V { return V{Tag: TagString, Str: s} }
 
 // Bool is a boolean.
@@ -238,7 +261,18 @@ func (v V) Number() float64 {
 	return 0
 }
 
-// String reads a string value, or "".
+// String reads a string value's BYTES, or "" for anything that is not a string.
+//
+// The bytes are exactly what the engine had: a Lua string is an arbitrary byte
+// sequence, the host shim copies it without looking at it, and a Go string is
+// the same thing, so this is byte-exact by construction. len() is the length the
+// engine wrote, NUL included.
+//
+// IT IS NOT NECESSARILY VALID UTF-8. Carry it, compare it and write it back
+// freely; before treating it as text -- ranging over runes, changing its case,
+// putting it in a message -- check it with utf8.ValidString. The Rust twin's
+// V.string() answers an Option for exactly this reason, and its V.bytes() is
+// this method's byte-exact counterpart.
 func (v V) String() string {
 	if v.Tag == TagString {
 		return v.Str

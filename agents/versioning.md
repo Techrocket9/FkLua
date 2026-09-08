@@ -398,7 +398,7 @@ make test                                    # sdk/go and cargo legs included
 ./bin/fklua spectest --opt=3                 # bindings moved; run the wide net
 ./bin/fklua spectest --opt=3 --gc=collected
 ./bin/fklua spectest --nan=exact --opt=3
-(cd guest/rust && cargo test -p fkipc &&
+(cd guest/rust && cargo test -p fkipc -p fkdata &&
    cargo build --target wasm32-unknown-unknown --workspace)
 ```
 

@@ -122,7 +122,7 @@ jobs:
         run: go run ./cmd/fklua gen-bindings --check
 
       # THE RUST HALF OF fkipc, WHICH RAN IN NOBODY'S GATE UNTIL 2026-08-07.
-      # 68 host-side tests over the wire codec, the link state machine and the
+      # 69 host-side tests over the wire codec, the link state machine and the
       # committed golden testdata/ipc/wire-vectors.txt -- and that golden is
       # the only cross-language pin needing neither a toolchain nor a Factorio,
       # so with this step absent a push checked one of its two readers. It is
@@ -148,6 +148,18 @@ jobs:
       - name: Rust fkipc tests (codec, link state machine, wire golden)
         working-directory: guest/rust
         run: cargo test -p fkipc
+
+      # THE SAME SEAM, ONE CRATE OVER: fkdata's value model and its byte type.
+      # A data-stage string is an arbitrary byte sequence and this is the half
+      # of that contract with no wire in it, so it is testable natively the way
+      # fkipc's state machine is -- fkdata's `fk` dependency is gated under
+      # `cfg(target_family = "wasm")` for exactly that reason and the crate has
+      # no host dependencies at all. The wire itself addresses linear memory
+      # with u32 and is pinned end to end instead, by internal/guest against
+      # both example guests under bin/lua52f.
+      - name: Rust fkdata tests (the data-stage value model and byte type)
+        working-directory: guest/rust
+        run: cargo test -p fkdata
 
       # sdk/go is its OWN MODULE, so `go test ./...` above never reaches it --
       # the same boundary that keeps its wire-vector golden test (the Go-side

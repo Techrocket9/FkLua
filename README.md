@@ -261,7 +261,7 @@ make optbench      # what each -opt level is worth
 make guest         # build, package and run a guest in a real Factorio
 ```
 
-`make test` is the entry point, not `go test ./...`: about thirty tests measure against `bin/lua52f` and skip when it is absent, and `go test` prints nothing for a skip. `make test` builds the oracle first and also runs the modules `go test ./...` does not reach (`sdk/go`, `guest/go`, and `cargo test -p fkipc` under `guest/rust`). The `agents/` directory holds the maintainer design notes: measured decisions, the invariants the emitter and runtime rest on, and the reasons behind them.
+`make test` is the entry point, not `go test ./...`: about thirty tests measure against `bin/lua52f` and skip when it is absent, and `go test` prints nothing for a skip. `make test` builds the oracle first and also runs the modules `go test ./...` does not reach (`sdk/go`, `guest/go`, and `cargo test -p fkipc -p fkdata` under `guest/rust`). The `agents/` directory holds the maintainer design notes: measured decisions, the invariants the emitter and runtime rest on, and the reasons behind them.
 
 | File | Covers |
 |---|---|

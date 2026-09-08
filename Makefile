@@ -35,6 +35,13 @@ all: lua52f
 # target-gated to `cfg(target_family = "wasm")` and the crate therefore has NO
 # host dependencies at all: no network, no wasm target, no oracle.
 #
+# fkdata JOINED IT ON THE SAME TERMS. A data-stage string is an arbitrary byte
+# sequence, and that contract's testable half -- the value model and the byte
+# type -- has no wire in it, so fkdata gates its own `fk` dependency the same
+# way and its 14 host-side tests run here. The WIRE cannot join them: it
+# addresses linear memory with u32, which a host pointer does not survive, and
+# it is pinned end to end by internal/guest instead.
+#
 # -p IS LOAD-BEARING AND IS NOT A NARROWING. A bare `cargo test` at the
 # workspace root cannot compile -- fk and fkgc name core::arch::wasm32 and the
 # host has no such module -- so anything that widens this line owes the crate
@@ -67,18 +74,19 @@ test: $(LUA52F)
 	cd sdk/go && go test ./...
 	cd guest/go && go test ./fkipc/...
 	@if command -v cargo >/dev/null 2>&1; then \
-	  echo "cd guest/rust && cargo test -p fkipc"; \
-	  cd guest/rust && cargo test -p fkipc; \
+	  echo "cd guest/rust && cargo test -p fkipc -p fkdata"; \
+	  cd guest/rust && cargo test -p fkipc -p fkdata; \
 	else \
 	  echo ""; \
 	  echo "======================================================================"; \
-	  echo "  NOT RUN: cargo test -p fkipc -- cargo is not on PATH."; \
+	  echo "  NOT RUN: cargo test -p fkipc -p fkdata -- cargo is not on PATH."; \
 	  echo ""; \
-	  echo "  68 host-side tests did not run: the Rust fkipc wire codec, the"; \
-	  echo "  link state machine, and the Rust half of the committed golden"; \
-	  echo "  testdata/ipc/wire-vectors.txt. That golden is the ONLY"; \
-	  echo "  cross-language pin needing no toolchain and no Factorio, and"; \
-	  echo "  with this leg absent only the Go half of it was just checked."; \
+	  echo "  Host-side tests did not run: the Rust fkipc wire codec, the link"; \
+	  echo "  state machine, the Rust half of the committed golden"; \
+	  echo "  testdata/ipc/wire-vectors.txt, and fkdata's data-stage value"; \
+	  echo "  model and byte type. That golden is the ONLY cross-language pin"; \
+	  echo "  needing no toolchain and no Factorio, and with this leg absent"; \
+	  echo "  only the Go half of it was just checked."; \
 	  echo ""; \
 	  echo "  Install cargo (https://rustup.rs) and re-run make test."; \
 	  echo "======================================================================"; \

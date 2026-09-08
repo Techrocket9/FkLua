@@ -61,11 +61,34 @@
 //! on: [`keys`] is sorted, [`mods`] is sorted, and every dictionary a [`get`]
 //! returns is sorted by key at every nesting level. That is a property of the
 //! host shim rather than a rule to follow.
+//!
+//! # Strings are BYTES, and nothing here rewrites one
+//!
+//! A Lua string is an arbitrary byte sequence, and so is everything that
+//! crosses this ABI as a string: a stored setting value the engine hands
+//! through unchanged, a prototype field somebody else's mod wrote, a path
+//! element. **Every string crosses byte-exact in both directions**, and neither
+//! this library nor its Go twin ever alters one.
+//!
+//! Rust's `String` cannot hold that, so [`V::Str`] holds a [`LuaStr`], which
+//! owns a `Vec<u8>`. [`V::bytes`] is the bytes, always; [`V::string`] is the
+//! CHECKED conversion and answers `None` for a string that is not UTF-8. The
+//! Go twin has no such split, because a Go `string` is already a byte string.
+//!
+//! The one place this library refuses rather than handing bytes through is the
+//! handful of names the ENGINE constrains: [`mods`], [`mod_version`],
+//! [`mod_name`], [`feature_flags`], [`derived_types`] and [`base_type`] answer
+//! with `String`, and a value there that is not UTF-8 stops the load through
+//! [`raise`] with the surface named and the bytes in hex. Rewriting it lossily
+//! would change its length silently, which is the defect this contract exists
+//! to prevent.
 
 #![no_std]
 
 extern crate alloc;
 
+use alloc::borrow::Cow;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -89,6 +112,9 @@ extern "C" {
     fn fkd_keys(pathp: u32, retp: u32) -> u32;
     #[link_name = "env"]
     fn fkd_env(which: u32, retp: u32) -> u32;
+    // The only import with an off-target caller that is stubbed out rather than
+    // gated away, so it is the only one the host build sees as unused.
+    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
     #[link_name = "raise"]
     fn fkd_raise(ptr: u32, len: u32);
 }
@@ -133,9 +159,16 @@ pub fn stage() -> StageId {
 
 /// Writes a line to `factorio-current.log`, which is the only output channel a
 /// data stage has: there is no console, because there is no game yet.
+#[cfg(target_family = "wasm")]
 pub fn log(s: &str) {
     fk::log(s)
 }
+
+/// Off-target there is no game and no log. See `Cargo.toml`: a host build of
+/// this crate exists so the value model and the byte type have native tests,
+/// and the wire is guest-only by construction.
+#[cfg(not(target_family = "wasm"))]
+pub fn log(_s: &str) {}
 
 /// Stops the load with THIS GUEST'S OWN message, exactly as a host-detected
 /// failure does: the stage name is prefixed, the error unwinds the whole
@@ -156,6 +189,7 @@ pub fn log(s: &str) {
 /// the message where the player looks. A cycle detector naming its path, a
 /// presence check naming the missing prototype, a refused configuration
 /// naming the setting: this is their exit.
+#[cfg(target_family = "wasm")]
 pub fn raise(msg: &str) -> ! {
     unsafe { fkd_raise(msg.as_ptr() as u32, msg.len() as u32) };
     // The host raise unwinds the Lua stage through this call, so execution
@@ -164,9 +198,182 @@ pub fn raise(msg: &str) -> ! {
     unreachable!("fkdata: raise returned")
 }
 
+/// Off-target there is no stage to unwind, so the contract that is left is the
+/// one the signature states: it does not return, and it carries the message.
+#[cfg(not(target_family = "wasm"))]
+pub fn raise(msg: &str) -> ! {
+    panic!("{msg}")
+}
+
 // ---------------------------------------------------------------------------
 // The value model.
 // ---------------------------------------------------------------------------
+
+/// A LUA STRING, WHICH IS A BYTE STRING AND NOT UTF-8.
+///
+/// The data-stage contract is that every string crosses this ABI byte-exact in
+/// both directions, and Rust's `String` cannot express that: it carries a
+/// validity invariant that safe code relies on. This library used to reconcile
+/// the two with `String::from_utf8_lossy`, which turns every byte outside UTF-8
+/// into U+FFFD, silently, and changes the length while it does it -- so the Go
+/// half and the Rust half saw different strings and different lengths for one
+/// wire. A stored setting value is where that reaches a real mod: the engine
+/// carries invalid UTF-8 and control characters through `mod-settings.dat`
+/// unchanged, so what a player typed is what a guest must be able to read back.
+/// (A NUL truncates the stored value inside the engine, which is the engine's
+/// behaviour and not this ABI's. A NUL that does reach this type crosses it
+/// whole, because a Lua string is counted rather than terminated.)
+///
+/// So the byte string gets a type, the same one the generated runtime-API
+/// bindings carry under this name. It is DECLARED HERE rather than imported,
+/// because a data module that imports `fkapi` is refused at package time.
+///
+/// `from_utf8_unchecked` was the cheap alternative and it is not available:
+/// handing safe Rust a `String` whose bytes are not UTF-8 is library UB the
+/// moment anything slices, iterates or formats it, and these bytes come from
+/// the engine rather than from the guest.
+///
+/// `Ord` and `Hash` are byte-lexicographic, which is the order `fk_data.lua`
+/// sorts a map's keys with and the order the Go twin's `string` comparison
+/// gives, so no dictionary's wire order moves.
+#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LuaStr(Vec<u8>);
+
+impl LuaStr {
+    #[inline]
+    pub fn new() -> Self {
+        LuaStr(Vec::new())
+    }
+
+    /// The bytes, always.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[inline]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+
+    /// The bytes as text, or `None` when they are not UTF-8. THE CHECKED
+    /// CONVERSION: a caller that needs a `&str` and cares whether it got one
+    /// asks for it here.
+    #[inline]
+    pub fn as_str(&self) -> Option<&str> {
+        core::str::from_utf8(&self.0).ok()
+    }
+
+    /// The lossy conversion, NAMED. Every byte outside UTF-8 becomes U+FFFD and
+    /// the length changes with it, which is fine for a log line and wrong for
+    /// anything that has to go back out to the engine.
+    #[inline]
+    pub fn to_string_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.0)
+    }
+
+    /// Replaces the contents, REUSING the allocation where the capacity allows.
+    #[inline]
+    pub fn set(&mut self, b: &[u8]) {
+        self.0.clear();
+        self.0.extend_from_slice(b);
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+impl core::ops::Deref for LuaStr {
+    type Target = [u8];
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AsRef<[u8]> for LuaStr {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// `Borrow<[u8]>` and NOT `Borrow<str>`, which is what a caller would rather
+/// write. `Borrow` is infallible and Ord-consistent by contract, and a `LuaStr`
+/// holding bytes that are not UTF-8 has no `&str` to hand back.
+impl core::borrow::Borrow<[u8]> for LuaStr {
+    #[inline]
+    fn borrow(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<&str> for LuaStr {
+    #[inline]
+    fn from(s: &str) -> Self {
+        LuaStr(s.as_bytes().to_vec())
+    }
+}
+
+impl From<String> for LuaStr {
+    #[inline]
+    fn from(s: String) -> Self {
+        LuaStr(s.into_bytes())
+    }
+}
+
+impl From<&[u8]> for LuaStr {
+    #[inline]
+    fn from(b: &[u8]) -> Self {
+        LuaStr(b.to_vec())
+    }
+}
+
+impl From<Vec<u8>> for LuaStr {
+    #[inline]
+    fn from(b: Vec<u8>) -> Self {
+        LuaStr(b)
+    }
+}
+
+impl PartialEq<str> for LuaStr {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<&str> for LuaStr {
+    #[inline]
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == other.as_bytes()
+    }
+}
+
+impl PartialEq<[u8]> for LuaStr {
+    #[inline]
+    fn eq(&self, other: &[u8]) -> bool {
+        self.0 == other
+    }
+}
+
+/// LOSSY, deliberately and visibly. Formatting is the text case, and a byte
+/// string that is not text has no rendering; what a caller must not be able to
+/// do is round-trip through here by accident, which is why the bytes come back
+/// out of [`LuaStr::as_bytes`] and never out of a formatter.
+impl core::fmt::Display for LuaStr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.to_string_lossy(), f)
+    }
+}
+
+impl core::fmt::Debug for LuaStr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self.to_string_lossy(), f)
+    }
+}
 
 /// One dynamic value: nil, a bool, a number, a string, an array or a map.
 ///
@@ -181,7 +388,9 @@ pub enum V {
     Nil,
     Bool(bool),
     Num(f64),
-    Str(String),
+    /// A byte string, not a `String`: see [`LuaStr`]. `str_("item")` and
+    /// `bytes_(b"\xff\x00")` both build one, and it crosses byte-exact.
+    Str(LuaStr),
     /// A LuaObject. Never produced at a data stage: the handle table is the
     /// control stage's and `fk_data.lua` does not bind it.
     Obj(u32),
@@ -197,9 +406,16 @@ pub fn num(f: f64) -> V {
     V::Num(f)
 }
 
-/// A string.
+/// A string, from text. Its BYTES are what crosses, so this is byte-exact for
+/// everything a `&str` can hold; [`bytes_`] is how to say the rest.
 pub fn str_(s: &str) -> V {
-    V::Str(String::from(s))
+    V::Str(LuaStr::from(s))
+}
+
+/// A string, from bytes. A Lua string is an arbitrary byte sequence, so this is
+/// the general constructor and [`str_`] is the convenient one.
+pub fn bytes_(b: &[u8]) -> V {
+    V::Str(LuaStr::from(b))
 }
 
 /// A boolean.
@@ -216,7 +432,7 @@ pub fn arr(vs: &[V]) -> V {
 pub fn obj(kvs: &[(&str, V)]) -> V {
     V::Map(
         kvs.iter()
-            .map(|(k, v)| (V::Str(String::from(*k)), v.clone()))
+            .map(|(k, v)| (V::Str(LuaStr::from(*k)), v.clone()))
             .collect(),
     )
 }
@@ -230,11 +446,31 @@ impl V {
         }
     }
 
-    /// Reads a string value, or "".
-    pub fn string(&self) -> &str {
+    /// Reads a string value's BYTES, or an empty slice for anything that is not
+    /// a string.
+    ///
+    /// This is the byte-exact twin of the Go half's `V.String()`, and it is
+    /// what to read when the value is carried rather than inspected: a stored
+    /// setting the engine hands through unchanged, a prototype field another
+    /// mod wrote. Nothing between the engine and here alters a byte.
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            V::Str(s) => s.as_bytes(),
+            _ => &[],
+        }
+    }
+
+    /// Reads a string value as TEXT, and `None` when there is no text to read:
+    /// the value is not a string, or its bytes are not valid UTF-8.
+    ///
+    /// The `Option` is deliberate. A Lua string is an arbitrary byte sequence,
+    /// so the conversion can fail, and the type is what makes every caller
+    /// decide at compile time whether it wanted text or bytes. [`V::bytes`] is
+    /// the answer that never fails.
+    pub fn string(&self) -> Option<&str> {
         match self {
             V::Str(s) => s.as_str(),
-            _ => "",
+            _ => None,
         }
     }
 
@@ -245,11 +481,19 @@ impl V {
 
     /// Looks one key up in a map. `None` for anything that is not a map, and
     /// for a key the map does not have.
-    pub fn at(&self, key: &str) -> Option<&V> {
+    ///
+    /// The comparison is over BYTES, and so is the ARGUMENT: `at("name")` and
+    /// `at(&[0xff, 0xfe][..])` are the same call, because a prototype field is
+    /// a key in a table any mod can write and a byte comparison no caller can
+    /// reach is not a byte comparison. A `&str` parameter would have left this
+    /// doc comment true and unreachable, which is how the defect this whole
+    /// contract answers looked from the outside.
+    pub fn at<K: AsRef<[u8]>>(&self, key: K) -> Option<&V> {
+        let key = key.as_ref();
         match self {
             V::Map(pairs) => pairs
                 .iter()
-                .find(|(k, _)| k.string() == key && matches!(k, V::Str(_)))
+                .find(|(k, _)| matches!(k, V::Str(_)) && k.bytes() == key)
                 .map(|(_, v)| v),
             _ => None,
         }
@@ -379,7 +623,12 @@ pub fn clone_to(src_type: &str, src_name: &str, dst_type: &str, dst_name: &str) 
 ///
 /// Numeric keys are not string keys and are not returned; read an array with
 /// [`get`].
-pub fn keys(path: &[P]) -> Vec<String> {
+///
+/// A prototype name is a key in a global namespace any mod can write, so the
+/// keys come back as [`LuaStr`] rather than as `String`: byte-exact, and a name
+/// that is not UTF-8 is enumerable rather than dropped. `k.as_str()` is the
+/// checked conversion where text is what is wanted.
+pub fn keys(path: &[P]) -> Vec<LuaStr> {
     let p = encode_path(path);
     let ret = slot();
     if unsafe { fkd_keys(p, ret) } == STATUS_ABSENT {
@@ -398,11 +647,14 @@ pub fn keys(path: &[P]) -> Vec<String> {
 }
 
 /// Every installed mod and its version, SORTED BY NAME.
+///
+/// `String` rather than [`LuaStr`], because the engine constrains both: see
+/// [`text`]'s note on the one place this library refuses.
 pub fn mods() -> Vec<(String, String)> {
     match env_value(1) {
         V::Map(pairs) => pairs
             .iter()
-            .map(|(k, v)| (String::from(k.string()), String::from(v.string())))
+            .map(|(k, v)| (text("a mod name", k), text("a mod version", v)))
             .collect(),
         _ => Vec::new(),
     }
@@ -410,7 +662,7 @@ pub fn mods() -> Vec<(String, String)> {
 
 /// One mod's version, and whether it is installed at all.
 pub fn mod_version(name: &str) -> Option<String> {
-    env_value(1).at(name).map(|v| String::from(v.string()))
+    env_value(1).at(name).map(|v| text("a mod version", v))
 }
 
 /// Reads one of the engine's feature flags, such as `space_travel` or
@@ -424,7 +676,7 @@ pub fn feature_flags() -> Vec<(String, bool)> {
     match env_value(2) {
         V::Map(pairs) => pairs
             .iter()
-            .map(|(k, v)| (String::from(k.string()), v.boolean()))
+            .map(|(k, v)| (text("a feature flag name", k), v.boolean()))
             .collect(),
         _ => Vec::new(),
     }
@@ -456,7 +708,7 @@ pub fn startup_setting(name: &str) -> Option<V> {
 ///
 /// Empty under a stage file written by an fklua older than the argument.
 pub fn mod_name() -> String {
-    String::from(env_value(4).string())
+    text("the mod's own name", &env_value(4))
 }
 
 /// Every concrete prototype TYPE under one of the engine's base types, SORTED
@@ -472,7 +724,7 @@ pub fn derived_types(base: &str) -> Vec<String> {
         Some(V::Arr(items)) => items
             .iter()
             .filter_map(|d| match d {
-                V::Str(s) => Some(s.clone()),
+                V::Str(_) => Some(text("a derived prototype type", d)),
                 _ => None,
             })
             .collect(),
@@ -490,13 +742,88 @@ pub fn base_type(derived: &str) -> Option<String> {
     if let V::Map(pairs) = env_value(5) {
         for (k, v) in pairs.iter() {
             if let V::Arr(items) = v {
-                if items.iter().any(|d| d.string() == derived) {
-                    return Some(String::from(k.string()));
+                if items
+                    .iter()
+                    .any(|d| matches!(d, V::Str(_)) && d.bytes() == derived.as_bytes())
+                {
+                    return Some(text("a base prototype type", k));
                 }
             }
         }
     }
     None
+}
+
+/// The ONE PLACE THIS LIBRARY REFUSES A STRING RATHER THAN CARRYING IT.
+///
+/// The conveniences above answer with `String` because the engine constrains
+/// what they name: a mod name, a mod version, a feature flag, a prototype type.
+/// If one of those is ever not UTF-8 the honest answers are to refuse or to
+/// widen the type, and refusing is the one that cannot corrupt anything: a
+/// lossy rewrite would change the value's length silently, and this ABI's whole
+/// contract is that it does not do that. The message names the surface and
+/// prints the bytes in hex, so the offending value is legible in the log rather
+/// than being whatever a terminal makes of it.
+///
+/// A non-string value answers with the empty string, which is what an absent
+/// [`mod_name`] is.
+fn text(surface: &str, v: &V) -> String {
+    match v {
+        V::Str(s) => match s.as_str() {
+            Some(t) => String::from(t),
+            None => raise(&format!(
+                "{surface} is not valid UTF-8, and this library never rewrites a \
+                 string: the bytes are {}",
+                hex(s.as_bytes())
+            )),
+        },
+        _ => String::new(),
+    }
+}
+
+/// Lowercase hex, for a refusal that has to print bytes.
+fn hex(b: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::new();
+    for x in b {
+        out.push(DIGITS[(x >> 4) as usize] as char);
+        out.push(DIGITS[(x & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// [`text`]'s refusal and the hex it prints, which no fixture can reach
+/// through the real shim: the surfaces it guards are constrained to ASCII by
+/// the engine, so the only way to exercise it is to call it. Off-target
+/// [`raise`] panics with the message, which is what makes that possible.
+#[cfg(all(test, not(target_family = "wasm")))]
+mod refusal_tests {
+    use super::*;
+
+    #[test]
+    fn text_passes_utf8_through_unchanged() {
+        assert_eq!(text("a mod name", &str_("space-age")), "space-age");
+        // A non-string is the absent case, not a refusal: an unset mod_name is
+        // nil and answers with the empty string.
+        assert_eq!(text("the mod's own name", &V::Nil), "");
+    }
+
+    // The WHOLE message, because what this guards is that the bytes are named
+    // rather than rewritten, and a substring match on the first clause would
+    // pass against a message that then printed a replacement character.
+    #[test]
+    #[should_panic(
+        expected = "a mod name is not valid UTF-8, and this library never rewrites a string: the bytes are ff00fe"
+    )]
+    fn text_refuses_rather_than_rewriting() {
+        text("a mod name", &bytes_(&[0xff, 0x00, 0xfe]));
+    }
+
+    #[test]
+    fn hex_is_lowercase_and_two_digits_per_byte() {
+        assert_eq!(hex(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
+        assert_eq!(hex(&[]), "");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -536,7 +863,7 @@ fn encode_path(path: &[P]) -> u32 {
     let vs: Vec<V> = path
         .iter()
         .map(|p| match p {
-            P::S(s) => V::Str(String::from(*s)),
+            P::S(s) => V::Str(LuaStr::from(*s)),
             P::N(n) => V::Num(*n),
         })
         .collect();
@@ -584,10 +911,15 @@ fn read_dyn(d: &[u8]) -> V {
             let ptr = rd_u32(d, 8) as usize;
             let n = rd_u32(d, 12) as usize;
             if n == 0 {
-                return V::Str(String::new());
+                return V::Str(LuaStr::new());
             }
+            // BYTE FOR BYTE. This line used to be
+            // String::from_utf8_lossy(bytes).into_owned(), which rewrote every
+            // byte outside UTF-8 into U+FFFD and changed the length while it
+            // did it -- so this half and the Go half disagreed about what one
+            // wire said, for any value the engine carries through unaltered.
             let bytes = unsafe { core::slice::from_raw_parts(ptr as *const u8, n) };
-            V::Str(String::from_utf8_lossy(bytes).into_owned())
+            V::Str(LuaStr::from(bytes))
         }
         // A data stage never produces one, and there is nothing a guest could
         // do with it: the handle table is the control stage's.
@@ -637,8 +969,11 @@ fn write_dyn(d: &mut [u8], v: &V) {
         }
         V::Str(s) => {
             wr_u32(d, 0, 3);
-            wr_u32(d, 8, s.as_ptr() as u32);
-            wr_u32(d, 12, s.len() as u32);
+            // The bytes' own storage, unaltered: the host copies them out
+            // before the call returns and the value is borrowed for that whole
+            // time.
+            wr_u32(d, 8, s.as_bytes().as_ptr() as u32);
+            wr_u32(d, 12, s.as_bytes().len() as u32);
         }
         V::Obj(h) => {
             wr_u32(d, 0, 4);
@@ -712,6 +1047,9 @@ fn key_less(a: &V, b: &V) -> bool {
     }
     match (a, b) {
         (V::Num(x), V::Num(y)) => x < y,
+        // BYTE-LEXICOGRAPHIC, which is what LuaStr's Ord is, what Go's string
+        // comparison is, and what Lua's own `<` over strings is in the C
+        // locale. All three have to agree or the wire order does not.
         (V::Str(x), V::Str(y)) => x < y,
         _ => false,
     }
@@ -728,9 +1066,18 @@ fn key_rank(v: &V) -> u8 {
 /// The guest's own allocator, reached the way `fkapi` reaches it: through the
 /// `fk_alloc` export `fk` defines, so there is exactly one allocator in the
 /// module graph.
+#[cfg(target_family = "wasm")]
 fn galloc(n: u32) -> u32 {
     if n == 0 {
         return 0;
     }
     fk::fk_alloc(n)
+}
+
+/// Off-target there is no guest heap and no 32-bit address space to put one in,
+/// which is why a host build of this crate tests the value model and never the
+/// wire. Reaching here means a test called an operation that crosses.
+#[cfg(not(target_family = "wasm"))]
+fn galloc(_n: u32) -> u32 {
+    panic!("fkdata: the tier-2 wire is guest memory and does not exist off-target")
 }

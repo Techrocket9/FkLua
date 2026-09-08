@@ -19,6 +19,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "databytes"
+version = "0.1.0"
+dependencies = [
+ "fk",
+ "fkdata",
+]
+
+[[package]]
 name = "datastage"
 version = "0.1.0"
 dependencies = [

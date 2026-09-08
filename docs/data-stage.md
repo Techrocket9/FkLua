@@ -140,12 +140,15 @@ Eight operations. Everything that is a failure raises at the stage, naming the s
 | `Set(value V, path ...any)` | `set(&V, &[P])` | write at any depth; `Nil()` deletes |
 | `Extend(protos ...V)` | `extend(&[V])` | `data:extend` |
 | `Clone(typ, from, to string)` | `clone_(typ, from, to)` | deep-copy one prototype under another name |
-| `Keys(path ...any) []string` | `keys(&[P]) -> Vec<String>` | the string keys at a path, sorted |
+| `Keys(path ...any) []string` | `keys(&[P]) -> Vec<LuaStr>` | the string keys at a path, sorted |
 | `Mods()`, `ModVersion(name)` | `mods()`, `mod_version(name)` | installed mods and versions |
 | `FeatureFlag(name)` | `feature_flag(name)` | `space_travel`, `quality`, and the rest |
 | `StartupSetting(name) (V, bool)` | `startup_setting(name)` | one startup setting's value |
 | `ModName() string` | `mod_name()` | this mod's own name, from the packager |
 | `DerivedTypes(base)`, `BaseType(derived)` | `derived_types(base)`, `base_type(derived)` | the engine's `defines.prototypes` map, both directions |
+| `V.String() string` | `V::bytes() -> &[u8]` | a string value's bytes, empty for anything else |
+| (the same method) | `V::string() -> Option<&str>` | those bytes as text, `None` when they are not UTF-8 |
+| `Str(s string) V` | `str_(&str) -> V`, `bytes_(&[u8]) -> V` | build a string value |
 | `Log(s string)` | `log(s)` | a line in `factorio-current.log` |
 | `Raise(msg string)` | `raise(msg) -> !` | stop the load with your own message; never returns |
 
@@ -278,6 +281,31 @@ The Rust side of the shared-crate pattern is the same shape and is unverified he
 ## Keeping your section functions
 
 A data stage is usually a few hundred straight-line prototype definitions, and if you split them across section functions for readability the optimizer will inline those sections back into one. Past a certain size that produces a function Lua cannot parse, because a single jump inside it exceeds what Lua can encode. Packaging catches it and names the function, but the error is easiest to avoid up front: put `//go:noinline` (Go) or `#[inline(never)]` (Rust) on each section function. This is the guest shape most likely to reach that limit; see [Limits a generated guest can reach](lua-limits.md).
+
+## Strings are bytes
+
+A Lua string is an arbitrary byte sequence, and so is every string that crosses this library: a stored setting value, a prototype field another mod wrote, a path element. **They cross byte-exact in both directions and the library never rewrites one.** That matters because the engine carries arbitrary bytes through: measured on Factorio 2.0.77, a startup setting whose stored value holds invalid UTF-8 or control characters arrives at the data stage unchanged.
+
+In Go there is nothing to opt into, because a Go `string` is already a byte string: `V.String()` gives you the engine's bytes and `len` gives you the engine's length. The obligation is the other way round. A string out of `V.String()`, `Keys`, `Mods` or `ModName` is not necessarily valid UTF-8, so check with `utf8.ValidString` before treating one as text, and carry it as-is when you are only passing it through.
+
+In Rust a `String` cannot hold those bytes, so `V::Str` holds a `LuaStr`, which owns a `Vec<u8>`. Two accessors split the question, and the types make you pick:
+
+```rust
+let v = fkdata::startup_setting("my-mod-label").unwrap_or_default();
+
+// Carrying it: the bytes, which never fails.
+fkdata::set(&fkdata::bytes_(v.bytes()), &[P::S("item"), P::S("my-item"), P::S("label")]);
+
+// Reading it as text: Some only when the bytes are UTF-8.
+match v.string() {
+    Some(text) => fkdata::log(text),
+    None => fkdata::raise("the label setting is not valid text"),
+}
+```
+
+`str_("item")` builds a string value from text and `bytes_(b"\xff\x00")` builds one from bytes; `LuaStr` also offers `as_str()` for the checked conversion and `to_string_lossy()` when a replacement character is genuinely what you want, such as in a log line. `Keys` returns `Vec<LuaStr>` for the same reason: a prototype name is a key in a namespace any mod can write.
+
+The exceptions are the conveniences over names the engine itself constrains, which stay `String` in Rust: `mods`, `mod_version`, `mod_name`, `feature_flags`, `derived_types` and `base_type`. If one of those is ever not valid UTF-8 the library stops the load, naming the surface and printing the bytes in hex, rather than rewriting it.
 
 ## Determinism
 

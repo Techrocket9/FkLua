@@ -396,6 +396,8 @@ if _, err := something(); err != nil {
 
 It describes the call that just returned. The slot is cleared as each host call begins, so it is empty after a call that succeeded rather than carrying an earlier failure, and it should be read where the error is still in hand. The Rust form returns bytes rather than a string, because a Lua string is an arbitrary byte sequence and the engine promises nothing about encoding.
 
+That is one instance of a rule that holds across the whole boundary, and across the data stage as well: **every string crosses byte-exact in both directions, and neither guest library rewrites one.** A Go `string` is already a byte string, so Go bindings are byte-exact by construction and the obligation is to check with `utf8.ValidString` before treating one as text. A Rust `String` is not, so a string-shaped position is a `LuaStr` owning a `Vec<u8>`, with `as_bytes()` for the bytes, `as_str()` for the checked conversion to text and `to_string_lossy()` where a replacement character is what you want. The [data stage](data-stage.md) says the same thing about `fkdata`, where a stored setting value is the string most likely to carry bytes that are not text.
+
 Log it, do not branch on it. The wording is an engine implementation detail a point release may change, and a mod that behaved differently because of a wording would behave differently on two versions of Factorio. A test asserting the exact text is the honest exception: an engine that stops refusing something should fail a suite rather than quietly widen it.
 
 ## Events

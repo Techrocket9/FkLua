@@ -229,11 +229,16 @@ pub extern "C" fn fk_data() {
     // order the mods happened to load in.
     let mut best = -1.0_f64;
     let mut best_name = String::new();
-    for n in fkdata::keys(&[P::S("transport-belt")]) {
-        if let Some(s) = fkdata::get(&[P::S("transport-belt"), P::S(&n), P::S("speed")]) {
+    for key in fkdata::keys(&[P::S("transport-belt")]) {
+        // `keys` hands back BYTES, because a prototype name is a key in a
+        // global namespace any mod can write and this ABI never rewrites one.
+        // A belt name is text, so this asks for the checked conversion rather
+        // than assuming it.
+        let Some(n) = key.as_str() else { continue };
+        if let Some(s) = fkdata::get(&[P::S("transport-belt"), P::S(n), P::S("speed")]) {
             if s.number() > best {
                 best = s.number();
-                best_name = n;
+                best_name = String::from(n);
             }
         }
     }
