@@ -204,7 +204,7 @@ The refusal is verbatim `Failed to load mod "fk-blockjump": __fk-blockjump__/fk_
 
 | | Go | Rust |
 |---|--:|--:|
-| emitted data module | 3,521,922 B | 3,087,588 B |
+| emitted data module | 3,502,792 B | 3,075,696 B |
 | functions measured | 147 | 254 |
 | widest span BEFORE the relay | **954,969 B** (146% of the limit) | **559,026 B** (85%) |
 | the function carrying it | `(*github.com/Techrocket9/fkrecipes/go.Lib).PlanData` | `_RNvMNtCsg99gZ7im5TJ_9fkrecipes4dataNtNtB4_4plan3Lib9plan_data` |
@@ -213,7 +213,7 @@ The refusal is verbatim `Failed to load mod "fk-blockjump": __fk-blockjump__/fk_
 | **widest block** | **802 B** | **461 B** |
 | **block room** (hop 327,677) | **326,875 B** (100%) | **327,216 B** (100%) |
 
-Those are the numbers AFTER the dirty-page barrier gate and the store's opener-line form (`luagen: the dirty-page barrier is emitted only in a mode that can arm it` and `luagen: the inlined store's fast arm rides the opener line`, same round), which together took 10.1% off the Go module and 15.5% off the Rust one and took the Rust module out of the relay altogether. Measured the same way BEFORE it, on the same wasms: Go 3,915,886 B of Lua, widest span **1,051,960 B** (161%), 13 stations, 328,256 B after, block 802 B, room 326,875; Rust 3,655,976 B, **668,851 B** (102%), 7 stations, 327,957 B after, block 607 B, room 327,070. Both are miles from the ceiling that matters: the widest nested run in either is under a kilobyte against a hop of 327 KB, so what the Go guest is over and the Rust guest is near is the SPAN, which the relay handles, and not the block, which it cannot. The pre-gate span figures confirm FkRecipes' finding and correct it in two places. Go's 1,052,862 is the same span measured in the POST-relay text, where the 13 stations have already added 851 bytes plus the rewritten gotos; the pre-relay distance is 1,051,960. Rust's 664,632 does not reconcile with 668,851 by any station arithmetic and is presumably a different build of the same source; the station count agrees at 7. **The emitted `fk_data_module.lua` is byte-identical before and after this round on both guests** (3,916,145 B with 26 `LT` labels in Go, 3,656,235 B with 14 in Rust, `cmp` clean), which is what says the measurement changed nothing about the output.
+Those are the numbers AFTER the dirty-page barrier gate, the store's opener-line form and the minimal-width data-segment escapes (`luagen: the dirty-page barrier is emitted only in a mode that can arm it`, `luagen: the inlined store's fast arm rides the opener line` and `luagen: minimal-width escapes in data-segment literals`, same round), which together took 10.5% off the Go module and 15.9% off the Rust one and took the Rust module out of the relay altogether; the escapes move only the module size, since data segments sit outside every function. Measured the same way BEFORE it, on the same wasms: Go 3,915,886 B of Lua, widest span **1,051,960 B** (161%), 13 stations, 328,256 B after, block 802 B, room 326,875; Rust 3,655,976 B, **668,851 B** (102%), 7 stations, 327,957 B after, block 607 B, room 327,070. Both are miles from the ceiling that matters: the widest nested run in either is under a kilobyte against a hop of 327 KB, so what the Go guest is over and the Rust guest is near is the SPAN, which the relay handles, and not the block, which it cannot. The pre-gate span figures confirm FkRecipes' finding and correct it in two places. Go's 1,052,862 is the same span measured in the POST-relay text, where the 13 stations have already added 851 bytes plus the rewritten gotos; the pre-relay distance is 1,051,960. Rust's 664,632 does not reconcile with 668,851 by any station arithmetic and is presumably a different build of the same source; the station count agrees at 7. **The emitted `fk_data_module.lua` is byte-identical before and after this round on both guests** (3,916,145 B with 26 `LT` labels in Go, 3,656,235 B with 14 in Rust, `cmp` clean), which is what says the measurement changed nothing about the output.
 
 **The remedy the message gives is `//go:noinline` in Go and `#[inline(never)]` in Rust**, on the boundaries the author already thinks of as sections, and it is now what is left when the relay could not help rather than the first answer. **The message LEADS with the block against the hop** rather than with the span, because since the relay the span is no longer the reason anything is refused, and the remedy has a second half it could not have had before: nesting is what costs the author, not length. A long straight-line run at function body level is fine at any size, since it has a statement boundary every few bytes; the same run inside one `if` or one loop body is what stops packaging. Proven on the reproduction: twenty section functions of sixteen prototypes each are inlined into one whose jump crosses 1,556,741 bytes and is refused, and the same source with the pragmas packages. **The size win reported downstream does not generalise, and the message says so**: that guest came out 27% smaller once its six sections stopped being inlined, and this reproduction goes 0.2% the *other* way. Both are real; it is a property of a particular guest's shape rather than a rule, and an error message that promised it would be wrong most of the time.
 
@@ -303,6 +303,54 @@ Two subtler ones worth remembering:
 - **A multi-word store must bounds-check the whole width up front.** Two independent `st32` calls leave memory half-written when the second traps, and the spec says a trapping store changes nothing. `st64` checks 8 bytes once.
 
 `f32.convert_i64_*` uses round-to-odd on the way through f64, so only one rounding remains; the naive `f32(i64_to_f64(x))` rounds twice.
+
+---
+
+### Data-segment literals, and why the escape width is not three
+
+A module's data segments are emitted as one `local d = "..."` per segment, then
+written a byte at a time. For a real guest that literal is the largest single
+thing in the chunk: the Go FkRecipes data guest carries **40,006 bytes of
+segment across 33 segments** and the Rust one **32,484 across 2**.
+
+Every non-printable byte goes out as a decimal escape, because Go's `%q` emits
+`\u` escapes that Lua rejects outright. That escape used to be `\%03d` --
+always three digits, on the argument that a following digit could otherwise
+extend it. Three digits for every byte is a **2.46x expansion** over the bytes
+themselves, and it is not necessary: `readdecesc`
+(`third_party/lua-5.2.1/build/src/llex.c:326`, present after `make lua52f`)
+reads **up to** three digits and stops at the first non-digit, so `\d`, `\dd`
+and `\ddd` are the same value. The width only has to be three when the NEXT
+emitted character is a digit CHARACTER -- which is exactly when the next byte is
+printable and in `'0'..'9'`, since a byte that is itself escaped emits a
+backslash first and cannot extend anything.
+
+**The padding rule is live and its failure is loud.** With it removed,
+`bin/lua52f` refuses the literal outright:
+`decimal escape too large near '\256'`. It is pinned by
+`TestEveryBytePairRoundTripsThroughTheLiteral`, which runs every byte followed
+by every byte -- 65,536 cases, the pair being the unit that can fail and the
+second of each pair covering "an escape at the end of the literal" -- through
+the real `luaString` and the real 5.2 parser.
+
+The segment loop reads `byte(d, i)` rather than `string.byte(d, i)`. `byte` is
+already a prelude chunk-local (`local char, concat, byte = string.char,
+table.concat, string.byte`) declared in the same function the loop is in, so
+that is **one instruction where `string.byte` was two** -- a register reference
+instead of `GETTABUP` for the `string` table plus `GETTABLE` for the field --
+and seven characters shorter per segment, the length of `string.`.
+
+The two halves account for the whole delta and were checked against each other
+rather than assumed. Go: the literal text goes 98,537 -> 79,638 characters
+(a 2.46x expansion over 40,006 bytes becoming 1.99x), and 18,899 + 33 x 7 =
+**19,130**, which is the module's whole change. Rust: 72,719 -> 60,841, and
+11,878 + 2 x 7 = **11,892**, likewise the whole change.
+
+Worth, on the two shipped FkRecipes data modules: **19,130 B (-0.54%)** on the
+Go one and **11,892 B (-0.39%)** on the Rust one, and it is the only size change
+in this family that reaches **below `-opt=3`**, because data segments are
+emitted at every level: the Go guest goes 1,546,072 -> 1,526,942 at `-opt=0`
+and 1,353,587 -> 1,334,457 at `-opt=1` and `-opt=2`.
 
 ---
 

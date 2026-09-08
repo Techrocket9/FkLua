@@ -162,7 +162,10 @@ func signature(f *ir.Func) string {
 // Go's %q cannot be used: it emits \u escapes for non-ASCII, which Lua does not
 // understand at all ("invalid escape sequence near '\u'"). wasm names are
 // arbitrary UTF-8 and data segments are arbitrary bytes, so everything outside
-// printable ASCII goes out as a decimal \ddd escape, which every Lua accepts.
+// printable ASCII goes out as a decimal escape, which every Lua accepts -- \d,
+// \dd or \ddd, at the MINIMAL width the next emitted character allows. Data
+// segments are most of a large module's literal text, and three digits for
+// every byte was a 2.46x expansion over the bytes themselves.
 func luaString(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
@@ -176,8 +179,21 @@ func luaString(s string) string {
 		case c >= 0x20 && c < 0x7F:
 			b.WriteByte(c)
 		default:
-			// Always three digits, so a following digit cannot extend the escape.
-			fmt.Fprintf(&b, "\\%03d", c)
+			// MINIMAL WIDTH, padded to three only where the next emitted
+			// character would extend the escape. Lua 5.2's reader is
+			// `readdecesc` in third_party/lua-5.2.1/build/src/llex.c:326
+			// (present after `make lua52f`; the tree is fetched and patched at
+			// build time, and neither patch touches llex.c): it takes UP TO
+			// three digits and stops at the first non-digit, so \d, \dd and
+			// \ddd all read the same value. The only hazard is a following
+			// DIGIT CHARACTER, which happens exactly when the next byte is
+			// printable and in '0'..'9'; a next byte that is itself escaped
+			// emits a backslash first and cannot extend anything.
+			w := 3
+			if i+1 == len(s) || !(s[i+1] >= '0' && s[i+1] <= '9') {
+				w = 1
+			}
+			fmt.Fprintf(&b, "\\%0*d", w, c)
 		}
 	}
 	b.WriteByte('"')
@@ -698,7 +714,15 @@ func emitModuleState(b *builder, m *ir.Module) error {
 			}
 			b.line("do local o = %d", d.Offset)
 			b.line("  local d = %s", luaString(string(d.Bytes)))
-			b.line("  for i = 1, #d do st8raw(MEM, o + i - 1, string.byte(d, i)) end")
+			// `byte` is the prelude's own chunk-local (`local char, concat,
+			// byte = string.char, table.concat, string.byte`), and in the
+			// packaged module that prelude and this loop are in the SAME
+			// function, so the reference is a register MOVE: one instruction
+			// where `string.byte` was two (GETTABUP for the `string` table,
+			// then GETTABLE for the field). SEVEN characters shorter per
+			// segment -- the length of "string." -- and the loop runs once per
+			// byte of every data segment at load.
+			b.line("  for i = 1, #d do st8raw(MEM, o + i - 1, byte(d, i)) end")
 			b.line("end")
 		}
 	}
