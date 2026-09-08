@@ -567,6 +567,19 @@ type ModuleJumps struct {
 	// widest function would quote room the relay does not have. See
 	// measureAndRelay in luagen.go.
 	Widest FuncJumps
+	// Blockiest is the function with the LONGEST BLOCK, carrying all of its own
+	// numbers: the function nearest the RELAY'S ceiling, where Widest is the
+	// one nearest Lua's. They are DIFFERENT functions on every real guest
+	// measured (FkRecipes' Go module: PlanData for the span, copyValue for the
+	// block, 802 against 13,029 bytes), which showed nothing while both sat
+	// far from their ceilings; the case where it matters is the one a module
+	// row taken from Widest alone gets wrong: a function under the span limit whose
+	// one loop body is longer than a hop is not refused today and cannot be
+	// relayed tomorrow, and the row read 100% of block room over it because the
+	// widest span sat in another function. Zero value for a module with no
+	// jump; ON A REFUSAL it is the refused function, like Widest, because the
+	// refusal is the diagnosis.
+	Blockiest FuncJumps
 	// AfterBytes is the widest span left ANYWHERE in the module once every
 	// ladder is in place. It is a maximum over functions and so need not come
 	// from Widest, though on every guest measured so far it does.

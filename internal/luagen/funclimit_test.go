@@ -1401,3 +1401,75 @@ func TestTheEmitterReportsWhatEveryFunctionsWidestJumpCost(t *testing.T) {
 		relayed.Widest.BlockBytes, relayHopBytes(),
 		quiet.Widest.SpanBytes, quiet.Widest.BlockBytes)
 }
+
+// wideAndBlockyWAT is one module with the widest span in one function and the
+// longest block in another: $spanner, a body-level run of spanOps statements
+// under a br_if, and $blocky, a counted loop with an early exit whose body is
+// blockOps statements. It is cmd/fklua's "both" fixture at the emitter level.
+func wideAndBlockyWAT(spanOps, blockOps int) string {
+	var b strings.Builder
+	b.WriteString(`(module (memory 1)
+  (func $spanner (export "fk_settings") (local $s i32)
+    (block $out
+      (br_if $out (i32.load (i32.const 0)))`)
+	for i := 0; i < spanOps; i++ {
+		b.WriteString("\n      (local.set $s (i32.add (local.get $s) (i32.const 1)))")
+	}
+	b.WriteString("\n      (return))\n    (unreachable))\n")
+	b.WriteString(`  (func $blocky (export "fk_data") (local $i i32) (local $s i32) (local $n i32)
+    (local.set $n (i32.const 4))
+    (block $out
+      (block $done
+        (loop $top
+          (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+          (br_if $out (i32.eq (local.get $i) (i32.const 3)))`)
+	for i := 0; i < blockOps; i++ {
+		b.WriteString("\n          (local.set $s (i32.add (local.get $s) (i32.const 1)))")
+	}
+	b.WriteString(`
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $top))))
+    (drop (local.get $s))))
+`)
+	return b.String()
+}
+
+// THE MODULE ROW CARRIES TWO FUNCTIONS WHEN TWO ARE NEAREST TWO CEILINGS.
+// Widest is the function nearest Lua's limit and Blockiest the one nearest the
+// relay's, and a row that reported the second from the first quoted full block
+// room over a loop body no ladder can break up. Red-proven by selecting
+// Blockiest by span, which makes both rows $spanner and the room positive.
+func TestTheModuleRowNamesTheFunctionNearestEachCeiling(t *testing.T) {
+	m, err := wasm.DecodeWAT(wideAndBlockyWAT(40000, 15000))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	im, err := ir.BuildModule(m)
+	if err != nil {
+		t.Fatalf("ir: %v", err)
+	}
+	_, _, j, err := EmitModuleJumps(im, Options{Opt: analysis.O3})
+	if err != nil {
+		t.Fatalf("the module was refused, so it is not the case under test: %v", err)
+	}
+	if j.Widest.SpanBytes > maxJumpSpanBytes || j.Stations != 0 {
+		t.Fatalf("the fixture is over the limit or relayed (%d bytes, %d stations); "+
+			"it has to be a module that packages with no relay", j.Widest.SpanBytes, j.Stations)
+	}
+	if !strings.Contains(j.Widest.Func, "spanner") {
+		t.Errorf("Widest is %q, want $spanner", j.Widest.Func)
+	}
+	if !strings.Contains(j.Blockiest.Func, "blocky") {
+		t.Errorf("Blockiest is %q, want $blocky: the loop body is the longest run with "+
+			"no body-level boundary in the module", j.Blockiest.Func)
+	}
+	if j.Blockiest.RoomBytes >= 0 {
+		t.Errorf("Blockiest.RoomBytes is %+d; the loop body is longer than a hop", j.Blockiest.RoomBytes)
+	}
+	if j.Widest.RoomBytes <= 0 {
+		t.Errorf("Widest.RoomBytes is %+d; a body-level run has a boundary every few bytes", j.Widest.RoomBytes)
+	}
+	t.Logf("widest %s span %d room %+d; blockiest %s block %d room %+d",
+		j.Widest.Func, j.Widest.SpanBytes, j.Widest.RoomBytes,
+		j.Blockiest.Func, j.Blockiest.BlockBytes, j.Blockiest.RoomBytes)
+}

@@ -134,12 +134,19 @@ type reportJumps struct {
 	Stations int `json:"stations"`
 	// WidestSpanAfterRelayBytes is the widest span left anywhere in the module.
 	WidestSpanAfterRelayBytes int `json:"widest_span_after_relay_bytes"`
-	// The block measure, taken in the function named by widest_span_function:
-	// inside its widest span while the relay can still carry that function, and
-	// inside the span that defeated the relay once one exists.
-	WidestBlockBytes int  `json:"widest_block_bytes"`
-	BlockRoomBytes   int  `json:"block_room_bytes"`
-	Relayed          bool `json:"relayed"`
+	// The block measure, taken over EVERY function: the longest run with no
+	// body-level statement boundary in it anywhere in the module, the function
+	// carrying it, and what is left of one hop over it. Within a function it is
+	// measured inside the widest span while the relay can still carry that
+	// function, and inside the span that defeated the relay once one exists.
+	// widest_block_function is usually NOT widest_span_function: the longest
+	// run tends to sit in a helper, the widest jump in the function that
+	// inlined the sections. The case that matters is a loop body longer than
+	// a hop in a function whose span is still under the limit.
+	WidestBlockBytes    int    `json:"widest_block_bytes"`
+	WidestBlockFunction string `json:"widest_block_function"`
+	BlockRoomBytes      int    `json:"block_room_bytes"`
+	Relayed             bool   `json:"relayed"`
 	// RelayedFunctions is every function the relay carried, in emission order.
 	// [] and never null.
 	RelayedFunctions []reportJumpFunc `json:"relayed_functions"`
@@ -234,8 +241,9 @@ func jumpEntry(j luagen.ModuleJumps) reportJumps {
 		WidestSpanFunction:        j.Widest.Func,
 		Stations:                  j.Stations,
 		WidestSpanAfterRelayBytes: j.AfterBytes,
-		WidestBlockBytes:          j.Widest.BlockBytes,
-		BlockRoomBytes:            j.Widest.RoomBytes,
+		WidestBlockBytes:          j.Blockiest.BlockBytes,
+		WidestBlockFunction:       j.Blockiest.Func,
+		BlockRoomBytes:            j.Blockiest.RoomBytes,
 		Relayed:                   j.Stations > 0,
 		RelayedFunctions:          []reportJumpFunc{},
 	}

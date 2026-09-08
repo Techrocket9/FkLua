@@ -1467,6 +1467,28 @@ func jumpNote(j luagen.ModuleJumps) []string {
 		return []string{fmt.Sprintf("  jump span: no function carries a jump; "+
 			"the limit is %d bytes and no relay was needed", limit)}
 	}
+	// THE BLOCK IS THE MODULE'S WORST, NOT THE WIDEST FUNCTION'S. On every real
+	// guest measured they are different functions (a 13 KB run in a helper
+	// against an 802-byte one in the relayed section function), and a module
+	// whose widest span sits in one function while a loop body longer than a
+	// hop sits in another used to print 100% of block room over that loop: the
+	// relay's ceiling reported from the function nearest Lua's. The function is
+	// named only when it is not the one the span already named.
+	in := ""
+	if j.Blockiest.Func != j.Widest.Func {
+		in = " in " + j.Blockiest.Func
+	}
+	block := fmt.Sprintf("widest block %d bytes%s against the %d one hop covers, "+
+		"so %d bytes of block room (%d%%)",
+		j.Blockiest.BlockBytes, in, hop, j.Blockiest.RoomBytes, pct(j.Blockiest.RoomBytes, hop))
+	const remedy = "Lift that long straight-line run to the function's own body " +
+		"level rather than leaving it nested inside one if or loop body, and put " +
+		"//go:noinline (Go) or #[inline(never)] (Rust) on your section functions " +
+		"so no single function carries a block that long."
+	where := "the widest run with nowhere at body level to put a station"
+	if in != "" {
+		where = "the widest run in " + j.Blockiest.Func + " with nowhere at body level to put a station"
+	}
 	if j.Stations == 0 {
 		// THE BLOCK IS PRINTED HERE TOO, and leaving it out was the hole this
 		// line existed to close. A module under the span limit needs no relay
@@ -1477,30 +1499,22 @@ func jumpNote(j luagen.ModuleJumps) []string {
 		// the ladder would not be able to break up. Printing only the span there
 		// is printing the reassuring half of a number that is not reassuring.
 		note := []string{fmt.Sprintf("  jump span: widest %d bytes in %s (%d%% of "+
-			"the %d-byte limit), no relay needed; widest block %d bytes against the "+
-			"%d one hop covers, so %d bytes of block room (%d%%)",
-			j.Widest.SpanBytes, j.Widest.Func, pct(j.Widest.SpanBytes, limit), limit,
-			j.Widest.BlockBytes, hop, j.Widest.RoomBytes, pct(j.Widest.RoomBytes, hop))}
-		if j.Widest.RoomBytes < 0 {
+			"the %d-byte limit), no relay needed; %s",
+			j.Widest.SpanBytes, j.Widest.Func, pct(j.Widest.SpanBytes, limit), limit, block)}
+		if j.Blockiest.RoomBytes < 0 {
 			note = append(note, "  this module is under the span limit and the relay "+
-				"could NOT carry it if it crossed: the widest run with nowhere at body "+
-				"level to put a station is already longer than one hop. Lift that long "+
-				"straight-line run to the function's own body level rather than leaving "+
-				"it nested inside one if or loop body, and put //go:noinline (Go) or "+
-				"#[inline(never)] (Rust) on your section functions so no single "+
-				"function carries a block that long.")
+				"could NOT carry it if it crossed: "+where+" is already longer than "+
+				"one hop. "+remedy)
 		}
 		return note
 	}
-	return []string{
+	note := []string{
 		fmt.Sprintf("  jump span: widest %d bytes in %s (%d%% of the %d-byte "+
 			"limit), relayed through %d station(s) in %d function(s); widest span "+
-			"after the relay %d bytes (%d%% of the limit); widest block %d bytes "+
-			"against the %d one hop covers, so %d bytes of block room (%d%%)",
+			"after the relay %d bytes (%d%% of the limit); %s",
 			j.Widest.SpanBytes, j.Widest.Func, pct(j.Widest.SpanBytes, limit), limit,
 			j.Stations, len(j.Relayed),
-			j.AfterBytes, pct(j.AfterBytes, limit),
-			j.Widest.BlockBytes, hop, j.Widest.RoomBytes, pct(j.Widest.RoomBytes, hop)),
+			j.AfterBytes, pct(j.AfterBytes, limit), block),
 		"  the relay carried this module, so the number that bounds it is the " +
 			"block room and not the span: a station is a label, a label only goes " +
 			"at function body level, and the relay refuses when a run with none in " +
@@ -1509,6 +1523,14 @@ func jumpNote(j luagen.ModuleJumps) []string {
 			"body, and put //go:noinline (Go) or #[inline(never)] (Rust) on your " +
 			"section functions so no single function carries a block that long.",
 	}
+	if j.Blockiest.RoomBytes < 0 {
+		// The relay carried what it could, and there is a run it could NOT
+		// carry sitting in a function that has not crossed the limit yet. The
+		// second line above is general advice; this one names the function.
+		note = append(note, "  and the relay could NOT carry "+j.Blockiest.Func+
+			" if its widest span crossed: "+where+" is already longer than one hop. "+remedy)
+	}
+	return note
 }
 
 // mapNote is one map's half of the line the packager prints about them.

@@ -233,13 +233,13 @@ func TestTheReportFieldSetIsPinned(t *testing.T) {
 		"jumps.control", "jumps.control.block_room_bytes", "jumps.control.hop_bytes",
 		"jumps.control.limit_bytes", "jumps.control.relayed",
 		"jumps.control.relayed_functions", "jumps.control.stations",
-		"jumps.control.widest_block_bytes",
+		"jumps.control.widest_block_bytes", "jumps.control.widest_block_function",
 		"jumps.control.widest_span_after_relay_bytes",
 		"jumps.control.widest_span_bytes", "jumps.control.widest_span_function",
 		"jumps.data", "jumps.data.block_room_bytes", "jumps.data.hop_bytes",
 		"jumps.data.limit_bytes", "jumps.data.relayed",
 		"jumps.data.relayed_functions", "jumps.data.stations",
-		"jumps.data.widest_block_bytes",
+		"jumps.data.widest_block_bytes", "jumps.data.widest_block_function",
 		"jumps.data.widest_span_after_relay_bytes",
 		"jumps.data.widest_span_bytes", "jumps.data.widest_span_function",
 		"lua_migrations", "ok",
@@ -358,7 +358,7 @@ func bigDataGuest(t *testing.T, shape string, fill int) string {
           (br $top))))
     (drop (local.get $s))))
 `)
-	case "both":
+	case "both", "relayed-and-blocky":
 		// BOTH SHAPES IN ONE MODULE, the wide relayable one FIRST and wider
 		// than the one that cannot be relayed. That is the only arrangement in
 		// which "the module's widest span" and "the function that refused the
@@ -375,6 +375,17 @@ func bigDataGuest(t *testing.T, shape string, fill int) string {
 		// One fewer closing paren than the "flat" arm: the module stays open
 		// for the second function.
 		b.WriteString("\n      (return))\n    (unreachable))\n")
+		// "relayed-and-blocky" holds the loop body at 15,000 whatever the
+		// spanner's size: the spanner crosses the limit and is relayed, the
+		// loop body is under it and stays, and its block room is -167,361.
+		// That is the module the relayed arm of the note has to be right
+		// about, and the only arrangement in which the widest-span function
+		// and the function with the least block room are different functions
+		// in a module that PACKAGES.
+		blockFill := fill
+		if shape == "relayed-and-blocky" {
+			blockFill = 15000
+		}
 		b.WriteString(`  (func $blocky (export "fk_data") (local $i i32) (local $s i32) (local $n i32)
     (local.set $n (i32.const 4))
     (block $out
@@ -382,7 +393,7 @@ func bigDataGuest(t *testing.T, shape string, fill int) string {
         (loop $top
           (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
           (br_if $out (i32.eq (local.get $i) (i32.const 3)))`)
-		for i := 0; i < fill; i++ {
+		for i := 0; i < blockFill; i++ {
 			b.WriteString("\n          (local.set $s (i32.add (local.get $s) (i32.const 1)))")
 		}
 		b.WriteString(`
@@ -760,4 +771,91 @@ func TestARefusedModulesJumpRowIsTheRefusedFunctions(t *testing.T) {
 	t.Logf("refused on %s: span %d, block %d, hop %d, room %d", fn,
 		num("widest_span_bytes"), num("widest_block_bytes"), num("hop_bytes"),
 		num("block_room_bytes"))
+}
+
+// THE MODULE ROW'S BLOCK IS THE MODULE'S WORST, and the whole-diff review of
+// 2026-09-08 is why this test exists: the row took its block and its room from
+// the function with the WIDEST SPAN, so a module carrying a 572 KB body-level
+// span in one function and a 495 KB loop body in another printed "327,625 bytes
+// of block room (100%)", no advisory line, and `block_room_bytes` of +327,625
+// in the report -- the relay's ceiling reported from the function nearest
+// Lua's. `bigDataGuest(t, "both", 15000)` is that module: $spanner at 40,000
+// statements is the widest span and under the limit, $blocky at 15,000 is the
+// longest block and cannot be relayed, and nothing is refused because nothing
+// has crossed.
+//
+// Red-proven by selecting Blockiest the way Widest is selected (by span): the
+// row names $spanner, block_room_bytes reads +327,625, and the stdout carries
+// neither the loop body's block nor the advisory line.
+func TestTheModuleRowsBlockIsTheFunctionWithTheLeastRoom(t *testing.T) {
+	doc, out, err := runModReportOut(t, "--data-module", bigDataGuest(t, "both", 15000))
+	if err != nil {
+		t.Fatalf("the fixture was refused, so it is not the case under test: %v\n%s", err, out)
+	}
+	j := at(t, doc, "jumps", "data").(map[string]any)
+	num := func(k string) int { return int(j[k].(float64)) }
+	spanFn, _ := j["widest_span_function"].(string)
+	blockFn, _ := j["widest_block_function"].(string)
+	if !strings.Contains(spanFn, "spanner") {
+		t.Fatalf("the widest span is in %q; this fixture needs it in $spanner", spanFn)
+	}
+	if num("stations") != 0 {
+		t.Fatalf("the fixture was relayed (%d station(s)); this test is the no-relay arm", num("stations"))
+	}
+	if !strings.Contains(blockFn, "blocky") {
+		t.Errorf("widest_block_function is %q, and the longest block in the module is "+
+			"$blocky's loop body", blockFn)
+	}
+	room, block, hop := num("block_room_bytes"), num("widest_block_bytes"), num("hop_bytes")
+	if room >= 0 || block <= hop {
+		t.Errorf("block_room_bytes is %+d and widest_block_bytes %d against a hop of %d; "+
+			"the row is reading the widest-span function's block, and the module "+
+			"holds a loop body the relay could not carry", room, block, hop)
+	}
+	for _, w := range []string{
+		"no relay needed",
+		fmt.Sprintf("widest block %d bytes in %s against", block, blockFn),
+		strconv.Itoa(room),
+		"the relay could NOT carry it if it crossed: the widest run in " + blockFn,
+	} {
+		if !strings.Contains(out, w) {
+			t.Errorf("the stdout says nothing about %q:\n%s", w, out)
+		}
+	}
+}
+
+// THE SAME ON THE RELAYED ARM. A module the relay carried can still hold a
+// loop body it could not carry, in a function that has not crossed the limit
+// yet; that module packages, its second line gives the general advice, and it
+// used to stop there. `relayed-and-blocky` at 30,000 is $spanner at 80,000
+// statements (1.12 MB, relayed) beside $blocky at 15,000 (495 KB, room
+// -167,361). Red-proven by dropping the third line, which fails at "the stdout
+// says nothing about \"could NOT carry\"".
+func TestARelayedModuleStillSaysWhatTheRelayCannotCarry(t *testing.T) {
+	doc, out, err := runModReportOut(t, "--data-module", bigDataGuest(t, "relayed-and-blocky", 30000))
+	if err != nil {
+		t.Fatalf("the fixture was refused, so it is not the case under test: %v\n%s", err, out)
+	}
+	j := at(t, doc, "jumps", "data").(map[string]any)
+	num := func(k string) int { return int(j[k].(float64)) }
+	if num("stations") == 0 || j["relayed"] != true {
+		t.Fatalf("the fixture was not relayed; this test is the relayed arm")
+	}
+	blockFn, _ := j["widest_block_function"].(string)
+	if !strings.Contains(blockFn, "blocky") {
+		t.Errorf("widest_block_function is %q, want $blocky", blockFn)
+	}
+	if room := num("block_room_bytes"); room >= 0 {
+		t.Errorf("block_room_bytes is %+d on a module holding a loop body longer than a hop", room)
+	}
+	for _, w := range []string{
+		"relayed through",
+		"the number that bounds it is the block room and not the span",
+		"and the relay could NOT carry " + blockFn + " if its widest span crossed",
+		"the widest run in " + blockFn + " with nowhere at body level",
+	} {
+		if !strings.Contains(out, w) {
+			t.Errorf("the stdout says nothing about %q:\n%s", w, out)
+		}
+	}
 }

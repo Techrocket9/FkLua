@@ -460,6 +460,9 @@ func EmitModuleJumps(m *ir.Module, opts Options) (string, []FuncSpan, ModuleJump
 		if f.SpanBytes > jumps.Widest.SpanBytes {
 			jumps.Widest = f
 		}
+		if f.BlockBytes > jumps.Blockiest.BlockBytes {
+			jumps.Blockiest = f
+		}
 		if f.AfterBytes > jumps.AfterBytes {
 			jumps.AfterBytes = f.AfterBytes
 		}
@@ -479,7 +482,7 @@ func EmitModuleJumps(m *ir.Module, opts Options) (string, []FuncSpan, ModuleJump
 			// comfortable block room for a build that had just stopped. On a
 			// refusal every number in this row describes ONE function, the one
 			// the build failed on.
-			jumps.Widest = f
+			jumps.Widest, jumps.Blockiest = f, f
 			return "", nil, jumps, err
 		}
 		if fixed != body {
