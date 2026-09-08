@@ -78,9 +78,8 @@ def main():
     #    plus one extra test per store. This script's own count assertion is
     #    what caught the change: it exited "loop B's store matched 0 times".
     s = sub(s,
-            "    if t0 >= 0 and t0 + 4 <= SHBOUND then\n"
-            "      S1[t0 / 4 + 1] = t1 %% 4294967296.0\n"
-            "    else\n"
+            "    if t0 >= 0 and t0 + 4 <= SHBOUND then "
+            "S1[t0 / 4 + 1] = t1 %% 4294967296.0 else\n"
             "      if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end\n"
             "      if t0 %% 4 == 0 then MEM[(t0 - t0 %% %d) / %d + 1]"
             "[t0 %% %d / 4 + 1] = t1 %% 4294967296.0 "

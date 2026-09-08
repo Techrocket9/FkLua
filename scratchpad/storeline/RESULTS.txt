@@ -1,0 +1,25 @@
+Do the two spellings of the inlined 4-byte store's fast arm compile to the
+same bytecode?
+
+    bin/lua52f scratchpad/storeline/dumpcmp.lua
+
+    table / none mode      executable 256 vs 256 bytes, IDENTICAL; whole dump 650 vs 650 (the difference is lineinfo and the source name)
+    packed / collected     executable 399 vs 399 bytes, IDENTICAL; whole dump 964 vs 964 (the difference is lineinfo and the source name)
+    VERDICT: same bytecode, fewer lines
+    CONTROL: no % 2^32     executable 256 vs 252 bytes, DIFFERENT; whole dump 650 vs 642 (the difference is lineinfo and the source name)
+    CONTROL OK: the comparison can say DIFFERENT
+
+Yes. `if C then A B else` is a statement LIST, so it is the same program as the
+four-line block form: identical code array, identical constants, identical
+upvalue descriptors. What differs is the DumpDebug block -- the per-instruction
+line numbers and the source name -- and the proto's own linedefined /
+lastlinedefined pair, which is exactly the two lines the change removes.
+
+The control is the part that makes the other three rows mean anything. Drop the
+store's `% 2^32`, one real change to the program that costs no lines at all, and
+the same comparison reports DIFFERENT. A comparison that could not do that would
+have reported IDENTICAL for everything.
+
+Never run this under the Homebrew lua: 5.5 has an integer subtype and a
+different dump format, and it would answer a question about a VM Factorio does
+not have.

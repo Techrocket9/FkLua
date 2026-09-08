@@ -484,10 +484,11 @@ func (b *builder) emitGuardedStore32(g *analysis.LoopGuard, s ir.Step, fw *forwa
 	b.line("if %s then %s = %s %% %s else", guardName(g.Header), b.guardRef(g, i), v, wrapMod)
 	b.indent++
 	b.line("t0 = %s", addrExpr(addr, s.Instr.MemOffset))
-	b.line("if %s then", shardFast(4, false))
-	b.markLineIndented(4)
-	b.line("  S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
-	b.line("else")
+	gfast := fmt.Sprintf("S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
+	if b.marksPages() {
+		gfast = markExpr(4) + " " + gfast
+	}
+	b.line("if %s then %s else", shardFast(4, false), gfast)
 	b.line("  if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end")
 	b.markLineIndented(4)
 	b.line("  if t0 %% 4 == 0 then %s = %s %% %s else st32(MEM, MEMSIZE, t0, %s) end",

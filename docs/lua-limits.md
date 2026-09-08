@@ -90,7 +90,7 @@ The threshold ships at five bytes per instruction, so 655,355 bytes, which is ab
 Packaging prints what each module's widest jump cost, under the line that names that module. Each of the two lines below is one line as the tool prints it:
 
 ```
-  jump span: widest 958365 bytes in (*github.com/Techrocket9/fkrecipes/go.Lib).PlanData (146% of the 655355-byte limit), relayed through 11 station(s) in 1 function(s); widest span after the relay 328167 bytes (50% of the limit); widest block 802 bytes against the 327677 one hop covers, so 326875 bytes of block room (100%)
+  jump span: widest 954969 bytes in (*github.com/Techrocket9/fkrecipes/go.Lib).PlanData (146% of the 655355-byte limit), relayed through 11 station(s) in 1 function(s); widest span after the relay 328189 bytes (50% of the limit); widest block 802 bytes against the 327677 one hop covers, so 326875 bytes of block room (100%)
   the relay carried this module, so the number that bounds it is the block room and not the span: a station is a label, a label only goes at function body level, and the relay refuses when a run with none in it is longer than one hop. Keep a long straight-line run at the function's own body level rather than nested inside one if or loop body, and put //go:noinline (Go) or #[inline(never)] (Rust) on your section functions so no single function carries a block that long.
 ```
 
@@ -110,19 +110,19 @@ A module that needed no relay gets the block and the room too, because those are
   "data": {
     "limit_bytes": 655355,
     "hop_bytes": 327677,
-    "widest_span_bytes": 958365,
+    "widest_span_bytes": 954969,
     "widest_span_function": "(*github.com/Techrocket9/fkrecipes/go.Lib).PlanData",
     "stations": 11,
-    "widest_span_after_relay_bytes": 328167,
+    "widest_span_after_relay_bytes": 328189,
     "widest_block_bytes": 802,
     "block_room_bytes": 326875,
     "relayed": true,
     "relayed_functions": [
       {
         "function": "(*github.com/Techrocket9/fkrecipes/go.Lib).PlanData",
-        "widest_span_bytes": 958365,
+        "widest_span_bytes": 954969,
         "stations": 11,
-        "widest_span_after_relay_bytes": 328167,
+        "widest_span_after_relay_bytes": 328189,
         "widest_block_bytes": 802,
         "block_room_bytes": 326875
       }

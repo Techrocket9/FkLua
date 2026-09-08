@@ -2147,7 +2147,12 @@ func (b *builder) inlineLoads() bool { return b.opt >= analysis.O3 }
 //
 // -opt=3 only, for the same reason as the load and with the same trade. A store
 // is already a statement, so nothing about expression folding is given up here;
-// what it costs is size, four lines where there was one.
+// what it costs is size. Counted on real emitted output rather than estimated:
+// FIVE lines where the call was one -- `t0 = <address>` and a four-line branch
+// -- in a mode with no dirty-page barrier, and SIX where the barrier is
+// emitted, plus one more in either when the value is composite enough to need
+// t1. It was seven and nine before the barrier was gated on marksPages() and
+// the fast arm moved onto the opener line.
 func (b *builder) inlineStores() bool { return b.opt >= analysis.O3 }
 
 // emitInlineStore32 expands i32.store at its use site: the mirror of the
@@ -2239,12 +2244,14 @@ func (b *builder) emitInlineStore32(s ir.Step, fw *forwarding, i int, addr, val 
 	// negative page number that reaches DPQ, the flush and `storage`. The
 	// bounds check has always come first here; the merged form keeps it first
 	// on both paths, at the price of one duplicated line on the cold arm.
-	b.line("if %s then", shardFast(4, b.al.AddrDividesBy(i, 4)))
-	b.indent++
-	b.markLine(4)
-	b.line("S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
-	b.indent--
-	b.line("else")
+	// The fast arm rides the opener line, exactly as the inlined LOAD's does.
+	// Lua reads a block as a statement list, so `if C then A B else` is the same
+	// program as the four-line form -- identical bytecode, two fewer lines.
+	fast := fmt.Sprintf("S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
+	if b.marksPages() {
+		fast = markExpr(4) + " " + fast
+	}
+	b.line("if %s then %s else", shardFast(4, b.al.AddrDividesBy(i, 4)), fast)
 	b.indent++
 	b.line("if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end")
 	b.markLine(4)
@@ -2252,6 +2259,14 @@ func (b *builder) emitInlineStore32(s ir.Step, fw *forwarding, i int, addr, val 
 		shardSlowRefNoTmp(), v, wrapMod, v)
 	b.indent--
 	b.line("end")
+}
+
+// markExpr is markLine's text, for the caller that puts it on a line WITH the
+// statement it guards rather than on a line of its own -- the inlined store's
+// fast arm, which rides the opener.
+func markExpr(width int64) string {
+	return fmt.Sprintf("if MEMDIRTY and (t0 < DPLO or t0 + %d > DPHI) then MEMPACK.mark(t0, t0 + %d) end",
+		width-1, width-1)
 }
 
 // inlineWideStores reports whether an 8-byte STORE is expanded at its use site
