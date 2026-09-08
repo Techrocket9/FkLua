@@ -323,7 +323,7 @@ match v.string() {
 }
 ```
 
-`str_("item")` builds a string value from text and `bytes_(b"\xff\x00")` builds one from bytes; `LuaStr` also offers `as_str()` for the checked conversion and `to_string_lossy()` when a replacement character is genuinely what you want, such as in a log line. `Keys` returns `Vec<LuaStr>` for the same reason: a prototype name is a key in a namespace any mod can write.
+`str_("item")` builds a string value from text and `bytes_(b"\xff\x00")` builds one from bytes; `LuaStr` also offers `as_str()` for the checked conversion and `to_string_lossy()` when a replacement character is genuinely what you want, such as in a log line. `Keys` returns `Vec<LuaStr>` for the same reason: a prototype name is a key in a namespace any mod can write. A path element is a string crossing the other way and takes bytes too: `P::B(name.as_bytes())`, or `(&name).into()`, spells a name `keys` handed back exactly as the engine wrote it, so a prototype whose name is not UTF-8 can be reached as well as listed. In Go the path takes the string as it is.
 
 The exceptions are the conveniences over names the engine itself constrains, which stay `String` in Rust: `mods`, `mod_version`, `mod_name`, `feature_flags`, `derived_types` and `base_type`. If one of those is ever not valid UTF-8 the library stops the load, naming the surface and printing the bytes in hex, rather than rewriting it.
 

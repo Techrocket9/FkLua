@@ -179,9 +179,14 @@ func dataBytesExpectation() []string {
 			"LOG databytes: setting "+p+" "+hexOf(setting[p]),
 			"LOG databytes: field "+p+" "+hexOf(field[p]))
 	}
-	// The sorted prototype NAMES at a type, out of `keys`.
+	// The sorted prototype NAMES at a type, out of `keys`, and each one fed
+	// BACK IN as a path element to reach the prototype it names: a path
+	// element is a string crossing into the engine like any other, and the
+	// Rust half could not spell one that is not UTF-8 until P::B existed.
 	for _, k := range dataBytesKeyNames() {
-		out = append(out, "LOG databytes: key "+hexOf(k))
+		out = append(out,
+			"LOG databytes: key "+hexOf(k),
+			"LOG databytes: roundtrip "+hexOf(k))
 	}
 	// What `set` put back: the SETTING's bytes.
 	for _, p := range dataBytesProbes {

@@ -516,15 +516,36 @@ impl V {
 
 /// One element of a path: a prototype type, a prototype name, a field name, or
 /// an array index.
+///
+/// `S` is text and `B` is the same position as BYTES. A path element is a
+/// string crossing into the engine like any other, and a prototype name is a
+/// key any mod can write, so the name [`keys`] hands back as a [`LuaStr`] has
+/// to be spellable on the way back in: `P::B(name.as_bytes())`, or
+/// `(&name).into()`. Without it the contract held for every string but this
+/// one, and the Go twin needed no second form only because a Go string is
+/// already bytes.
 #[derive(Clone, Debug)]
 pub enum P<'a> {
     S(&'a str),
+    B(&'a [u8]),
     N(f64),
 }
 
 impl<'a> From<&'a str> for P<'a> {
     fn from(s: &'a str) -> Self {
         P::S(s)
+    }
+}
+
+impl<'a> From<&'a [u8]> for P<'a> {
+    fn from(b: &'a [u8]) -> Self {
+        P::B(b)
+    }
+}
+
+impl<'a> From<&'a LuaStr> for P<'a> {
+    fn from(s: &'a LuaStr) -> Self {
+        P::B(s.as_bytes())
     }
 }
 
@@ -864,6 +885,7 @@ fn encode_path(path: &[P]) -> u32 {
         .iter()
         .map(|p| match p {
             P::S(s) => V::Str(LuaStr::from(*s)),
+            P::B(b) => V::Str(LuaStr::from(*b)),
             P::N(n) => V::Num(*n),
         })
         .collect();

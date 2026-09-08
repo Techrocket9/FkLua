@@ -89,6 +89,14 @@ func onData() {
 	// ASCII names cannot hold to the contract.
 	for _, k := range fkdata.Keys(keyedType) {
 		fkdata.Log("databytes: key " + hexline(k))
+		// And BACK IN as a path element: the name a mod wrote, reaching the
+		// prototype that carries it. A Go string is bytes, so the path takes
+		// it as it is; the Rust twin spells the same position as P::B.
+		if v, ok := fkdata.Get(keyedType, k, "name"); ok {
+			fkdata.Log("databytes: roundtrip " + hexline(v.String()))
+		} else {
+			fkdata.Log("databytes: roundtrip ABSENT")
+		}
 	}
 
 	fkdata.Extend(fkdata.Obj(echo...))

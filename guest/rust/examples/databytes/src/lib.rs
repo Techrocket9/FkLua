@@ -99,6 +99,14 @@ pub extern "C" fn fk_data() {
     // ASCII names cannot hold to the contract.
     for k in fkdata::keys(&[P::S(KEYED_TYPE)]) {
         fkdata::log(&format!("databytes: key {}", hexline(k.as_bytes())));
+        // And BACK IN as a path element: the name a mod wrote, spelled as
+        // the bytes it is, reaching the prototype that carries it. A path
+        // that could only be text would be the one string on this surface
+        // that does not cross byte-exact.
+        match fkdata::get(&[P::S(KEYED_TYPE), P::B(k.as_bytes()), P::S("name")]) {
+            Some(v) => fkdata::log(&format!("databytes: roundtrip {}", hexline(v.bytes()))),
+            None => fkdata::log("databytes: roundtrip ABSENT"),
+        }
     }
 
     fkdata::extend(&[V::Map(echo)]);
