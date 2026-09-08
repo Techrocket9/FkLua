@@ -2159,6 +2159,7 @@ func (b *builder) inlineStores() bool { return b.opt >= analysis.O3 }
 //	t1 = <value>                                -- only when it is not a bare name
 //	if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end
 //	if MEMDIRTY and <t0's span left the cached page> then MEMPACK.mark(t0, t0 + 3) end
+//	                                          -- only where marksPages() is true
 //	if t0 % 4 == 0 then MEM[t0 / 4 + 1] = t1 % 2^32 else st32(..., t0, t1) end
 //
 // **Operand order and single evaluation.** t0 and t1 are pre-declared scratch
@@ -2172,17 +2173,29 @@ func (b *builder) inlineStores() bool { return b.opt >= analysis.O3 }
 // refused to forward a trapping operand into either position -- so moving the
 // bounds check after them cannot change WHICH trap a guest sees.
 //
-// **THE DIRTY-PAGE MARK IS NOT OPTIONAL.** Under --persist=packed, the page set
-// is what the next flush repacks. Every store in the system funnels through
-// st8b/st16/st32 precisely so that no store can miss it; inlining st32 means
-// inheriting that duty rather than escaping it. A store that does not mark its
-// page is not a slow store, it is a store silently absent from the save: the
-// guest runs correctly all session and comes back with stale memory, which in a
-// lockstep multiplayer game is a desync and not an error message. It is emitted
-// unconditionally and gated on MEMDIRTY exactly as st32 gates it, so this stays
-// correct in every persistence mode without the emitter having to know which one
-// is in force -- a coupling that would otherwise break the day `arm` is reachable
-// from somewhere new.
+// **THE DIRTY-PAGE MARK IS NOT OPTIONAL IN A MODE THAT CAN ARM IT.** Under
+// --persist=packed the page set is what the next flush repacks; under
+// --gc=collected it is the collector's write barrier. Every store in the system
+// funnels through st8b/st16/st32 precisely so that no store can miss it;
+// inlining st32 means inheriting that duty rather than escaping it. A store that
+// does not mark its page is not a slow store, it is a store silently absent from
+// the save: the guest runs correctly all session and comes back with stale
+// memory, which in a lockstep multiplayer game is a desync and not an error
+// message -- and under the collector it is worse, a live object the sweep
+// reclaims.
+//
+// The line is printed by markLine, which is gated on marksPages(), and that is
+// the SAME predicate inlineWideStores reads. So there is still exactly one copy
+// of the marking rule: the emitter does not know which mode is in force, it
+// knows whether the mode can arm the set, and both the wide store's gate and the
+// mark's emission ask that one question. The day `arm` is reachable from
+// somewhere new, that somewhere teaches marksPages about itself and every
+// emitting site follows. In a mode with no `arm` to publish the line is a test
+// that can only be false, so omitting it changes nothing a guest can observe --
+// which is exactly why it could sit there unread, and why the property is a TEXT
+// property: TestTheDirtyPageBarrierIsEmittedOnlyWhereItCanBeArmed asserts the
+// absence in table/none/auto and the presence in packed/collected, because a
+// gate with its condition backwards would satisfy either half alone.
 //
 // The `t0 < DPLO or t0 + 3 > DPHI` half is not a second correctness condition,
 // it is st32's own fast path printed here: DPLO/DPHI bound the page most
@@ -2216,7 +2229,7 @@ func (b *builder) emitInlineStore32(s ir.Step, fw *forwarding, i int, addr, val 
 	// over the same span.
 	if ref, ok := b.staticFold(i, s.Instr.MemOffset, 4); ok {
 		b.line("if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end")
-		b.line("if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then MEMPACK.mark(t0, t0 + 3) end")
+		b.markLine(4)
 		b.line("%s = %s %% %s", ref, v, wrapMod)
 		return
 	}
@@ -2228,13 +2241,13 @@ func (b *builder) emitInlineStore32(s ir.Step, fw *forwarding, i int, addr, val 
 	// on both paths, at the price of one duplicated line on the cold arm.
 	b.line("if %s then", shardFast(4, b.al.AddrDividesBy(i, 4)))
 	b.indent++
-	b.line("if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then MEMPACK.mark(t0, t0 + 3) end")
+	b.markLine(4)
 	b.line("S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
 	b.indent--
 	b.line("else")
 	b.indent++
 	b.line("if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end")
-	b.line("if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then MEMPACK.mark(t0, t0 + 3) end")
+	b.markLine(4)
 	b.line("if t0 %% 4 == 0 then %s = %s %% %s else st32(MEM, MEMSIZE, t0, %s) end",
 		shardSlowRefNoTmp(), v, wrapMod, v)
 	b.indent--
@@ -2285,9 +2298,53 @@ func (b *builder) emitInlineStore32(s ir.Step, fw *forwarding, i int, addr, val 
 //
 // Loads have no such constraint: nothing about reading memory is recorded.
 func (b *builder) inlineWideStores() bool {
-	return b.opt >= analysis.O3 &&
-		b.opts.Persist != PersistPacked &&
-		b.opts.GC != GCCollected
+	return b.opt >= analysis.O3 && !b.marksPages()
+}
+
+// marksPages reports whether anything in this module can ever arm MEMDIRTY.
+//
+// runtime/lua/fk_rt.lua assigns MEMDIRTY in exactly three places: MEMPACK.arm
+// sets it true, MEMPACK.gc_arm sets it true, and MEMPACK.gc_disarm restores it
+// to PKARM -- which only MEMPACK.arm ever writes. So the two arms are the only
+// sources of a true, and the chunk exposes `persist.arm` only under
+// --persist=packed and `persist.gc.arm` only under --gc=collected (see
+// emitModuleState). Under every other combination MEMDIRTY is `false` for the
+// life of the chunk, unreachable from the host, and every emitted
+// `if MEMDIRTY and ... then MEMPACK.mark(...) end` is a test that can only be
+// false.
+//
+// PersistAuto reads FALSE here, and that is not an oversight. `fklua compile`
+// hands it to the emitter unresolved -- only `fklua mod` runs ResolvePersist,
+// so that the choice can be printed -- and the publish site tests
+// `== PersistPacked`, so an auto chunk publishes no `arm` either. The gate and
+// the publish agree because they read the same condition.
+//
+// It is the SAME predicate inlineWideStores already turns on, which is what
+// keeps this from being a second copy of the marking rule: there is one
+// condition, and both the wide store's gate and the mark's emission read it.
+// TestTheDirtyPageBarrierIsEmittedOnlyWhereItCanBeArmed pins both directions.
+func (b *builder) marksPages() bool {
+	return b.opts.Persist == PersistPacked || b.opts.GC == GCCollected
+}
+
+// markLine prints the dirty-page update for a `width`-byte store at t0, or
+// nothing at all in a mode that cannot arm the set.
+func (b *builder) markLine(width int64) {
+	if !b.marksPages() {
+		return
+	}
+	b.line("if MEMDIRTY and (t0 < DPLO or t0 + %d > DPHI) then MEMPACK.mark(t0, t0 + %d) end",
+		width-1, width-1)
+}
+
+// markLineIndented is markLine one level in, for the two arms of the inlined
+// store, which the builder writes at b.indent+1 by hand.
+func (b *builder) markLineIndented(width int64) {
+	if !b.marksPages() {
+		return
+	}
+	b.line("  if MEMDIRTY and (t0 < DPLO or t0 + %d > DPHI) then MEMPACK.mark(t0, t0 + %d) end",
+		width-1, width-1)
 }
 
 // pfx is the helper-name prefix for the current NaN mode: exact-mode helpers

@@ -15,6 +15,12 @@
 -- the shard arithmetic's cost is only meaningful against a baseline that
 -- carries everything else the real access carries.
 --
+-- The MEMDIRTY test is the --persist=packed / --gc=collected shape as of
+-- 2026-09-07: the emitted barrier is gated on builder.marksPages(), so a table
+-- or none chunk carries no barrier at all now. Every arm here carries it
+-- identically, so it cancels out of every ratio; what it means is that these
+-- numbers describe the heavier of the two emitted shapes.
+--
 --   flat        MEM[t0 / 4 + 1]                       -- today
 --   divmod      MEMS[(t0 - t0 % SHB) / SHB + 1][...]  -- shard select, arithmetic
 --   bit32       MEMS[rshift(t0,21)+1][band(...)+1]     -- shard select, bit32
@@ -35,7 +41,7 @@ local MEM                    -- the flat word table: today's representation
 local MEMS                   -- shards, MEMS[s+1] is words [s*SHW, (s+1)*SHW)
 local SH                     -- shards keyed by SHARD BASE BYTE ADDRESS
 local MEMSIZE = 0            -- bytes
-local MEMDIRTY = false       -- packed/collector arm; false here, as table mode
+local MEMDIRTY = false       -- packed/collector arm; false here, i.e. unarmed
 local DPLO, DPHI = math.huge, -1
 local SHARDED = false        -- the runtime-transition mode flag (candidate b)
 local LD, ST                 -- the upvalue function slots (candidate b)

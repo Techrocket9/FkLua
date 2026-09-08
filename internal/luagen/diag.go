@@ -78,8 +78,12 @@ const (
 	PersistPacked
 
 	// PersistAuto asks the compiler to choose between table and packed from the
-	// module's declared heap size. It is never emitted: ResolvePersist turns it
-	// into one of the other two before code generation.
+	// module's declared heap size. `fklua mod` resolves it with ResolvePersist
+	// before code generation, so the choice can be printed -- but `fklua
+	// compile` does NOT, and hands it to the emitter as it stands, so the
+	// emitter has to have an answer for it. It behaves as a mode that publishes
+	// no `arm`: emitModuleState tests `== PersistPacked` and marksPages reads
+	// false for it, both for the same reason.
 	PersistAuto
 )
 

@@ -297,7 +297,7 @@ func (b *builder) emitLoopGuard(f *ir.Func, g *analysis.LoopGuard) {
 	// millions of times; this runs once per loop ENTRY, and skipping it keeps
 	// the emitted line honest about marking a whole span the cache cannot
 	// describe anyway.
-	if g.HasStore {
+	if g.HasStore && b.marksPages() {
 		b.line("if %s and MEMDIRTY then", name)
 		b.indent++
 		for _, gb := range g.Bases {
@@ -485,11 +485,11 @@ func (b *builder) emitGuardedStore32(g *analysis.LoopGuard, s ir.Step, fw *forwa
 	b.indent++
 	b.line("t0 = %s", addrExpr(addr, s.Instr.MemOffset))
 	b.line("if %s then", shardFast(4, false))
-	b.line("  if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then MEMPACK.mark(t0, t0 + 3) end")
+	b.markLineIndented(4)
 	b.line("  S1[t0 / 4 + 1] = %s %% %s", v, wrapMod)
 	b.line("else")
 	b.line("  if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end")
-	b.line("  if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then MEMPACK.mark(t0, t0 + 3) end")
+	b.markLineIndented(4)
 	b.line("  if t0 %% 4 == 0 then %s = %s %% %s else st32(MEM, MEMSIZE, t0, %s) end",
 		shardSlowRefNoTmp(), v, wrapMod, v)
 	b.line("end")

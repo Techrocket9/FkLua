@@ -68,24 +68,25 @@ def main():
     # 3. Loop B's STORE. Its addresses walk the WHOLE memory at an 8 KiB
     #    stride, so under `fast` it misses shard 0 on most iterations -- which
     #    is the point of having it: a guest whose working set is not at the
-    #    bottom of its memory. The mark is preserved verbatim and stays after
-    #    the bounds check, exactly as the emitter orders it.
+    #    bottom of its memory.
+    #
+    #    NO DIRTY-PAGE MARK IN EITHER ARM. This harness builds at
+    #    --persist=none on purpose (see run-shard-e2e.sh), and since the
+    #    barrier was gated on builder.marksPages() the emitter prints no
+    #    `if MEMDIRTY ...` line in a mode that cannot arm the set. The control
+    #    must not carry one the `fast` arm does not, or it measures the merge
+    #    plus one extra test per store. This script's own count assertion is
+    #    what caught the change: it exited "loop B's store matched 0 times".
     s = sub(s,
             "    if t0 >= 0 and t0 + 4 <= SHBOUND then\n"
-            "      if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then "
-            "MEMPACK.mark(t0, t0 + 3) end\n"
             "      S1[t0 / 4 + 1] = t1 %% 4294967296.0\n"
             "    else\n"
             "      if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end\n"
-            "      if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then "
-            "MEMPACK.mark(t0, t0 + 3) end\n"
             "      if t0 %% 4 == 0 then MEM[(t0 - t0 %% %d) / %d + 1]"
             "[t0 %% %d / 4 + 1] = t1 %% 4294967296.0 "
             "else st32(MEM, MEMSIZE, t0, t1) end\n"
             "    end\n" % (SHB, SHB, SHB),
             "    if t0 < 0 or t0 + 4 > MEMSIZE then trap_oob() end\n"
-            "    if MEMDIRTY and (t0 < DPLO or t0 + 3 > DPHI) then "
-            "MEMPACK.mark(t0, t0 + 3) end\n"
             "    t2 = t0 %% %d\n"
             "    MEM[(t0 - t2) / %d + 1][t2 / 4 + 1] = t1 %% 4294967296.0\n" % (SHB, SHB),
             "loop B's store")
