@@ -110,6 +110,17 @@ Usage:
       --into DIR repin a vendored FkLua checkout's committed bindings to this
                  project's pin -- what the library packages in its guest module
                  import, and what fklua mod refuses a mismatch of
+  fklua modsettings write --from FILE.json --out mod-settings.dat
+  fklua modsettings read mod-settings.dat
+                        Factorio's mod-settings.dat, the file that carries a
+                        PLAYER'S chosen values into the settings and data
+                        stages. The engine writes it and reads it back and
+                        nothing else does, so this is what lets a headless
+                        check run a stage on a flipped setting instead of only
+                        on the declared defaults. ` + "`read`" + ` prints the JSON form
+                        of an existing file to stdout, which is how to see what
+                        the engine settled on after a run. See
+                        docs/data-stage.md, "Verifying it"
   fklua bench [--runs N] [--json PATH]   run the M0 kernels under lua52f
   fklua bench --opt [--runs N]           compile the wasm kernels at each -opt
   fklua spectest [--filter S] [-v] [--nan=MODE] [--opt=N] [--gc=MODE]
@@ -148,7 +159,10 @@ order that file loads things in while hand-written Lua is still in the chain.
 A data module must not import the generated fkapi bindings: those stages have no
 runtime API, and packaging refuses one that does -- nor carry a collector, since
 it runs once at load and nothing there drives one. ` + "`fklua init <name> --data`" + `
-scaffolds the whole shape. See docs/data-stage.md.
+scaffolds the whole shape, and ` + "`fklua modsettings write`" + ` writes the
+mod-settings.dat that carries a PLAYER'S chosen values into those stages, which
+is what a headless run needs to exercise anything but the declared defaults.
+See docs/data-stage.md.
 
 ` + "`bench`" + ` measures FkLua-style generated Lua against the Lua a mod author
 would write by hand. ` + "`spectest`" + ` runs the official WebAssembly conformance
@@ -228,6 +242,11 @@ func main() {
 	case "mod":
 		if err := runMod(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "fklua mod: %v\n", err)
+			os.Exit(1)
+		}
+	case "modsettings":
+		if err := runModSettings(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "fklua modsettings: %v\n", err)
 			os.Exit(1)
 		}
 	case "spectest":

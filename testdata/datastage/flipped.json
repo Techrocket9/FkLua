@@ -1,0 +1,7 @@
+{
+  "comment": "The FLIPPED row of the data-stage in-game gate: the example guests' own startup setting, turned off, which is what a player who opened the Mod Settings screen and unticked the box would leave behind. fk_settings declares fkd-enabled with a default of true; the data stage reads it back through env(3), logs it, and puts it in the marker technology's enabled field, so this one bool moves the data dump and the log line at once. Nothing else is named here: a value under a name no mod declares is ignored by the engine, and a row that named one would be asserting nothing.",
+  "version": [2, 0, 77, 0],
+  "startup": {
+    "fkd-enabled": false
+  }
+}

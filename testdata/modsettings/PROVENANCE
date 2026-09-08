@@ -1,0 +1,33 @@
+testdata/modsettings/engine-2.0.77.dat is a mod-settings.dat FACTORIO ITSELF
+WROTE. Nothing in this repository encoded it, which is the whole point: every
+other test in internal/modsettings compares that package against itself and
+would stay green for a reader and a writer that agreed on the wrong layout.
+
+HOW IT WAS TAKEN, on 2026-09-07:
+
+    "$FACTORIO" --version                     # Version: 2.0.77 (build 84539, mac-arm64, steam)
+    FACTORIO_USERDIR=/tmp/fk-r5-settings ./scripts/run-datastage.sh
+    cp testdata/tmp/datastage-settings-go-2.dat testdata/modsettings/engine-2.0.77.dat
+
+The gate packages guest/go/examples/datastage as the mod fkd-example, whose
+settings stage declares one startup bool-setting, fkd-enabled, defaulting to
+true. The DEFAULT row's second run is the arm with no mod-settings.dat in the
+mod directory at all, so the engine WROTE this file from nothing rather than
+rewriting one of ours: 105 bytes, the version header 2.0.77.0 with a zero flag,
+and the three sections with fkd-enabled true in startup.
+
+WHAT IT HOLDS, and it was read before it was committed: the four version
+numbers, the three section names, one setting name that this repository's own
+example guest declares, and the value true. No path, no account, no machine
+name and nothing from the Factorio install.
+
+TAKE IT AGAIN, on this engine or another, by running the gate and copying the
+same file. A line for a second engine is a second file beside this one, named
+for its engine, plus its case in internal/modsettings; the format has not moved
+between 2.0 and 2.1, so a second file is a check rather than an obligation.
+
+MEASURED IN THE SAME RUN, and it is the strongest thing here: on the FLIPPED
+row the mod-settings.dat the engine rewrote after the run is BYTE-IDENTICAL to
+the one `fklua modsettings write` had installed (cmp, 105 bytes, exit 0). So the
+encoder does not merely produce something the engine accepts; for this document
+it produces the bytes the engine produces.

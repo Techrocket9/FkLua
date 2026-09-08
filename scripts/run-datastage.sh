@@ -14,16 +14,52 @@
 # control.lua, so this is a pure data-stage instrument and it costs about two
 # and a half seconds per run.
 #
-# THREE ASSERTIONS, and the order is by strength:
+# TWO ROWS PER LANGUAGE, AND THE SECOND ONE IS A PLAYER'S CHOICE. The DEFAULT
+# row is every setting left where the guest declared it, which is the load a
+# player who never opens the settings screen gets. The FLIPPED row is the same
+# mod with testdata/datastage/flipped.json written into the mod directory as
+# mod-settings.dat by `fklua modsettings write`: the example guests' own
+# fkd-enabled turned off, which the settings stage stores and the data stage
+# reads back through env(3) into the marker technology's `enabled` field.
 #
-#   1. The normalised dump matches a committed golden. This is the real one.
-#   2. The GO and RUST guests produce the SAME dump. Two hand-written guest
-#      libraries drift, and a census cannot see either of them -- that is the
-#      whole reason both were built in one round.
-#   3. Two runs of the same guest produce the same dump. A tripwire rather
+# Until that row existed this gate could only ever run the stages on DECLARED
+# values, and "the settings stage stores what a player chose and the data stage
+# reads it back" was the one thing about the feature nothing measured. Nothing
+# but the engine can measure it: a stand-in has no stored value to read.
+#
+# THE WRITER IS FKLUA'S OWN, and that is deliberate rather than convenient.
+# This script already builds bin/fklua every run (see below), so `fklua
+# modsettings write` costs nothing extra; a second tool would be a second thing
+# to build, a second implementation of the binary format to keep in step, and a
+# second answer the day the two disagreed. It is also the whole reason the
+# command exists in the compiler: every guest library on the channel gets this
+# row by writing its own JSON.
+#
+# SEVEN ASSERTIONS, and the order is by strength:
+#
+#   1. The normalised dumps match a committed golden, for BOTH rows. This is
+#      the real one.
+#   2. The GO and RUST guests produce the SAME dumps, for both rows. Two
+#      hand-written guest libraries drift, and a census cannot see either of
+#      them -- that is the whole reason both were built in one round.
+#   3. Two runs of the same guest produce the same dumps. A tripwire rather
 #      than a discovery: it is true today, and the day it stops being true the
 #      data stage has become nondeterministic and every mod built on it is a
 #      join refusal waiting to happen.
+#   4. The FLIPPED dump DIFFERS from the default one. A settings file the
+#      engine ignored, one this script failed to install, or a writer that
+#      wrote the declared default would otherwise produce a second row
+#      identical to the first, and every check above would still pass.
+#   5. Each row logs the value it ran on by name: `startup fkd-enabled is true`
+#      on the default row and `is false` on the flipped one. A hash can only
+#      say "different"; this names the cause.
+#   6. The mod-settings.dat the engine REWROTE after the flipped run still
+#      carries false, read back with `fklua modsettings read`. The engine
+#      rewrites the file with the values it settled on and resets anything out
+#      of range or off a dropdown's list, so this is asserted rather than
+#      assumed.
+#   7. The guest's own log lines are in each run, so a dump that matched while
+#      the guest never ran cannot pass.
 #
 # NORMALISATION IS NOT OPTIONAL. Key order in the dump is INSERTION order, so
 # two mods differing only in the order they extend produce dumps that differ at
@@ -52,6 +88,8 @@ MODVER=0.1.0
 TMPDIR="$ROOT/testdata/tmp"
 MODDIR="$TMPDIR/datastage-mods"
 GOLDEN="$ROOT/testdata/datastage/dump-sha256.txt"
+FLIPPED_JSON="$ROOT/testdata/datastage/flipped.json"
+FLIPPED_DAT="$TMPDIR/datastage-flipped.dat"
 
 [ -x "$FACTORIO" ] || { echo "factorio not found at: $FACTORIO" >&2; echo "set FACTORIO_BIN" >&2; exit 1; }
 SERIES="$(factorio_series)"
@@ -121,6 +159,18 @@ export PATH="/opt/homebrew/opt/binaryen/bin:$PATH"
 # proven otherwise; agents/testing.md has the longer version, twice.
 go build -o "$ROOT/bin/fklua" "$ROOT/cmd/fklua"
 
+# THE FLIPPED ROW'S SETTINGS FILE, written by the compiler that was just built.
+# There is no CLI for a mod-settings.dat outside this one: the engine writes it
+# and reads it back, and a headless gate that wants a player's chosen value in
+# front of the settings stage has to write those bytes itself. `write` decodes
+# what it encoded before writing, so a row edited into something that does not
+# round trip is a sentence naming the byte here rather than a Factorio that
+# refuses to start twenty seconds later.
+echo "writing the flipped row's mod-settings.dat..."
+[ -f "$FLIPPED_JSON" ] || { echo "no flipped settings at $FLIPPED_JSON" >&2; exit 1; }
+"$ROOT/bin/fklua" modsettings write --from "$FLIPPED_JSON" --out "$FLIPPED_DAT" ||
+  { echo "the flipped settings file did not encode" >&2; exit 1; }
+
 # The CONTROL guest, and this gate KEEPS ONE ON PURPOSE now that it does not
 # have to.
 #
@@ -160,8 +210,18 @@ build_data() {
   esac
 }
 
-# dump_once LANG RUN -> prints "<data sha256> <settings sha256>", both over
-# normalised dumps.
+# dump_once LANG RUN [SETTINGS] -> prints "<data sha256> <settings sha256>",
+# both over normalised dumps, and keeps the run's own dump and the mod
+# directory's mod-settings.dat under $TMPDIR so a later assertion can name a
+# particular row instead of reading whatever the last run happened to leave in
+# script-output.
+#
+# SETTINGS, when given, is a mod-settings.dat installed before the run.
+# MEASURED: the engine reads MODS/mod-settings.dat, beside the mod folders
+# rather than inside one, and it REWRITES that file after the run with the
+# values it settled on. The rewrite is what the flipped row's read-back
+# assertion reads, and this directory is torn down at the top of the next run,
+# so it is kept here or it is gone.
 #
 # THE SETTINGS DUMP IS HASHED TOO, and it took a gap to learn why: setting
 # prototypes live in the settings stage's own Lua state and NEVER reach
@@ -174,7 +234,7 @@ build_data() {
 # dumps where two names would put a difference in mod-settings-dump.json that
 # says nothing useful.
 dump_once() {
-  local lang="$1" run="$2" out sout
+  local lang="$1" run="$2" settings="${3:-}" out sout dhash shash
   rm -rf "$MODDIR"
   mkdir -p "$MODDIR"
   "$ROOT/bin/fklua" mod "$CONTROL" \
@@ -183,6 +243,11 @@ dump_once() {
     --factorio-version "$SERIES" \
     -o "$MODDIR" >"$TMPDIR/datastage-package-$lang.log" 2>&1 ||
     { cat "$TMPDIR/datastage-package-$lang.log" >&2; return 1; }
+
+  if [ -n "$settings" ]; then
+    cp "$settings" "$MODDIR/mod-settings.dat" ||
+      { echo "could not install $settings into $MODDIR" >&2; return 1; }
+  fi
 
   rm -f "$USERDIR/script-output/data-raw-dump.json" \
         "$USERDIR/script-output/mod-settings-dump.json"
@@ -194,8 +259,33 @@ dump_once() {
   sout="$USERDIR/script-output/mod-settings-dump.json"
   [ -f "$out" ] || { echo "no dump at $out" >&2; return 1; }
   [ -f "$sout" ] || { echo "no settings dump at $sout" >&2; return 1; }
-  echo "$("${NORMALISE[@]}" < "$out" | shasum -a 256 | cut -d' ' -f1) \
-$("${NORMALISE[@]}" < "$sout" | shasum -a 256 | cut -d' ' -f1)"
+  cp "$out" "$TMPDIR/datastage-raw-$lang-$run.json" || return 1
+
+  # The engine's own mod-settings.dat, kept whether one was installed or not: a
+  # run with no file gets one WRITTEN from the declared defaults, and a run with
+  # one gets it REWRITTEN. Both are the engine's bytes and both are read back.
+  [ -f "$MODDIR/mod-settings.dat" ] ||
+    { echo "the engine wrote no mod-settings.dat into $MODDIR" >&2; return 1; }
+  cp "$MODDIR/mod-settings.dat" "$TMPDIR/datastage-settings-$lang-$run.dat" || return 1
+
+  # ONE HASH PER LINE, AND EACH LINE CHECKS ITS OWN STATUS. Inside `echo`'s
+  # argument list the status of a command substitution is echo's, not the
+  # pipeline's, so a normaliser that died handed back the hash of EMPTY INPUT --
+  # e3b0c442..., stable, identical for both dumps, both runs and both languages,
+  # which every comparison in this script agrees with (measured: only the
+  # committed golden noticed).
+  #
+  # AND `set -e` IS NOT THE FIX, which is the part worth writing down: this
+  # function's output is captured with `h1="$(dump_once ...)"`, and inside a
+  # command substitution bash does not honour errexit at all -- measured on bash
+  # 5.3.15, a bare `false` in a function called that way is stepped straight
+  # over, while the same function called plainly aborts. So the status is tested
+  # here explicitly, the way every other step of this function already does.
+  dhash="$("${NORMALISE[@]}" < "$out" | shasum -a 256 | cut -d' ' -f1)" ||
+    { echo "the normaliser failed on $out" >&2; return 1; }
+  shash="$("${NORMALISE[@]}" < "$sout" | shasum -a 256 | cut -d' ' -f1)" ||
+    { echo "the normaliser failed on $sout" >&2; return 1; }
+  echo "$dhash $shash"
 }
 
 # mod_set LOG -- the data-stage mod set, as one comparable string.
@@ -213,6 +303,7 @@ mod_set() {
 
 FAIL=0
 FIRST=""
+FIRSTFLIPPED=""
 for lang in $LANGS; do
   echo "--- $lang ---"
   build_data "$lang"
@@ -220,14 +311,19 @@ for lang in $LANGS; do
 
   h1="$(dump_once "$lang" 1)"
   h2="$(dump_once "$lang" 2)"
+  # THE FLIPPED ROW RUNS LAST AND ONCE. Determinism is a property of the data
+  # stage rather than of a particular settings file, so the second DEFAULT run
+  # is what proves it and a second flipped run would buy nothing but two and a
+  # half more seconds.
+  hf="$(dump_once "$lang" flipped "$FLIPPED_DAT")"
   lua_bytes=$(wc -c < "$MODDIR/${MODNAME}_${MODVER}/fk_data_module.lua" | tr -d ' ')
-  proto_count=$(grep -c '"name"' "$USERDIR/script-output/data-raw-dump.json" || true)
   checksum=$(grep -o 'Prototype list checksum: [0-9]*' \
     "$TMPDIR/datastage-dump-$lang-2.log" | tail -1 || true)
 
   echo "  wasm $wasm_bytes B -> fk_data_module.lua $lua_bytes B"
   echo "  ${checksum:-Prototype list checksum: (not logged)}  <- SMOKE TEST ONLY: blind to field values"
-  echo "  sha256 (data, settings) $h1"
+  echo "  sha256 default (data, settings) $h1"
+  echo "  sha256 flipped (data, settings) $hf"
 
   if [ "$h1" != "$h2" ]; then
     echo "  FAIL: two runs of the same guest produced different dumps" >&2
@@ -238,22 +334,46 @@ for lang in $LANGS; do
     echo "  ok: two runs agree (the data stage is deterministic)"
   fi
 
-  # The guest's own log lines. A dump that matched while the guest never ran is
-  # the vacuous pass this has to be able to fail on: a data module that
-  # exported nothing would leave data.raw untouched and hash to whatever base
-  # alone hashes to.
-  if grep -q "fkdata example: data stage" "$TMPDIR/datastage-dump-$lang-2.log"; then
-    echo "  ok: the guest ran (its log lines are in the dump run)"
-  else
-    echo "  FAIL: the guest never logged anything, so the dump says nothing" >&2
+  # A SETTINGS FILE THE ENGINE IGNORED, one this script failed to install, or a
+  # writer that wrote the DECLARED default would leave the flipped row identical
+  # to the default one -- and every other check here would still pass: the two
+  # languages would agree, both runs would agree, and the golden would hold two
+  # identical hashes proving nothing about a player's choice.
+  if [ "$hf" = "$h1" ]; then
+    echo "  FAIL: the flipped row produced the same dump as the default one," >&2
+    echo "        so mod-settings.dat changed nothing" >&2
+    echo "        $FLIPPED_DAT was installed into $MODDIR" >&2
     FAIL=1
+  else
+    echo "  ok: the flipped settings file moved the dump"
   fi
 
-  # THE SETTINGS -> DATA ROUND TRIP, asserted in game by name: the setting
-  # fk_settings declared came back through env(3) at the data stage with its
-  # default value. The dump hash covers the same fact through the marker
-  # technology's enabled field, but a hash can only say "different"; this
-  # names the cause.
+  # The guest's own log lines, IN EVERY RUN. A dump that matched while the guest
+  # never ran is the vacuous pass this has to be able to fail on: a data module
+  # that exported nothing would leave data.raw untouched and hash to whatever
+  # base alone hashes to. Checking one of the three runs would leave the other
+  # two carrying that pass, and the flipped run is the one with a settings file
+  # in it -- the run where a guest is likeliest to die before it logs.
+  guest_ran=1
+  for run in 1 2 flipped; do
+    if ! grep -q "fkdata example: data stage" "$TMPDIR/datastage-dump-$lang-$run.log"; then
+      echo "  FAIL: the guest logged nothing in run $run, so that dump says nothing" >&2
+      echo "        (the log is $TMPDIR/datastage-dump-$lang-$run.log)" >&2
+      guest_ran=0
+      FAIL=1
+    fi
+  done
+  if [ "$guest_ran" = 1 ]; then
+    echo "  ok: the guest ran in all three runs (its log lines are in each)"
+  fi
+
+  # THE SETTINGS -> DATA ROUND TRIP, asserted in game by name, ON BOTH ROWS: the
+  # setting fk_settings declared came back through env(3) at the data stage,
+  # with its DECLARED value on the default row and with the PLAYER'S on the
+  # flipped one. The dump hashes cover the same fact through the marker
+  # technology's enabled field, but a hash can only say "different"; these name
+  # the cause, and the pair is what tells "the value moved" from "something else
+  # moved".
   if grep -q "fkdata example: startup fkd-enabled is true" \
     "$TMPDIR/datastage-dump-$lang-2.log"; then
     echo "  ok: the settings stage's own setting read back at the data stage"
@@ -261,55 +381,130 @@ for lang in $LANGS; do
     echo "  FAIL: the startup setting never came back at the data stage" >&2
     FAIL=1
   fi
+  if grep -q "fkdata example: startup fkd-enabled is false" \
+    "$TMPDIR/datastage-dump-$lang-flipped.log"; then
+    echo "  ok: the flipped row's stored value reached the data stage"
+  else
+    echo "  FAIL: the flipped row's data stage did not read fkd-enabled as false" >&2
+    echo "        (the log is $TMPDIR/datastage-dump-$lang-flipped.log)" >&2
+    FAIL=1
+  fi
+
+  # WHAT THE ENGINE SETTLED ON, read back rather than assumed. The engine
+  # rewrites mod-settings.dat after the run with the values it kept, and it does
+  # NOT keep everything: a number outside a setting's range and a dropdown value
+  # off its list are both RESET to the default (measured). So a row that the
+  # engine silently discarded would still be in the file this script wrote, and
+  # only the file the engine wrote can say what ran.
+  if "$ROOT/bin/fklua" modsettings read "$TMPDIR/datastage-settings-$lang-flipped.dat" \
+    >"$TMPDIR/datastage-settings-$lang-flipped.json" 2>"$TMPDIR/datastage-settings-$lang-flipped.err"; then
+    if grep -q '"fkd-enabled": false' "$TMPDIR/datastage-settings-$lang-flipped.json"; then
+      echo "  ok: the engine's own rewrite still carries fkd-enabled false"
+    else
+      echo "  FAIL: the mod-settings.dat the engine rewrote does not carry fkd-enabled false" >&2
+      sed 's/^/        /' "$TMPDIR/datastage-settings-$lang-flipped.json" >&2
+      FAIL=1
+    fi
+  else
+    echo "  FAIL: the mod-settings.dat the engine rewrote does not read back" >&2
+    sed 's/^/        /' "$TMPDIR/datastage-settings-$lang-flipped.err" >&2
+    FAIL=1
+  fi
 
   if [ -z "$FIRST" ]; then
     FIRST="$h1"
+    FIRSTFLIPPED="$hf"
     FIRSTLANG="$lang"
-  elif [ "$h1" != "$FIRST" ]; then
-    echo "  FAIL: $lang and $FIRSTLANG disagree about what the data stage produced" >&2
-    echo "        $FIRSTLANG $FIRST" >&2
-    echo "        $lang $h1" >&2
-    FAIL=1
   else
-    echo "  ok: identical to the $FIRSTLANG guest's dump"
+    if [ "$h1" != "$FIRST" ]; then
+      echo "  FAIL: $lang and $FIRSTLANG disagree about the default row" >&2
+      echo "        $FIRSTLANG $FIRST" >&2
+      echo "        $lang $h1" >&2
+      FAIL=1
+    else
+      echo "  ok: the default row is identical to the $FIRSTLANG guest's"
+    fi
+    if [ "$hf" != "$FIRSTFLIPPED" ]; then
+      echo "  FAIL: $lang and $FIRSTLANG disagree about the flipped row" >&2
+      echo "        $FIRSTLANG $FIRSTFLIPPED" >&2
+      echo "        $lang $hf" >&2
+      FAIL=1
+    else
+      echo "  ok: the flipped row is identical to the $FIRSTLANG guest's"
+    fi
   fi
   echo
 done
 
-# THE GOLDEN, per engine. --dump-data was verified on 2.0.77; the flag exists on
-# 2.1 and the mechanics are the same, but base's own prototypes move between
-# series, so a hash taken on one engine says nothing about the other.
+# THE GOLDEN, per engine AND PER ROW. --dump-data was verified on 2.0.77; the
+# flag exists on 2.1 and the mechanics are the same, but base's own prototypes
+# move between series, so a hash taken on one engine says nothing about the
+# other. The ROW tag is the second key because one file now describes two loads
+# of the same mod: the settings as the guest declares them, and the settings as
+# a player chose them.
 echo "--- golden ---"
 mkdir -p "$(dirname "$GOLDEN")"
 MODS="$(mod_set "$TMPDIR/datastage-dump-${FIRSTLANG}-2.log")"
 echo "mods: $MODS"
-WANT=""
-WANTMODS=""
-if [ -f "$GOLDEN" ]; then
-  WANT="$(awk -v e="$ENGINE" '$1 == e { print $2 " " $3 }' "$GOLDEN")"
-  WANTMODS="$(awk -v e="$ENGINE" '$1 == e { $1 = ""; $2 = ""; $3 = ""; sub(/^ +/, ""); print }' "$GOLDEN")"
-fi
-if [ -z "$WANT" ]; then
+
+# compare_row ROW HASHES KEPT -- one tagged golden line against one row.
+compare_row() {
+  local row="$1" hashes="$2" kept="$3" want wantmods
+  want=""
+  wantmods=""
+  if [ -f "$GOLDEN" ]; then
+    want="$(awk -v e="$ENGINE" -v r="$row" '$1 == e && $2 == r { print $3 " " $4 }' "$GOLDEN")"
+    wantmods="$(awk -v e="$ENGINE" -v r="$row" \
+      '$1 == e && $2 == r { $1 = ""; $2 = ""; $3 = ""; $4 = ""; sub(/^ +/, ""); print }' "$GOLDEN")"
+  fi
+  if [ -z "$want" ]; then
+    # THE ENGINE HAS A LINE AND THIS ROW IS NOT IN IT. That is a half-recorded
+    # golden rather than an unrecorded engine, and it is exactly what a file
+    # written before the row tag existed looks like: reading it as "record it"
+    # would leave one of the two rows silently unchecked forever.
+    echo "FAIL: the golden has a line for Factorio $ENGINE but no $row row" >&2
+    echo "  re-record BOTH rows for this engine:" >&2
+    echo "    $ENGINE default $FIRST $MODS" >&2
+    echo "    $ENGINE flipped $FIRSTFLIPPED $MODS" >&2
+    FAIL=1
+    return
+  fi
+  if [ "$wantmods" != "$MODS" ]; then
+    # NOT A FAILURE OF THE MOD, and saying so is the whole reason the mod set is
+    # in the file. A different DLC set is a different game.
+    echo "SKIP: the $row golden for Factorio $ENGINE was taken with a different mod set."
+    echo "  golden $wantmods"
+    echo "  here   $MODS"
+    echo "  (dump  $hashes)"
+    return
+  fi
+  if [ "$want" != "$hashes" ]; then
+    echo "FAIL: the $row dumps do not match the golden for Factorio $ENGINE" >&2
+    echo "  golden $want" >&2
+    echo "  got    $hashes" >&2
+    echo "  the dump is at $kept" >&2
+    FAIL=1
+    return
+  fi
+  echo "ok: the $row dumps match the committed golden for Factorio $ENGINE"
+}
+
+# A missing line reads as "record it" rather than as a failure, and it names
+# BOTH lines: a golden with one of the two rows would leave the other silently
+# unchecked, which is the shape this repository keeps meeting.
+if [ ! -f "$GOLDEN" ] ||
+   [ -z "$(awk -v e="$ENGINE" '$1 == e { print }' "$GOLDEN")" ]; then
   echo "no golden recorded for Factorio $ENGINE."
   echo "record it with:"
-  echo "    echo '$ENGINE  $FIRST  $MODS' >> ${GOLDEN#"$ROOT/"}"
-  echo "-- but read the dump first: a golden taken from a broken run is a gate"
+  echo "    cat >> ${GOLDEN#"$ROOT/"} <<'EOF'"
+  echo "$ENGINE default $FIRST $MODS"
+  echo "$ENGINE flipped $FIRSTFLIPPED $MODS"
+  echo "EOF"
+  echo "-- but read the dumps first: a golden taken from a broken run is a gate"
   echo "   that certifies the break forever."
-elif [ "$WANTMODS" != "$MODS" ]; then
-  # NOT A FAILURE OF THE MOD, and saying so is the whole reason the mod set is
-  # in the file. A different DLC set is a different game.
-  echo "SKIP: the golden for Factorio $ENGINE was taken with a different mod set."
-  echo "  golden $WANTMODS"
-  echo "  here   $MODS"
-  echo "  (dump  $FIRST)"
-elif [ "$WANT" != "$FIRST" ]; then
-  echo "FAIL: the dump does not match the golden for Factorio $ENGINE" >&2
-  echo "  golden $WANT" >&2
-  echo "  got    $FIRST" >&2
-  echo "The dump is at $USERDIR/script-output/data-raw-dump.json." >&2
-  FAIL=1
 else
-  echo "ok: matches the committed golden for Factorio $ENGINE"
+  compare_row default "$FIRST" "$TMPDIR/datastage-raw-$FIRSTLANG-2.json"
+  compare_row flipped "$FIRSTFLIPPED" "$TMPDIR/datastage-raw-$FIRSTLANG-flipped.json"
 fi
 
 echo

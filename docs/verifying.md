@@ -40,3 +40,22 @@ Two limits:
 - A headless `--create` has no player and no connected client, so any event that needs one never fires.
 
 [`scripts/run-guest.sh`](../scripts/run-guest.sh) is this recipe wired to the FkLua repository's own example guests.
+
+## Verifying it on a setting a player chose
+
+Everything above runs your mod on the settings it declares, which is the load a player who never opens the settings screen gets. A player's chosen values reach a mod through `mod-settings.dat`, a binary file the engine writes and reads back at every load; `fklua modsettings` writes and reads it, so a headless check can run on chosen values too.
+
+```sh
+cat > chosen.json <<'JSON'
+{"version": [2, 0, 77, 0],
+ "startup": {"my-mod-hard-mode": true, "my-mod-stack-size": 40},
+ "runtime-global": {},
+ "runtime-per-user": {}}
+JSON
+
+fklua modsettings write --from chosen.json --out verify/mods/mod-settings.dat
+```
+
+The file goes in the mod directory beside the mod folders, not inside one, and the run above then loads with those values in place. `fklua modsettings read verify/mods/mod-settings.dat` after the run prints the same JSON shape back: the engine rewrites the file with the values it settled on, and it resets a number outside a setting's range and a dropdown value off its list to the default rather than keeping them, so reading the file back is what says which values the load actually used.
+
+Startup settings reach the settings and data stages, which have a check of their own that never reaches `control.lua` and costs seconds rather than a map: [`docs/data-stage.md`](data-stage.md), "Verifying it".

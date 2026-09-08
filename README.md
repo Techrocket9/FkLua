@@ -121,7 +121,7 @@ The scaffold uses the two simplest hooks: `fk_on_init` once per save and `fk_on_
 
 `guest/go/examples/` holds twenty-eight more, each aimed at one thing: `array` and `dict` for marshalling, `callback` for commands and remote interfaces, `retain` for a handle that outlives its event, [`handles`](guest/go/examples/handles/main.go) for the three handle spaces and the rules for owning a slot, `gcsave` for the collector across a save, `migrate` for a rebuilt guest, [`ipc`](guest/go/examples/ipc/main.go) for [FkIPC](guest/go/fkipc/README.md), and [`datastage`](guest/go/examples/datastage/main.go) for a mod's settings and data stages. `guest/rust/examples/` mirrors thirteen of them line for line.
 
-A mod's **settings and data stages** can be a guest too, as a second wasm module packaged beside the control one. It defines prototypes, reads and patches `data.raw`, and clones a base prototype without marshalling it through the guest, which is what keeps the untouched fields exactly as the source shipped them. There is no runtime API at those stages, so a data module imports `fkdata` and never `fkapi`, and packaging refuses one that does; it also refuses one built with a collector, because it runs once at load and nothing there drives one. `fklua init <mod-name> --data` scaffolds it in every language the project declares. See [`docs/data-stage.md`](docs/data-stage.md).
+A mod's **settings and data stages** can be a guest too, as a second wasm module packaged beside the control one. It defines prototypes, reads and patches `data.raw`, and clones a base prototype without marshalling it through the guest, which is what keeps the untouched fields exactly as the source shipped them. There is no runtime API at those stages, so a data module imports `fkdata` and never `fkapi`, and packaging refuses one that does; it also refuses one built with a collector, because it runs once at load and nothing there drives one. `fklua init <mod-name> --data` scaffolds it in every language the project declares, and `fklua modsettings write` produces the `mod-settings.dat` that carries a player's chosen values into those stages, so a headless check can run on more than the declared defaults. See [`docs/data-stage.md`](docs/data-stage.md).
 
 ---
 
@@ -135,9 +135,9 @@ Documentation for mod authors lives under [`docs/`](docs/):
 | [`docs/generated-files.md`](docs/generated-files.md) | every file `fklua init`, `gen-bindings`, `lock` and `mod` write: which are yours to edit, which are regenerated, and how |
 | [`docs/memory.md`](docs/memory.md) | guest memory, the garbage collector and why Rust has one, the tuning knobs, the leaking opt-out, `--persist`, and migrating a recompiled guest |
 | [`docs/factorio-api.md`](docs/factorio-api.md) | calling the API: handles, events, filters and field masks, commands and remote interfaces, `defines`, and the version axes |
-| [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` |
+| [`docs/data-stage.md`](docs/data-stage.md) | writing a mod's settings and data stages in Go or Rust: the four hooks, reading and patching `data.raw`, cloning a prototype, ordering against hand-written Lua, and verifying with `--dump-data` on declared or on player-chosen settings |
 | [`docs/lua-limits.md`](docs/lua-limits.md) | the two Lua limits a generated guest can reach, what each packaging error means, and the `//go:noinline` / `#[inline(never)]` remedy |
-| [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod |
+| [`docs/verifying.md`](docs/verifying.md) | the headless create-and-benchmark check for any mod, and running it on settings a player chose |
 | [`docs/library-parity.md`](docs/library-parity.md) | keeping a two-language guest library honest: the transcript-comparison recipe and the committed-golden pin |
 | [`docs/debugging.md`](docs/debugging.md) | making a guest say what it is doing: the log, `fk.LastError`, `Value.Dump`, the line builder, and driving a packaged mod under the Lua oracle |
 | [`docs/from-lua.md`](docs/from-lua.md) | where a Lua mod author's habits land: the standard library module by module, desync-safe randomness, keeping handles across saves, and what has no guest form |
@@ -202,7 +202,7 @@ Everything else, including the tuning knobs, what recompiling does to the heap i
 
 ## Verifying a mod headlessly
 
-Factorio runs headless, so "does it load, and does it do the same thing twice" is a scriptable check: create a map (which is where `_initialize` and `fk_on_init` run), then `--benchmark` it twice and compare script checksums; two runs disagreeing means a nondeterministic guest, which in a lockstep game is a desync. The full recipe, generic over any mod, is [`docs/verifying.md`](docs/verifying.md).
+Factorio runs headless, so "does it load, and does it do the same thing twice" is a scriptable check: create a map (which is where `_initialize` and `fk_on_init` run), then `--benchmark` it twice and compare script checksums; two runs disagreeing means a nondeterministic guest, which in a lockstep game is a desync. The full recipe, generic over any mod, is [`docs/verifying.md`](docs/verifying.md). `fklua modsettings write` puts a chosen value in front of that run and `fklua modsettings read` prints back what the engine settled on, so a mod's settings are checkable headlessly too.
 
 ---
 

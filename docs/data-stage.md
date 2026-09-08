@@ -234,7 +234,7 @@ A prototype your guest builds is validated by Factorio, not by FkLua, and a valu
 
 **Research units.** A research unit takes tool items only: an ordinary item is `Invalid research unit (iron-plate). Research unit(s) can only be tool type items at the moment.`. A fluid name fails earlier and differently, `Error in assignID: item with name 'water' does not exist.`, because the name is resolved against items and no fluid exists there. A unit with an empty ingredient list loads; whether such a research completes in a running game is a question a headless dump cannot answer.
 
-**Settings, from the two sides that surprise people.** Setting prototypes are not in `data.raw` at the data stage: `data.raw["string-setting"]` is nil and indexing into it is a Lua error, so anything that needs to know which settings your mod declared has to carry the declarations itself. And a stored value is not the value you declared. A stored text is not trimmed, whatever `auto_trim` says, and reaches the stage with its leading and trailing spaces intact, so trim it yourself. A stored value of the wrong type, a number outside the declared range and a dropdown value outside `allowed_values` are all reset to the default before any stage runs, and the range case resets rather than clamping to the bound. Only the wrong-typed one says so: it logs a line and carries on loading, while the other two are silent, so a stage cannot tell a reset value from a value a player chose.
+**Settings, from the two sides that surprise people.** Setting prototypes are not in `data.raw` at the data stage: `data.raw["string-setting"]` is nil and indexing into it is a Lua error, so anything that needs to know which settings your mod declared has to carry the declarations itself. And a stored value is not the value you declared: the engine resets some of what a player's `mod-settings.dat` carries before any stage runs and passes the rest through untrimmed. The table under "Running a stage on a value a player chose" below lists what it does with each shape. The one thing to add here is that only a value of the wrong type says so, by logging a line and carrying on, while a number outside the declared range and a dropdown value outside `allowed_values` are reset in silence, so a stage cannot tell a reset value from a value a player chose.
 
 ## Sharing one config between the two stages
 
@@ -348,6 +348,52 @@ jq -S . script-output/data-raw-dump.json | shasum -a 256
 And **the engine's own `Prototype list checksum` is not an equivalence proof.** It is order-insensitive, which is convenient, and it is blind to field values: it does not move when a prototype's `stack_size` goes from 1 to 42. Use it as a smoke test and hash the normalised dump for anything that matters.
 
 A hash is per engine and per mod set, because the dump contains every mod that ran, bundled DLC data included.
+
+### Running a stage on a value a player chose
+
+A dump taken as above runs both stages on the values your guest declares, which is the load a player who never opens the settings screen gets. The other half needs a `mod-settings.dat`, the file that carries a player's chosen values into the settings and data stages. The engine writes that file and reads it back at every load, and nothing else produces it: `fklua modsettings` is the writer and the reader.
+
+```sh
+cat > chosen.json <<'JSON'
+{
+  "comment": "read and ignored, because JSON has no comment syntax",
+  "version": [2, 0, 77, 0],
+  "startup": {
+    "my-mod-hard-mode": true,
+    "my-mod-belt-speed": 20.0,
+    "my-mod-stack-size": 40,
+    "my-mod-recipe": "1 steel-plate, 10 water"
+  },
+  "runtime-global": {},
+  "runtime-per-user": {}
+}
+JSON
+
+fklua modsettings write --from chosen.json --out "$MODS/mod-settings.dat"
+factorio -c "$USERDIR/config/config.ini" --mod-directory "$MODS" --dump-data
+fklua modsettings read "$MODS/mod-settings.dat"
+```
+
+The file goes in the mod directory beside the mod folders, not inside one. A section you leave out is written empty, which is what the engine's own file carries for a stage nothing has set; setting names are the full prototype names your guest declared; and the order settings appear in is the order they are written in.
+
+**The type of a number is its spelling.** `40` is the signed 64-bit type, and `40.0` and `1e3` are the double, because an int setting and a double setting are different prototypes. The engine reads either encoding as the same number, so this is about the file saying which kind of setting a row is for.
+
+**Read the file back after the run rather than assuming what ran.** The engine rewrites `mod-settings.dat` when the load finishes, with the values it settled on, and it does not keep everything. Measured on Factorio 2.0.77:
+
+| what the file stores | what the engine does with it |
+|---|---|
+| a value of the wrong type for the setting | resets it to the default, and this is the one reset that logs a line |
+| a number outside the setting's range | resets it to the default; it is not clamped |
+| a dropdown value outside `allowed_values` | resets it to the default, before any stage runs |
+| a string with leading or trailing spaces | keeps both space runs, `auto_trim` or not: trimming is a GUI behaviour |
+| an empty string | resets it to the default |
+| a value under a name no mod declares | ignores it, and leaves it in the file |
+
+So the third command above is what says which values the stages actually saw, and it prints them in the same JSON shape `write` reads.
+
+**Both halves refuse rather than guess.** `write` names the key it cannot encode, and reads back what it encoded before it writes anything, so a file the engine would reject is a sentence naming the byte instead of a failed load. `read` names what it cannot describe in JSON and exits non-zero: a setting name or a stored value holding bytes that are not UTF-8 is refused rather than printed with each bad byte replaced, because that printout would write back a different file. A key named twice, at any level, is refused for the same reason: the later one would win in silence.
+
+A guest library that generates settings can add the same check to its own in-game gate by writing its own JSON. There is no encoder to write and no second tool to build: the compiler already owns the format.
 
 ## Where to look next
 

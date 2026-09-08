@@ -1,15 +1,27 @@
-# The data-stage acceptance golden, one line per engine:
+# The data-stage acceptance golden, two lines per engine:
 #
-#     <engine>  <sha256 of `jq -S .` over data-raw-dump.json> <sha256 of `jq -S .` over mod-settings-dump.json>  <the mod set>
+#     <engine> <row> <sha256 of `jq -S .` over data-raw-dump.json> <sha256 of `jq -S .` over mod-settings-dump.json>  <the mod set>
 #
 # Written and checked by scripts/run-datastage.sh, which packages
 # guest/{go,rust}/examples/datastage as a mod, runs `factorio --dump-data`, and
 # hashes both normalised dumps.
 #
+# WHY A ROW. The dump is a function of the SETTINGS the engine read as well as
+# of the guest. The `default` row is every setting left where the guest declared
+# it, which is the load a player who never opens the settings screen gets. The
+# `flipped` row is the same mod with testdata/datastage/flipped.json written
+# into the mod directory as mod-settings.dat by `fklua modsettings write`, which
+# is a player who opened the settings screen and unticked the box. Only the
+# engine can run that path: the settings stage stores a value and no stand-in
+# has one to read.
+#
 # WHY TWO HASHES. Setting prototypes live in the settings stage's own Lua state
 # and never reach data-raw-dump.json, so a golden over the data dump alone is
 # green for a guest whose fk_settings hook silently did nothing. The settings
 # dump is where they land, and hashing it is what lets the settings stage fail.
+# The two rows share a settings hash on purpose: a stored VALUE is not a
+# prototype, so flipping one moves the data dump and leaves the settings dump
+# alone, and that is the fact the pair records.
 #
 # WHY NORMALISED. Key order in the dumps is INSERTION order, so two mods
 # differing only in the order they call data:extend produce dumps that differ at
@@ -25,9 +37,10 @@
 #
 # WHY PER ENGINE. base's own prototypes move between series, so a hash taken on
 # one engine says nothing about another. A line is re-taken on its own engine
-# whenever the example guests change; the 2026-08-30 change (the settings->data
-# round trip, plus the env(4)/env(5) log lines) invalidated every earlier line
-# at once, so this file was re-taken from scratch on the engine then installed.
-# An engine with no line reads as "record it" rather than as a failure; switch
-# the Steam branch and run the script to add one.
-2.0.77  b94427c6df824f223001ea3a2e2045850d55101eb9a8f6f076fc3985bc7216c0 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e  base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
+# whenever the example guests change. An engine with NO line reads as "record
+# it" rather than as a failure; switch the Steam branch, run the script, and
+# append the two lines it prints. An engine with ONE of its two lines is a
+# FAILURE rather than a skip: a half-recorded golden leaves the other row
+# silently unchecked.
+2.0.77 default b94427c6df824f223001ea3a2e2045850d55101eb9a8f6f076fc3985bc7216c0 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
+2.0.77 flipped 6e2284d1505f9ee5ef3a1f63a1e0a8cb33d6fa5295df961c3ab6aceebcafacc7 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
