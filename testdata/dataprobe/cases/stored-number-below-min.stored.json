@@ -1,0 +1,5 @@
+{
+  "comment": "a double stored below the setting's minimum_value, and the witness proving the file was read",
+  "version": [2, 0, 77, 0],
+  "startup": { "fkdp-dbl": 0.1, "fkdp-witness": "present" }
+}

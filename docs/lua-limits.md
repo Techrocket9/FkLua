@@ -72,5 +72,6 @@ Real guests emit zero or one global, so this is rare. Measured today, 26 mutable
 ## Related
 
 - [Writing a mod's settings and data stages](data-stage.md), the guest shape most likely to reach the jump limit.
+- [What the engine checks](data-stage.md#what-the-engine-checks). Every limit on this page is Lua's. Factorio enforces its own on the prototypes a data stage builds, including a 200-character cap on a prototype name and a 20-parameter cap on a localised string, and those are measured there.
 - [Guest memory and the collector](memory.md).
 - [Verifying a mod headlessly](verifying.md), which is how to find out whether what you packaged loads.

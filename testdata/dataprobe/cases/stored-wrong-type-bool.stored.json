@@ -1,0 +1,5 @@
+{
+  "comment": "fact 8: a bool stored under a string setting",
+  "version": [2, 0, 77, 0],
+  "startup": { "fkdp-text": true }
+}

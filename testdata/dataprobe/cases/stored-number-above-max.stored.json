@@ -1,0 +1,5 @@
+{
+  "comment": "an int stored above the setting's maximum_value, and the witness proving the file was read",
+  "version": [2, 0, 77, 0],
+  "startup": { "fkdp-int": 70000, "fkdp-witness": "present" }
+}

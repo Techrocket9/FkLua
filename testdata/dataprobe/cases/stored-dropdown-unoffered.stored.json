@@ -1,0 +1,5 @@
+{
+  "comment": "a dropdown value the setting does not offer, and the witness proving the file was read",
+  "version": [2, 0, 77, 0],
+  "startup": { "fkdp-drop": "bogus", "fkdp-witness": "present" }
+}

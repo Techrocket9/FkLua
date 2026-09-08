@@ -1,0 +1,8 @@
+{
+  "name": "fkdataprobe",
+  "version": "0.0.1",
+  "title": "FkLua data-stage probe",
+  "author": "FkLua",
+  "factorio_version": "2.0",
+  "description": "Asks a real Factorio what it enforces at the settings and data stages. One case at a time: scripts/run-dataprobe.sh writes settings.lua and data.lua from testdata/dataprobe/cases and compares the outcome with expected.txt. Not a real mod."
+}

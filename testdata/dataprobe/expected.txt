@@ -1,0 +1,106 @@
+# What a real Factorio does with each probe case, one line per case.
+#
+# FORMAT
+#
+#   <case>  <outcome>  <text>
+#
+# Fields are separated by two or more spaces; <text> runs to the end of the
+# line and may contain single spaces. A blank line or one starting with # is a
+# comment. <case> names the files in cases/: <case>.settings.lua and
+# <case>.data.lua are the bodies appended to prelude.lua, either one optional,
+# and <case>.stored.json is encoded into the mod-settings.dat the run reads.
+#
+# THE FOUR OUTCOMES, which is the whole classification:
+#
+#   loaded            exit 0, script-output/data-raw-dump.json written, and NO
+#                     `Error` line anywhere in the run's output. A case that
+#                     expects this asserts the fact IN LUA with an error() call,
+#                     so a broken invariant turns the case into a refusal and the
+#                     probe reports the mismatch. <text> empty.
+#   logged  <text>    the same load, WITH an `Error` line, and <text> appears
+#                     somewhere in the run's output. For a fact the engine states
+#                     in a log line rather than by refusing.
+#   refused <text>    non-zero exit, no dump written, and <text> appears in the
+#                     first `Error` line of the run's output.
+#   aborted <text>    non-zero exit, no dump written, and the crash handler ran.
+#                     <text> appears in the first `Error` line.
+#
+# AN `Error` LINE IS NOT BY ITSELF A REFUSAL -- measured: the wrong-typed
+# stored-value cases log one and still exit 0 with a dump. The exit code and the
+# dump are read first, and the message second.
+#
+# THE OUTCOME IS READ OFF THE RUN, NEVER OFF THIS FILE. `loaded` and `logged`
+# are told apart by whether the log carries an `Error` line, so a case here
+# saying `loaded` whose engine begins writing one FAILS with the line shown
+# rather than passing quietly; and the "no dump written" in the two non-zero
+# outcomes is checked, not inferred from the exit code.
+#
+# <text> IS MATCHED AS A SUBSTRING, and that is deliberate rather than lax. The
+# engine's line carries a C++ source location (`Util.cpp:81`) and a property
+# tree path, which are facts about the build and not about the rule; the probe
+# prints every line it saw in full underneath the table, so a drift in the part
+# that is not pinned is still visible to a reader. For `refused` and `aborted`
+# the line matched is the FIRST `Error` line, which has a consequence for how a
+# case is written: such a case must not ALSO carry a stored value the engine
+# logs about, because that line would come first and the refusal's own would
+# never be reached. A `logged` case is matched against the whole log instead.
+#
+# WHAT THESE LINES ARE. Every one was measured on Factorio 2.0.77 (build 84539,
+# mac-arm64, steam) on 2026-09-07 by running this probe. Nothing here was copied
+# from a note. agents/datastage.md, "What the engine enforces, measured", is the
+# same table with the reasoning; docs/data-stage.md is the author-facing half.
+
+# --- a localised string's parameter and nesting limits ---
+locstring-params-20            loaded
+locstring-params-21            refused  Too many parameters for localised string: 21 > 20 (limit).
+locstring-nest-19              loaded
+locstring-nest-20              refused  Too deep recursion for localised string: 21 > 20 (limit).
+locstring-nested-groups        loaded
+locstring-data-params-21       refused  Too many parameters for localised string: 21 > 20 (limit).
+locstring-data-nest-20         refused  Too deep recursion for localised string: 21 > 20 (limit).
+
+# --- the prototype name charset and length ---
+name-dot                       refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-space                     refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-colon                     refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-comma                     refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-slash                     refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-star                      refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-bracket                   refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-nonascii                  refused  Invalid prototype name. Only characters A-Z a-z 0-9 _- are allowed.
+name-len-200                   loaded
+name-len-201                   refused  Name field is too large. Max allowed size is: 200.
+
+# --- ingredient amounts ---
+item-amount-0                  refused  Item ingredient can't have count of 0.
+item-amount-65535              loaded
+item-amount-65536              refused  Value (65536) outside of range. The data type allows values from 0 to 65535
+duplicate-ingredient           refused  Duplicate item ingredients are not allowed (iron-plate exists 2 or more times).
+
+# --- fluids, including the one case that aborts rather than refusing ---
+fluid-amount-0                 refused  amount must be larger than 0
+fluid-in-crafting              refused  Recipe is in 'crafting' category but has a non-item ingredient 'water' (fluid).
+fluid-in-crafting-with-fluid   loaded
+fluid-amount-1e301             loaded
+fluid-amount-1e302             aborted  double value not in range for fixed point number: inf
+fluid-amount-1p0715e301        loaded
+fluid-amount-1p0716e301        aborted  double value not in range for fixed point number: inf
+
+# --- what each stage can see ---
+settings-data-raw-empty        loaded
+setting-proto-absent           loaded
+setting-proto-index            refused  attempt to index field 'string-setting' (a nil value)
+
+# --- research units ---
+research-unit-item             refused  Invalid research unit (iron-plate). Research unit(s) can only be tool type items at the moment.
+research-unit-fluid            refused  Error in assignID: item with name 'water' does not exist.
+research-unit-empty            loaded
+
+# --- declared and stored setting values ---
+default-2401-chars             loaded
+stored-text-not-trimmed        loaded
+stored-wrong-type-double       logged   Failed to load mod mod setting (fkdp-text): Value must be a string
+stored-wrong-type-bool         logged   Failed to load mod mod setting (fkdp-text): Value must be a string
+stored-number-above-max        loaded
+stored-number-below-min        loaded
+stored-dropdown-unoffered      loaded

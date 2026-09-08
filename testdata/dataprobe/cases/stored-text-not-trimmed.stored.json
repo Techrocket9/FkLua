@@ -1,0 +1,5 @@
+{
+  "comment": "fact 7: a stored text is not trimmed by auto_trim",
+  "version": [2, 0, 77, 0],
+  "startup": { "fkdp-text": "  3 iron-plate , 0.5 [fluid=water]  " }
+}

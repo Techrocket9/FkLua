@@ -64,7 +64,7 @@ Three lessons outlived their fixes, and each is written into the section it belo
 | [`agents/gc.md`](agents/gc.md) | **Read before proposing anything about a guest-heap collector.** The incremental-GC design, the measured write-barrier table, the go/no-go verdict, the staged plan |
 | [`agents/ipc.md`](agents/ipc.md) | **Read before touching fkipc or anything that puts bytes on the UDP socket.** The wire format and why every field is where it is, sessions and the peer-minted epoch, the FOUR-MECHANISM filter ladder (HELLO = session boundary, epoch = frame filter, source port = mod filter, NAME = schema filter), **the ENGINE floor and why below it the library is INERT rather than send-only**, the determinism cost model that decides everything by DIRECTION — **and the rule it implies, that no peer-local signal may mutate guest state, which the load-reset design broke and a joining client measured** — the two probes' findings, the Rust mirror's five forced deviations, and what is still open |
 | [`agents/docs-style.md`](agents/docs-style.md) | **Read before creating or editing any human-facing document** (`README.md`, `docs/`, ledgers, reports). The public-audience house style: what must not appear, the formatting rules, the structure per document type, the licence wording, and the grep check to run before committing |
-| [`agents/datastage.md`](agents/datastage.md) | **Read before touching `guest/*/fkdata`, `runtime/lua/fk_data.lua` or the stage-file packaging.** The SETTINGS and DATA stages from a guest: what each stage's Lua environment actually is (probed, not quoted), why a data guest is a SECOND wasm module (+150 ms of parse per game load if it is not), the eight-import ABI and why errors RAISE there where the control ABI returns a status -- including the guest's OWN `raise`, the 2026-08-31 half of that convention, the host-side CLONE primitive and the fidelity argument that makes it a primitive, `[stages]` as a migration ramp, the sort-everything determinism rule, the six red proofs, the `--dump-data` acceptance gate, and the oracle's per-run `pairs()` seed |
+| [`agents/datastage.md`](agents/datastage.md) | **Read before touching `guest/*/fkdata`, `runtime/lua/fk_data.lua` or the stage-file packaging.** The SETTINGS and DATA stages from a guest: what each stage's Lua environment actually is (probed, not quoted), why a data guest is a SECOND wasm module (+150 ms of parse per game load if it is not), the eight-import ABI and why errors RAISE there where the control ABI returns a status -- including the guest's OWN `raise`, the 2026-08-31 half of that convention, the host-side CLONE primitive and the fidelity argument that makes it a primitive, `[stages]` as a migration ramp, the sort-everything determinism rule, the six red proofs, the `--dump-data` acceptance gate, **"What the engine enforces, measured"** -- the 41-case table of what the settings and data stages REFUSE (the name charset and length, the localised-string parameter and nesting limits, the ingredient and fluid amount rules, the fluid amount that ABORTS the engine rather than refusing, tool-only research units, and what the engine does with a value already stored for a setting), the three outcomes' measured timing bands, the WITNESS the three reset-to-default cases needed before they asserted anything, and that probe's nine injected defects -- and the oracle's per-run `pairs()` seed |
 | [`agents/sharding.md`](agents/sharding.md) | **Read before touching linear memory, and before quoting what a large Lua table costs.** Where the wall WAS (bracketed to 4,096 words), the in-game/host-side constant that closes gc.md's open item 1, the measured candidate table, the shipped representation and its refusals, stage B as built, **stage C: the cap is gone, the metadata scales, and the five defects that were hiding behind it**, §16: the shard-doubling residual, measured and ACCEPTED |
 | [`agents/library-ecosystem.md`](agents/library-ecosystem.md) | **Read before designing anything a third party imports.** The 2026-08-30 research record: same-language SOURCE libraries as the model and the MEASURED refusal of in-module cross-language (it links today and silently corrupts — 99,712/100,000 bytes), the two pin classes and the author rules with no other home (`/v2`, feature unification, the single-`fk`-crate convention), the fkipc stay-and-tag verdict, the flib port-not-shim verdict, the recipes/research first-library brief, the roads not taken with their numbers, and the two asks the toolkit points back here (`fklua mod --report`, `init --library`) |
 
@@ -964,6 +964,7 @@ FACTORIO_USERDIR=/tmp/fkuser ./scripts/run-guest.sh          # ...while a Factor
 ./bin/fklua gen-bindings --check                             # committed bindings are current
 FACTORIO_USERDIR=/tmp/fkdata ./scripts/run-datastage.sh     # the DATA STAGE in a real Factorio: --dump-data, normalised, hashed against a golden -- and Go against Rust
 LANGS=go FACTORIO_USERDIR=/tmp/fkdata ./scripts/run-datastage.sh  # ...one arm only
+FACTORIO_USERDIR=/tmp/fkdataprobe ./scripts/run-dataprobe.sh # what the engine REFUSES: 41 bare-Lua cases under --dump-data, each classified loaded/logged/refused/aborted against testdata/dataprobe/expected.txt -- from the RUN, never from what the case expected. 30 s. The other side of run-datastage.sh, whose every case is one that loads
 ./scripts/run-probe.sh && python3 scripts/analyze-probe.py   # in-game probe (needs Factorio)
 ```
 
@@ -981,7 +982,7 @@ git rebase master && git checkout master
 git merge --ff-only m<n>-<topic> && git branch -d m<n>-<topic>
 ```
 
-Committed on purpose, trading repo size for hermetic CI: `testdata/spec/` (wast2json output), `api/<version>/runtime-api.json`, generated bindings, `bench/baselines/`, `testdata/ipc/wire-vectors.txt` (the fkipc golden both codecs read), `testdata/ipcprobe/` (the probe mod) and `testdata/datastage/dump-sha256.txt` (the data-stage acceptance golden, one line per engine, carrying its mod set). Never committed: the Lua tarball, `dist/`, rebuildable `.wasm` fixtures, anything from the Factorio install, `scratch_tmp/`.
+Committed on purpose, trading repo size for hermetic CI: `testdata/spec/` (wast2json output), `api/<version>/runtime-api.json`, generated bindings, `bench/baselines/`, `testdata/ipc/wire-vectors.txt` (the fkipc golden both codecs read), `testdata/ipcprobe/` (the probe mod), `testdata/dataprobe/` (the data-stage refusal probe: the mod skeleton, one file per case, the stored-settings JSON inputs and `expected.txt`; the `.dat` files those cases run against are built per run and are not committed) and `testdata/datastage/dump-sha256.txt` (the data-stage acceptance golden, one line per engine, carrying its mod set). Never committed: the Lua tarball, `dist/`, rebuildable `.wasm` fixtures, anything from the Factorio install, `scratch_tmp/`.
 
 ---
 
@@ -1050,11 +1051,19 @@ docs/               the USER documentation the README links out to: the generate
                     docs/ directory by default; that output is never committed
                     in this repo
 third_party/        lua-5.2.1 patches + SHA-pinned fetch script
+testdata/dataprobe/ the DATA-STAGE REFUSAL PROBE: a bare-Lua mod skeleton
+                    (info.json, mod-list.json, prelude.lua), one file per case
+                    under cases/, and expected.txt naming every case's outcome.
+                    No wasm and no FkLua runtime on purpose -- what is under
+                    test is the ENGINE, and a compiler in the path would be a
+                    variable. scripts/run-dataprobe.sh drives it
 scripts/            the in-game and corpus tooling, five families: run-* (guest,
                     roundtrip, probe, gcbench, gctail, growbench, growprobe,
-                    shardprobe, shard-e2e, ipcprobe, ipc, ipcdemo, datastage --
-                    that last one BUILDS bin/fklua itself, because the stage shim
-                    is embedded in it and a stale binary packages a stale shim),
+                    shardprobe, shard-e2e, ipcprobe, ipc, ipcdemo, datastage,
+                    dataprobe -- the last two BUILD bin/fklua themselves, one
+                    because the stage shim is embedded in it and a stale binary
+                    packages a stale shim, the other because the mod-settings
+                    encoder its stored-value cases need is a subcommand),
                     analyze-*.py (one per
                     run-* probe), fetch-spec + coverage-gate + bench-guests,
                     the generators gen-kindnames.py / shard-e2e-edit.py /
