@@ -69,16 +69,23 @@ Six reps each, arms interleaved within every rep so session drift scales the gro
 
 ### As built: module sizes through the real pipeline
 
-`guest/{go,rust}/examples/datastage`, which reaches all seven of the original imports (`raise` cannot appear in a happy-path example -- it ends the stage -- and is pinned by the shim's raising-cases test instead):
+`guest/{go,rust}/examples/datastage`, which reaches all seven of the original imports (`raise` cannot appear in a happy-path example -- it ends the stage -- and is pinned by the shim's raising-cases test instead). Re-taken 2026-09-08 with the fklua that carries the size round of 2026-09-07 (the dirty-page barrier gate, the store's opener-line arm and the minimal-width data-segment escapes) against the fklua of the commit before it, on ONE build of each wasm:
 
-| | wasm | generated Lua |
+```sh
+(cd guest/go && tinygo build -target=wasm-unknown -scheduler=none -gc=leaking -opt=2 -o W ./examples/datastage)
+(cd guest/rust && cargo build --release --target wasm32-unknown-unknown -p datastage)
+bin/fklua mod --data-module W --name fk-asbuilt --version 0.1.0 --author Techrocket9 --factorio-version 2.0 -o DIR
+wc -c DIR/fk-asbuilt_0.1.0/fk_data_module.lua   # the compile body plus its 259-byte factory wrapper
+```
+
+| | generated Lua, before the size round | after |
 |---|--:|--:|
-| the Go data guest | 83,990 B | **496,361 B** |
-| the Rust data guest | 26,639 B | **535,311 B** |
-| `fk_data.lua` (the shim, verbatim) | -- | 24,106 B |
-| BBB's control guest, for scale | 1,293,396 B | 3,136,956 B |
+| the Go data guest | 559,087 B | **488,676 B** (-12.6%) |
+| the Rust data guest | 605,869 B | **520,127 B** (-14.2%) |
+| `fk_data.lua` (the shim, verbatim) | 28,169 B | 28,169 B |
+| BBB's control guest, for scale (2026-08-25, not re-taken) | 3,136,956 B | -- |
 
-The Rust module is a third of the wasm and slightly MORE Lua, which is the usual shape here: rustc emits fewer, larger functions.
+No relay fires on either: the widest span is 200,210 B (31% of the limit) in the Go guest's `onData` and 71,894 B (11%) in the Rust guest's `fk_data`, with block room at 100% in both. The Rust module is still the larger Lua, which is the usual shape here: rustc emits fewer, larger functions. There is no wasm column any more, for the reason the data-stage section of `CLAUDE.md` gives: a wasm size moves with the length of the checkout's path and with whether the build carries debug info, so it is not a number two machines can compare. The figures this table carried from 2026-08-25 (496,361 and 535,311 B of Lua beside 24,106 B of shim) were of an older example pair and an older shim -- the settings->data round trip of 2026-08-30, the guest's own `raise` of 2026-08-31 and the `keys` loop of 2026-09-07 all landed after them -- so they are not a before column for this round and are not kept beside numbers they cannot be compared with.
 
 ### `--dump-data` is the acceptance gate
 
@@ -346,17 +353,20 @@ In game: `scripts/run-datastage.sh`.
 | `set` with a nil value implemented as "write false" | `TestSetWithNilDeletesRatherThanWritingFalse`: `minable false`, `next_upgrade false`, `nested.drop false` |
 | the back-compat branch removed | `TestAProjectWithNoDataModuleIsByteIdentical`: nine files where a mod with no data module has always shipped five |
 
-**Five more, for the byte-exactness contract, each injected and reverted on 2026-09-07:**
+**The example guests carry a NESTED patch for the second of those**, and it is the reason it is there rather than in a test: every other patch in them is top-level, and a shallow clone survives all of those. `collision_box` is an array of two arrays, so `Set(..., "collision_box", 1, 1)` reaches two levels down through NUMERIC path elements -- which nothing else in the corpus exercises either.
+
+**Eight more, for the byte-exactness contract, each injected, observed and reverted on 2026-09-07** (six of them fired again on 2026-09-08 when this table was corrected against the review round that added the `keys` arm and `V::at`'s type parameter, which had moved two of its numbers):
 
 | injected defect | what fired |
 |---|---|
 | the old `String::from_utf8_lossy` line restored in Rust's `read_dyn` | `TestADataStageStringCrossesFkdataByteExact`, rust line 1: `setting all 512:` against `256:`, with 128 `efbfbd` in the hex and the line 1055 characters against 543 |
 | `strings.ToValidUTF8` added to Go's `readDyn` | the same test, go line 1: `setting all 131:` with ONE `efbfbd`. The two lossy readings are not the same wrong answer, which is the measurement that rejects "lossy on both sides" |
-| Rust's `write_dyn` truncating a string at its first NUL | rust line 7: `ECHO all 0:` against `256:...`, with every LOG line still right -- which is what proves the OUT direction is asserted and not only the IN one |
-| `LuaStr::from(&[u8])` made lossy | `cargo test -p fkdata`: 7 of the 10 tests in `tests/bytes.rs`, including `every_byte_value_survives_the_byte_type` at 512 against 256 |
+| Rust's `write_dyn` truncating a string at its first NUL | rust line 10: `ECHO all 0:` against `256:...`, with every LOG line still right -- which is what proves the OUT direction is asserted and not only the IN one |
+| Rust's `keys()` made lossy | rust line 8: `LOG databytes: key 5:6b2defbfbd` against `3:6b2d80`. This is the injection that went unnoticed until the enumerated type carried names that are not ASCII |
+| the same conversion added to Go's `Keys` loop | go line 8: the same two lines. A Go string is bytes, so there is no lossy line to RESTORE on that side; the injection has to be written, which is what makes the Go arm falsifiable |
+| `LuaStr::from(&[u8])` made lossy | `cargo test -p fkdata --no-fail-fast`: 8 of the 11 tests in `tests/bytes.rs`, `every_byte_value_survives_the_byte_type` at 512 against 256 among them, and `text_refuses_rather_than_rewriting` in the crate with them |
+| `V::at`'s comparison routed through `as_str()` | `a_lookup_finds_a_key_that_is_not_utf8`: `left: None` against `right: Some("what the engine wrote")`, while `a_map_lookup_compares_bytes` stays green, which is why that case had to be added rather than widened |
 | the `text()` refusal replaced by `to_string_lossy` | `text_refuses_rather_than_rewriting`: *test did not panic as expected* |
-
-**The example guests carry a NESTED patch for the second of those**, and it is the reason it is there rather than in a test: every other patch in them is top-level, and a shallow clone survives all of those. `collision_box` is an array of two arrays, so `Set(..., "collision_box", 1, 1)` reaches two levels down through NUMERIC path elements -- which nothing else in the corpus exercises either.
 
 ### The in-game gate
 
