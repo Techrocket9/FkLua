@@ -44,3 +44,5 @@
 # silently unchecked.
 2.0.77 default b94427c6df824f223001ea3a2e2045850d55101eb9a8f6f076fc3985bc7216c0 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
 2.0.77 flipped 6e2284d1505f9ee5ef3a1f63a1e0a8cb33d6fa5295df961c3ab6aceebcafacc7 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.0.77 core@0.0.0 elevated-rails@2.0.77 fkd-example@0.1.0 quality@2.0.77 space-age@2.0.77
+2.1.20 default 20ebd188962f7a312d2a8a948a8d3aadaf5d0ef92b5008e17a7c259a526d6866 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.1.20 core@0.0.0 elevated-rails@2.1.20 fkd-example@0.1.0 quality@2.1.20 recycler@2.1.20 space-age@2.1.20
+2.1.20 flipped f949eedcc52290e0e577407b059f0fbeb9fb9f5b93099873cf2a89bf3665c2b0 61063926195053cb2743908d97627aef01da71d9b5f8df24257c554b91bcbd4e base@2.1.20 core@0.0.0 elevated-rails@2.1.20 fkd-example@0.1.0 quality@2.1.20 recycler@2.1.20 space-age@2.1.20
