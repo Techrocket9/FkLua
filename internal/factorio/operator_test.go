@@ -75,6 +75,14 @@ var operatorsByVersion = map[string]map[string][]string{
 		"LuaRandomGenerator": {"call"},
 		"LuaTransportLine":   {"index", "length"},
 	},
+	"2.1.20": {
+		"LuaChunkIterator":   {"call"},
+		"LuaCustomTable":     {"index", "length"},
+		"LuaGuiElement":      {"index"},
+		"LuaInventory":       {"index", "length"},
+		"LuaRandomGenerator": {"call"},
+		"LuaTransportLine":   {"index", "length"},
+	},
 }
 
 // operatorClasses is the table for the pin these tests actually load.

@@ -313,8 +313,8 @@ func TestTheTableOrTupleConceptsRenderPositional(t *testing.T) {
 				"shorthand and is marked positional", v)
 		}
 	}
-	// Ten concepts at five descriptions, two to four elements each. A zero here
-	// means the TUPLE walk stopped finding anything to compare.
+	// Ten concepts at every committed description, two to four elements each. A
+	// zero here means the TUPLE walk stopped finding anything to compare.
 	//
 	// The array walk gets no zero tooth of its own and cannot have one: no
 	// committed description carries an array shorthand inside any of these ten,
