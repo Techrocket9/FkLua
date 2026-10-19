@@ -449,7 +449,7 @@ Three choices worth knowing:
 
 - **It stops early when nothing is new**, so a quiet week costs one HTTP request and no PR noise.
 - **A failing test suite makes the PR a DRAFT rather than blocking it.** The suite runs against the old pin, so red means the generators could not absorb the new description — which is the interesting failure and the one a human most needs to see, not a reason to hide the PR.
-- **It is the only job allowed near the network**, and it reaches it exactly once. Nothing is ever built against the network: the JSON lands in the tree first, which is the same reason `api pull` is a separate command.
+- **It is the only job whose test input comes from the network**, and it reaches for one exactly once. Nothing is ever built against the network: the JSON lands in the tree first, which is the same reason `api pull` is a separate command. Its Test step provisions toolchain the way ci.yml's `go` job does (the Rust wasm target, the SHA-pinned Lua tarball the oracle builds from), which is not input.
 
 **It had never run to completion, and both reasons were in the shell rather than in anything Go builds.** Every scheduled run from the day `api list` grew its legend line died in the second step, and the failure arrived as an email rather than as a red mark on anything a person passes on the way to work.
 
@@ -457,6 +457,10 @@ Three choices worth knowing:
 - **`git diff` cannot see a new version, because a new version arrives as an UNTRACKED directory.** The gate that stops the bot when nothing is new asked `git diff --quiet -- api/`, and git diff does not report untracked files — so the one gate whose whole job is to notice a new release was structurally unable to see one, and would have reported "nothing to do" and exited GREEN on exactly the week the bot exists for. That is this repo's *a skipped gate reads exactly like a pass*, one step further out than the two instances already recorded. It reads `git status --porcelain` now — which is also where the pulled version's number comes from, replacing "the highest directory on disk", so the two cannot disagree and a hand-dispatched older version is no longer diffed under somebody else's number.
 
 Both are TEXT properties and neither is reachable by building anything, so `TestTheRegenBotDoesNotReadTheHumanTableOrAskGitDiffForANewDirectory` reads the workflow file itself and was confirmed to fail against both pre-fix lines.
+
+**And when it first ran to completion, its draft flag could not mean what it says.** The repository refused the Actions token permission to open a PR until 2026-10-19 (a repository setting: every week with a release failed at the last step after pushing its branch), and the first PR it then opened, for 2.1.22, was a draft. Nothing in 2.1.22 caused that: the Test step ran bare `go test ./...` on a runner with no `bin/lua52f`, no wasm32 Rust target and no `FKLUA_NO_GUEST_TOOLCHAIN` declaration, so `TestTheOracleIsBuilt`, `TestTheRustToolchainIsAvailable` and `TestTheGuestToolchainIsAvailable` failed on every run and every PR would have been a draft. A flag that is always set is a gate that cannot fail, read from the other side. The step is `make test` now, the repo's own entry point, with the Rust target installed before it and the TinyGo absence declared in its `env:`, mirroring ci.yml's `go` job; `TestTheRegenBotsTestStepCanPassOnItsRunner` reads both workflow files and was confirmed to fail with each of the three removed.
+
+Two things about the PRs it opens are worth knowing before reviewing one. **ci.yml does not run on them**: a PR created with the built-in Actions token raises no further workflow runs, so the bot's own Test step is the only suite that has seen the change unless somebody closes and reopens the PR. And **a draft is set at creation only**, so a PR the bot updates in a later week keeps whatever draft state it was opened with.
 
 ## `fklua docs` — **built**
 

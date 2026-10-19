@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Techrocket9/fklua/internal/factorio"
+	"github.com/Techrocket9/fklua/internal/guest"
 )
 
 // captureStdout runs f with os.Stdout redirected and returns what it printed.
@@ -185,6 +186,90 @@ func TestTheRegenBotCannotBeBlockedByARegenerationItCannotDo(t *testing.T) {
 		t.Error("api-regen.yml opens a NON-draft PR after a regeneration that " +
 			"failed; the draft condition must carry steps.regen.outcome the way " +
 			"it carries steps.tests.outcome")
+	}
+}
+
+// THE BOT'S DRAFT FLAG MEANS SOMETHING ONLY IF ITS TEST STEP CAN PASS.
+//
+// The PR is a draft when the Test step fails, on the stated grounds that a red
+// suite means the generators could not absorb the new description. That step
+// ran bare `go test ./...` on a runner with no oracle, no Rust wasm target and
+// no TinyGo, so three availability guards failed on every run and the first PR
+// the bot ever opened (2.1.22) was a draft for that reason alone. A flag that is
+// always set is a gate that cannot fail, read from the other side.
+//
+// So the step must be the repo's own entry point, which builds the oracle, and
+// must provision what ci.yml's `go` job provisions: the declaration that TinyGo
+// is absent, and the Rust target. Both halves are asked of ci.yml too, so a
+// change of spelling there is a failure here rather than a silent divergence.
+func TestTheRegenBotsTestStepCanPassOnItsRunner(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Skipf("not in a checkout: %v", err)
+	}
+	read := func(name string) []string {
+		b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The comments name the old line on purpose, so they are blanked rather
+		// than matched -- and blanked rather than dropped, so an index is still
+		// a line number.
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				lines[i] = ""
+			}
+		}
+		return lines
+	}
+	regen, ci := read("api-regen.yml"), read("ci.yml")
+
+	declare := guest.NoToolchainEnv + ": '1'"
+	target := "rustup target add wasm32-unknown-unknown"
+	for _, want := range []string{declare, target} {
+		if !strings.Contains(strings.Join(ci, "\n"), want) {
+			t.Errorf("ci.yml no longer contains %q; this test mirrors ci.yml's "+
+				"`go` job and needs updating with it", want)
+		}
+	}
+
+	// The Test step's own block: from its `- name:` to the next one.
+	at := -1
+	for i, line := range regen {
+		if strings.TrimSpace(line) == "id: tests" {
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatal("api-regen.yml has no step with `id: tests`; the draft condition " +
+			"reads steps.tests.outcome")
+	}
+	start, end := at, len(regen)
+	for start > 0 && !strings.HasPrefix(strings.TrimSpace(regen[start]), "- name:") {
+		start--
+	}
+	for i := at + 1; i < len(regen); i++ {
+		if strings.HasPrefix(strings.TrimSpace(regen[i]), "- name:") {
+			end = i
+			break
+		}
+	}
+	block := strings.Join(regen[start:end], "\n")
+
+	if !strings.Contains(block, "run: make test") {
+		t.Errorf("api-regen.yml:%d the Test step is not `make test`. Bare `go test` "+
+			"has no oracle here, and TestTheOracleIsBuilt fails every run:\n%s",
+			start+1, block)
+	}
+	if !strings.Contains(block, declare) {
+		t.Errorf("api-regen.yml:%d the Test step does not declare %s, so the TinyGo "+
+			"guard fails on a runner that was never meant to have TinyGo:\n%s",
+			start+1, declare, block)
+	}
+	if !strings.Contains(strings.Join(regen[:start], "\n"), target) {
+		t.Errorf("api-regen.yml installs no wasm32 Rust target before the Test step, "+
+			"so TestTheRustToolchainIsAvailable fails every run; it wants `%s`", target)
 	}
 }
 

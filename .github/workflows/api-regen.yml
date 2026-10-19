@@ -15,9 +15,12 @@ name: api-regen
 # mechanical, and the point of `api diff`'s classification is that the review is
 # bounded — a reviewer reads the Breaking section and nothing else.
 #
-# This is the one job in the repo that is allowed to reach the network, and it
-# reaches it exactly once, to fetch a JSON file. Nothing it opens a PR for is
-# ever built against the network: the JSON lands in the tree first.
+# This is the one job in the repo whose TEST INPUT comes from the network, and
+# it reaches for one exactly once, to fetch a JSON file. Nothing it opens a PR
+# for is ever built against the network: the JSON lands in the tree first. The
+# Test step provisions what ci.yml's `go` job provisions -- the Rust wasm target
+# and the SHA-pinned Lua tarball the oracle is built from -- which is toolchain,
+# not input, in the same category as setup-go.
 
 on:
   schedule:
@@ -123,15 +126,42 @@ jobs:
           ./bin/fklua api diff "${{ steps.before.outputs.current }}" \
             "${{ steps.pull.outputs.version }}" --json /tmp/diff.json || true
 
+      # The Rust guard test runs in the suite below and is deliberately NOT
+      # exempted by FKLUA_NO_GUEST_TOOLCHAIN, and the runner image ships rustc
+      # without this target. ci.yml's `go` job installs it for the same reason;
+      # see the comment on its own copy of this step.
+      - name: Rust wasm target
+        if: steps.check.outputs.new == 'true'
+        run: rustup target add wasm32-unknown-unknown
+
       # The suite runs against the OLD pin, which is what the committed bindings
       # are still generated from. A red run here means the generators could not
       # absorb the new description -- which is the interesting failure, and the
       # PR should carry it rather than be blocked by it.
+      #
+      # THAT IS ONLY TRUE IF THE SUITE CAN PASS HERE, AND UNTIL 2026-10-19 IT
+      # COULD NOT. This step ran bare `go test ./...` with no oracle, no Rust
+      # target and no toolchain declaration, so three availability guards
+      # (TestTheOracleIsBuilt, TestTheGuestToolchainIsAvailable,
+      # TestTheRustToolchainIsAvailable) failed on every run, and every PR this
+      # bot opened would have been a draft whatever the release contained. The
+      # first one it ever opened, for 2.1.22, was a draft for exactly that
+      # reason and no other. A draft flag that is always set says nothing,
+      # which is a gate that cannot fail wearing the opposite sign.
+      #
+      # So this is `make test`, the repo's own entry point, rather than a
+      # second spelling of it: it builds the oracle first and carries the
+      # -timeout every other caller of the suite passes. And it declares the
+      # absent TinyGo the way ci.yml's `go` job does, in `env:`, so the TinyGo
+      # guard skips by declaration rather than failing by absence. What that
+      # leaves unrun here is what ci.yml leaves unrun, stated there.
       - name: Test
         if: steps.check.outputs.new == 'true'
         continue-on-error: true
         id: tests
-        run: go test ./...
+        env:
+          FKLUA_NO_GUEST_TOOLCHAIN: '1'
+        run: make test
 
       - name: Open the PR
         if: steps.check.outputs.new == 'true'
