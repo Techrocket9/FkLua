@@ -8,8 +8,9 @@ name: api-regen
 #
 # The BINDINGS in that PR are usually unchanged, and that is not a bug. They are
 # generated from factorio.DefaultAPIVersion, which is a committed pin a human
-# moves; the bot pulls a version alongside it and shows what moved. Regenerating
-# runs anyway so that a pin bumped by hand in the same PR is never stale.
+# moves; the bot pulls a version alongside it and shows what moved since the
+# release before it. Regenerating runs anyway so that a pin bumped by hand in
+# the same PR is never stale.
 #
 # WHAT A HUMAN IS FOR: reading the breaking list. Everything else here is
 # mechanical, and the point of `api diff`'s classification is that the review is
@@ -49,15 +50,6 @@ jobs:
 
       - name: Build fklua
         run: go build -o bin/fklua ./cmd/fklua
-
-      # `api list --current` and not `api list | awk '/^\*/'`: the table is a
-      # human-facing presentation and its trailing legend line ("* is the
-      # version the committed bindings are generated from") starts with the very
-      # character that awk was keying on, so the step wrote TWO lines into
-      # $GITHUB_OUTPUT and the job died on `Invalid format 'is'`.
-      - name: Record what we already have
-        id: before
-        run: echo "current=$(./bin/fklua api list --current)" >> "$GITHUB_OUTPUT"
 
       - name: Pull the target version
         id: pull
@@ -118,13 +110,27 @@ jobs:
         id: regen
         run: ./bin/fklua gen-bindings
 
+      # THE BASELINE IS THE RELEASE BEFORE THIS ONE, NOT THE PIN. This diffed
+      # against `api list --current`, which answers "what would moving the
+      # default pin cost" -- a pin-move question, and the same question as
+      # "what changed in this release" only while every release was a 2.0.x
+      # patch. Once 2.1.x shipped beside a 2.0.77 pin, the first PR this bot
+      # opened (2.1.22) listed 295 breaking entries, nearly all of them the
+      # 2.0-to-2.1 gap, against 51 from 2.1.20, every one of them new; and the
+      # review this workflow promises is "read the Breaking section and
+      # nothing else". `--diff-base` names the newest committed description
+      # older than the pulled one, after the pull, which is why it is asked
+      # here and not before.
+      #
+      # It is a machine flag and not the table, for the reason `--current` is:
+      # the table's legend line once put two lines into $GITHUB_OUTPUT.
       - name: Classify the change
         if: steps.check.outputs.new == 'true'
         run: |
-          ./bin/fklua api diff "${{ steps.before.outputs.current }}" \
-            "${{ steps.pull.outputs.version }}" > /tmp/diff.md
-          ./bin/fklua api diff "${{ steps.before.outputs.current }}" \
-            "${{ steps.pull.outputs.version }}" --json /tmp/diff.json || true
+          NEW="${{ steps.pull.outputs.version }}"
+          BASE=$(./bin/fklua api list --diff-base "$NEW")
+          ./bin/fklua api diff "$BASE" "$NEW" > /tmp/diff.md
+          ./bin/fklua api diff "$BASE" "$NEW" --json /tmp/diff.json || true
 
       # The Rust guard test runs in the suite below and is deliberately NOT
       # exempted by FKLUA_NO_GUEST_TOOLCHAIN, and the runner image ships rustc

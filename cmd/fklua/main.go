@@ -72,7 +72,10 @@ Usage:
                         alone is an empty list, and mixing it with a real value
                         is refused
   fklua api pull <version> | --from-install
-  fklua api list [--current]        (--current: just the pin, one line, for a script)
+  fklua api list [--current | --diff-base VERSION]
+                        --current: just the pin, one line, for a script.
+                        --diff-base: the committed description VERSION is best
+                        diffed against (the newest older one), one line
   fklua api diff <from> <to> [--breaking] [--json PATH]
   fklua api check GUEST.wasm --to <version> [--from <version>] [--json]
                         exit 0 nothing this guest uses breaks, 1 something does

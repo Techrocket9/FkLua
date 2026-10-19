@@ -111,16 +111,102 @@ func TestTheRegenBotDoesNotReadTheHumanTableOrAskGitDiffForANewDirectory(t *test
 			continue // the comments describe both defects on purpose
 		}
 		if strings.Contains(line, "api list") &&
-			!strings.Contains(line, "api list --current") {
-			t.Errorf("api-regen.yml:%d reads the pin out of the human table "+
-				"again; `api list --current` is the one line it wants:\n\t%s",
-				i+1, strings.TrimSpace(line))
+			!strings.Contains(line, "api list --current") &&
+			!strings.Contains(line, "api list --diff-base") {
+			t.Errorf("api-regen.yml:%d reads a version out of the human table "+
+				"again; `api list --current` and `api list --diff-base` are the "+
+				"one-line forms:\n\t%s", i+1, strings.TrimSpace(line))
 		}
 		if strings.Contains(line, "git diff") && strings.Contains(line, "api/") {
 			t.Errorf("api-regen.yml:%d gates on `git diff` over api/, which "+
 				"cannot see the untracked directory a new version arrives as; "+
 				"`git status --porcelain` can:\n\t%s", i+1, strings.TrimSpace(line))
 		}
+	}
+}
+
+// --diff-base NAMES THE RELEASE BEFORE THE ONE BEING DIFFED, by version number,
+// and is held to --current's contract: one line, nothing around it.
+//
+// The fixture is directory names alone, because that is all the answer reads,
+// and it carries the two cases a string comparison gets wrong: 2.1.9 against
+// 2.1.10, and the pulled version itself already sitting on disk, which is
+// where the bot asks from.
+func TestAPIListDiffBaseNamesThePreviousRelease(t *testing.T) {
+	dir := t.TempDir()
+	for _, v := range []string{"2.0.77", "2.1.9", "2.1.10", "2.1.20", "2.1.22", "notes"} {
+		if err := os.Mkdir(filepath.Join(dir, v), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("FKLUA_API_DIR", dir)
+
+	for _, c := range []struct{ version, want, why string }{
+		{"2.1.22", "2.1.20", "the pulled version is on disk and must not be its own base"},
+		{"2.1.21", "2.1.20", "a version between two committed ones"},
+		{"2.1.11", "2.1.10", "2.1.10 is newer than 2.1.9, which a string sort denies"},
+		{"2.0.78", "2.0.77", "a 2.0.x patch diffs against 2.0.x, not the newest 2.1"},
+		{"2.2.0", "2.1.22", "a new series diffs against the previous series' newest"},
+		{"1.1.110", factorio.DefaultAPIVersion, "nothing older: the pin"},
+	} {
+		for _, args := range [][]string{
+			{"--diff-base", c.version}, {"--diff-base=" + c.version},
+		} {
+			out := captureStdout(t, func() error { return runAPIList(args) })
+			if out != c.want+"\n" {
+				t.Errorf("api list %v printed %q, want exactly %q (%s)",
+					args, out, c.want+"\n", c.why)
+			}
+		}
+	}
+
+	for _, args := range [][]string{
+		{"--diff-base", "latest"},
+		{"--diff-base"},
+		{"--diff-base", "2.1.22", "--current"},
+	} {
+		if err := runAPIList(args); err == nil {
+			t.Errorf("api list %v was accepted; the bot would diff against "+
+				"whatever it printed", args)
+		}
+	}
+}
+
+// THE BOT DIFFS AGAINST THE RELEASE BEFORE THE ONE IT PULLED, NOT THE PIN.
+//
+// The pin answers whether moving the default would cost anything, and it was
+// the same question as "what changed in this release" only while every
+// release was a 2.0.x patch. The first PR the bot opened, for 2.1.22, carried
+// 295 breaking entries against 2.0.77, nearly all of them the 2.0-to-2.1 gap,
+// where 2.1.20 to 2.1.22 is 51; the review the workflow promises is reading
+// that list and nothing else. A text property for the reason the two above it
+// are: nothing built reaches what a workflow passes to a command.
+func TestTheRegenBotDiffsAgainstThePreviousReleaseNotThePin(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Skipf("not in a checkout: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "api-regen.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	asks := false
+	for i, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue // the comments name the old baseline on purpose
+		}
+		if strings.Contains(line, "api list --diff-base") {
+			asks = true
+		}
+		if strings.Contains(line, "api list --current") || strings.Contains(line, "steps.before") {
+			t.Errorf("api-regen.yml:%d reaches for the pin, which the bot has no "+
+				"use for since its diff stopped being against it:\n\t%s",
+				i+1, strings.TrimSpace(line))
+		}
+	}
+	if !asks {
+		t.Error("api-regen.yml never asks `api list --diff-base`, so its diff has " +
+			"some other baseline than the release before the one it pulled")
 	}
 }
 

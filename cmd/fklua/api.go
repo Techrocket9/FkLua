@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,13 +141,45 @@ func readInstalledAPI() ([]byte, error) {
 
 func runAPIList(args []string) error {
 	current := false
-	for _, a := range args {
-		switch a {
-		case "--current":
+	diffBase := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--current":
 			current = true
+		case a == "--diff-base":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return fmt.Errorf("--diff-base needs a version (the one being diffed)")
+			}
+			i++
+			diffBase = args[i]
+		case strings.HasPrefix(a, "--diff-base="):
+			diffBase = strings.TrimPrefix(a, "--diff-base=")
 		default:
-			return fmt.Errorf("unknown argument %q (api list takes --current or nothing)", a)
+			return fmt.Errorf("unknown argument %q (api list takes --current, "+
+				"--diff-base VERSION, or nothing)", a)
 		}
+	}
+	if current && diffBase != "" {
+		return fmt.Errorf("--current and --diff-base each print one line; pass one")
+	}
+
+	// --diff-base is the bot's OTHER question, and asking --current for it was
+	// the defect. The pin answers "what would moving the default cost", which
+	// is a pin-move question; a weekly release wants "what changed in this
+	// release", and once 2.1.x existed beside a 2.0.77 pin the two stopped
+	// being the same question. The first PR the bot opened, for 2.1.22, listed
+	// 295 breaking entries against 2.0.77 -- the whole 2.0-to-2.1 gap, known
+	// since 2.1.12 landed -- where 2.1.20 to 2.1.22 is 51, every one of them
+	// new. Same machine-readable contract as --current: one line, nothing
+	// around it.
+	if diffBase != "" {
+		base, err := apiDiffBase(diffBase)
+		if err != nil {
+			return err
+		}
+		fmt.Println(base)
+		return nil
 	}
 
 	// --current is the MACHINE-READABLE half, and it exists because the table
@@ -194,6 +227,69 @@ func runAPIList(args []string) error {
 	}
 	fmt.Println("\n* is the version the committed bindings are generated from")
 	return nil
+}
+
+// apiDiffBase names the description a newly pulled VERSION is best diffed
+// against: the newest one in this checkout that is OLDER than it, by version
+// number, whatever its series. Factorio's series are contiguous in version
+// order, so that is the same-series predecessor whenever there is one (2.1.20
+// for 2.1.22, 2.0.77 for a 2.0.78) and the previous series' newest for the
+// first release of a new one (2.1.x for a 2.2.0) -- which is also what changed
+// in that release, and is not the 2.0-to-2.1 gap again. VERSION itself is
+// skipped, because the bot asks after the pull has already written it.
+//
+// Only when nothing older is committed does it fall back to the default pin,
+// which then diffs forwards from an older pull rather than not at all.
+func apiDiffBase(version string) (string, error) {
+	want, ok := parseVersion(version)
+	if !ok {
+		return "", fmt.Errorf("--diff-base %q is not a Factorio version (X.Y.Z)", version)
+	}
+	entries, err := os.ReadDir(apiDir())
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", apiDir(), err)
+	}
+	best, bestV := "", [3]int{}
+	for _, e := range entries {
+		v, ok := parseVersion(e.Name())
+		if !e.IsDir() || !ok || !versionLess(v, want) {
+			continue
+		}
+		if best == "" || versionLess(bestV, v) {
+			best, bestV = e.Name(), v
+		}
+	}
+	if best == "" {
+		return factorio.DefaultAPIVersion, nil
+	}
+	return best, nil
+}
+
+// parseVersion reads a Factorio version, which is always three dotted numbers.
+// Comparing the strings instead would put 2.1.10 before 2.1.9.
+func parseVersion(s string) ([3]int, bool) {
+	var v [3]int
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 || p != strconv.Itoa(n) {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
+}
+
+func versionLess(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
 
 func runAPIDiff(args []string) error {
