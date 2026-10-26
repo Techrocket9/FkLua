@@ -1,0 +1,76 @@
+{
+  "application_version": "2.1.23",
+  "api_version": 6,
+  "classes": 157,
+  "members": 3814,
+  "methods": 1041,
+  "attributes": 2773,
+  "events": 229,
+  "concepts": 496,
+  "defines": 62,
+  "define_values": 1187,
+  "global_objects": 9,
+  "global_functions": 3,
+  "positional_methods": 927,
+  "takes_table_methods": 114,
+  "variant_group_methods": 5,
+  "subclass_restricted_methods": 192,
+  "subclass_restricted_attributes": 975,
+  "optional_readable_attributes": 1001,
+  "operators": 9,
+  "attribute_shaped_operators": 7,
+  "operators_bound": 9,
+  "global_functions_bound": 3,
+  "custom_table_handle_members": 58,
+  "custom_table_handle_methods": 11,
+  "index_setter_members": 1,
+  "typed_arg_members": 5,
+  "typed_variant_bindings": 5,
+  "bulk_read_members": 1816,
+  "bulk_variant_bindings": 1816,
+  "collapsed_union_arg_positions": 276,
+  "table_shaped_concepts": 347,
+  "pure_string_enum_concepts": 46,
+  "positional_struct_positions": 878,
+  "host_members_bound": 4917,
+  "host_members_skipped": 5,
+  "host_skips_by_reason": {
+    "callback parameter": 3,
+    "variadic parameter": 2
+  },
+  "fields_omitted": 1,
+  "fields_omitted_by_reason": {
+    "nil": 1
+  },
+  "host_events_bound": 229,
+  "event_scratch_bytes": 136,
+  "hook_payload_fields": 6,
+  "go_members_bound": 4912,
+  "go_members_deferred": 5,
+  "go_deferrals_by_reason": {
+    "handler is a Lua function": 5
+  },
+  "go_literals_deferred": 1,
+  "go_literal_deferrals_by_reason": {
+    "a string literal with no identifier name": 1
+  },
+  "go_members_inherited": 1533,
+  "go_event_payload_structs": 229,
+  "go_define_accessors": 1187,
+  "go_event_payloads_deferred": 0,
+  "go_event_deferrals_by_reason": {},
+  "rust_members_bound": 4912,
+  "rust_members_deferred": 5,
+  "rust_deferrals_by_reason": {
+    "handler is a Lua function": 5
+  },
+  "rust_literals_deferred": 1,
+  "rust_literal_deferrals_by_reason": {
+    "a string literal with no identifier name": 1
+  },
+  "rust_members_inherited": 1533,
+  "rust_event_payload_structs": 229,
+  "rust_define_accessors": 1187,
+  "dyn_value_structs": 1,
+  "max_method_return_arity": 3
+}
