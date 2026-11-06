@@ -31,9 +31,9 @@ package fkipc
 // from -- and every member this package touches (send_udp, recv_udp,
 // write_file, game_version, on_udp_packet_received) exists in the 2.0.77
 // description, which shipped with 2.0.59. The engine is what
-// helpers.game_version reports at RUN TIME. So a mod built at the
-// general-availability pin gets the whole library on a 2.1.14 engine with no
-// rebuild, no repin and no second build of the guest.
+// helpers.game_version reports at RUN TIME. So a mod built at the 2.0.77 pin
+// gets the whole library on a 2.1.14 engine with no rebuild, no repin and no
+// second build of the guest, and so does one built at any 2.1.x pin.
 
 // Version is a Factorio version triple.
 type Version struct{ Major, Minor, Patch uint16 }

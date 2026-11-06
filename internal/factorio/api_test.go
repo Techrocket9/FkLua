@@ -55,7 +55,7 @@ func loadTestAPI(t *testing.T) *API {
 //
 // A test using this must NOT also compare against api/<pin>/census.json or the
 // committed bindings, for the reason apiPath's comment gives.
-const shapeAPIVersion = "2.1.20"
+const shapeAPIVersion = "2.1.24"
 
 // loadShapeAPI loads a description by name. See shapeAPIVersion.
 func loadShapeAPI(t *testing.T, version string) *API {

@@ -350,7 +350,7 @@ func (m Member) IsOperator() bool {
 //     on_runtime_mod_setting_changed synchronously.
 //   - LuaFluidBox -- TRUE, and the operator says so itself: "Access, SET OR
 //     CLEAR a fluid box... Writing `nil` removes all fluid from the fluid box."
-//     Present at the 2.0.77 GA pin and absent at 2.1, which retired the pair in
+//     Present at the 2.0.77 pin and absent at 2.1, which retired the pair in
 //     the fluid rework, so at that pin the row simply goes unasked.
 //   - LuaGuiElement -- FALSE. "Gets children by name." A child is added with
 //     LuaGuiElement::add and removed with ::destroy; assigning one has no
@@ -1674,7 +1674,7 @@ func attachDocs(a *API, r *Report) {
 // first sentence.
 //
 // FIRST SENTENCE RATHER THAN THE WHOLE THING, and the policy is a measurement:
-// the full prose of every member is 324,058 bytes at the GA pin against 148,401
+// the full prose of every member is 324,058 bytes at the 2.0.77 pin against 148,401
 // for the first sentences, and what the second and later sentences carry is
 // mostly examples and cross-references that the docs renderer shows in full
 // anyway. The generated bindings are SOURCE -- nothing here reaches the packaged

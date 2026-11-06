@@ -59,7 +59,7 @@ const TypedDispatchName = "call_typed"
 // handed. Three shapes were available and this is why it is the third:
 //
 //   - a member KIND, one bulk id per eligible attribute. Pruning works
-//     unchanged and the member table grows by +1,533 at the GA pin -- a third
+//     unchanged and the member table grows by +1,533 at the 2.0.77 pin -- a third
 //     again, in every save, every download and every load.
 //   - ONE bulk member with the TARGET id inside the ARGUMENT BLOCK. No new
 //     members, and usedIDs below cannot see an i32.const that is STORED to

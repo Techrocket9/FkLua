@@ -48,8 +48,8 @@
 # THE FLOOR IS ABOUT THE ENGINE AND NOT ABOUT THE API PIN, which is a separate
 # axis: the pin decides which description the bindings came from and defaults to
 # the general-availability release, while fkipc asks helpers.game_version at run
-# time. A GA-pinned mod gets the whole library on a 2.1.14 engine, which is
-# exactly what this gate packages and runs.
+# time. A mod pinned to 2.0.77 gets the whole library on a 2.1.14 engine, and
+# this gate packages at whatever the default pin is.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

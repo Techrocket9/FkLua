@@ -2207,8 +2207,9 @@ func runModWith(args []string, rep *modReport) error {
 	// THE FALLBACK NAMES fklua's DEFAULT PIN AND NEVER THE PROJECT'S, because
 	// that is where the value came from: info.FactorioVersion is seeded with
 	// DefaultFactorioVersion at the top of this function and only the manifest
-	// key or the flag ever moves it, so a project pinning 2.1.x with no
-	// `factorio_version` key really does declare "2.0". This line used to read
+	// key or the flag ever moves it, so a project pinning another series with
+	// no `factorio_version` key really does declare the default's (a 2.0.77
+	// pin under a 2.1.x default declares "2.1"). This line used to read
 	// "the <resolved pin>'s series", which described a derivation the code does
 	// not perform and named the one number that had nothing to do with the
 	// answer -- a reader chasing the game-start refusal was pointed at the pin,

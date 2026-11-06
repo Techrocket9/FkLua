@@ -36,17 +36,18 @@ import (
 // the control would have gone on "passing" on misresolved ids, which was not.
 // Named from the constant now, so the two cannot drift apart again.
 //
-// The direction is an UPGRADE from the GA pin to a 2.1 description, and it was
-// a downgrade while the default pin was the newest thing committed. The
-// machinery is direction-agnostic -- "does this guest still work on 2.1.12" is
-// the same cross-reference as "will it survive 2.1.16" -- and it is the same
-// mostly-nobody's-problem shape the feature exists for. What the direction
-// change DID cost is the fixture's member, which has to be one the two
-// descriptions disagree about: `burner_usage` was the 2.1.14-only one and
-// `LuaRecipePrototype::is_parameter` is the 2.0.77-only one. The disagreement
-// is re-derived from the descriptions below rather than trusted, so a later
-// pin move fails here saying what to pick instead of building a fixture that
-// compiles and reports nothing.
+// The direction is a DOWNGRADE from the 2.1.24 pin to 2.1.12; it was an
+// upgrade while the default pin was 2.0.77 and a downgrade before that, while
+// the default was 2.1.14. The machinery is direction-agnostic -- "does this
+// guest still work on 2.1.12" is the same cross-reference as "will it survive
+// 2.1.16" -- and it is the same mostly-nobody's-problem shape the feature
+// exists for. What each direction change DID cost is the fixture's member,
+// which has to be one the two descriptions disagree about: `burner_usage` was
+// the 2.1.14-only one, `LuaRecipePrototype::is_parameter` the 2.0.77-only one,
+// and `LuaItemPrototype::science_capacity`, new in 2.1.20, is the one now.
+// The disagreement is re-derived from the descriptions below rather than
+// trusted, so a later pin move fails here saying what to pick instead of
+// building a fixture that compiles and reports nothing.
 func TestAPICheckCatchesABrokenGuest(t *testing.T) {
 	if ok, why := guest.Available(); !ok {
 		t.Skipf("skipping: %s", why)
@@ -69,8 +70,8 @@ func TestAPICheckCatchesABrokenGuest(t *testing.T) {
 	// how the last pin move announced itself) or builds and reports nothing --
 	// which reads exactly like a check that works and found nothing to say.
 	const (
-		fixClass = "LuaRecipePrototype"
-		fixAttr  = "is_parameter"
+		fixClass = "LuaItemPrototype"
+		fixAttr  = "science_capacity"
 	)
 	hasAttr := func(a *factorio.API) bool {
 		for _, c := range a.Classes {
@@ -106,10 +107,10 @@ import "github.com/Techrocket9/fklua/guest/go/fkapi"
 
 //go:wasmexport fk_on_init
 func onInit() {
-	// is_parameter exists at the default pin and NOT in 2.1.12; the two
+	// science_capacity exists at the default pin and NOT in 2.1.12; the two
 	// descriptions are asked to confirm that before this is compiled.
-	p := fkapi.LuaRecipePrototype{}
-	_, _ = p.IsParameter()
+	p := fkapi.LuaItemPrototype{}
+	_, _ = p.ScienceCapacity()
 }
 
 func main() {}

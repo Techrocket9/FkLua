@@ -89,7 +89,7 @@ speed, err := fkapi.Game.Speed()          // read
 err = fkapi.Game.SetSpeed(speed * 2)      // write
 ```
 
-and `fklua mod` then reports `API 2.0.77: 1 members, pruned from 4259`: the mod ships the one member it calls. Every TinyGo flag above is required, and the scaffolded `main.go` says why; `-opt=2` rather than TinyGo's `-opt=z` default is worth up to 1.7×, because `z` optimises for size, which is not a major cost here (Factorio parses 4 MB of Lua in about 106 ms).
+and `fklua mod` then reports `API 2.1.24: 2 members, pruned from 4920`: the mod ships the two members it calls, a read and a write. Every TinyGo flag above is required, and the scaffolded `main.go` says why; `-opt=2` rather than TinyGo's `-opt=z` default is worth up to 1.7×, because `z` optimises for size, which is not a major cost here (Factorio parses 4 MB of Lua in about 106 ms).
 
 ### Rust
 
@@ -148,11 +148,11 @@ The `agents/` directory holds the maintainer design notes; see [Working on FkLua
 
 ## The Factorio API from a guest
 
-The whole runtime API is bound in both languages, member id for member id: against the default **2.0.77** API pin, 4,257 of 4,262 members, with a payload struct for every event, 1,331 inherited forwarders and 1,137 `defines` accessors. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id: against the default **2.1.24** API pin, 4,915 of 4,920 members, with a payload struct for every event, 1,533 inherited forwarders and 1,187 `defines` accessors. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings; read them from there rather than from this page.
 
-The shape of it: one generic `fk.call` import rather than one per method, so a member Factorio removes degrades to a status instead of failing the module; a mod ships the member and event tables pruned to the ids it provably calls (about 0.6 KB instead of about 840 KB); events are filtered in C++ before the guest is entered, and an expensive payload field can be masked out; commands and remote interfaces dispatch back in by id; and a host call costs about 12.5 µs, so the cost model is calls, not bytes.
+The shape of it: one generic `fk.call` import rather than one per method, so a member Factorio removes degrades to a status instead of failing the module; a mod ships the member and event tables pruned to the ids it provably calls (about 0.6 KB instead of about 1 MB); events are filtered in C++ before the guest is entered, and an expensive payload field can be masked out; commands and remote interfaces dispatch back in by id; and a host call costs about 12.5 µs, so the cost model is calls, not bytes.
 
-There are two version axes worth keeping apart: the **API pin** (which `runtime-api.json` the bindings and the packaged tables come from; default 2.0.77, changed in one `fklua.toml` line) and the **engine** (whichever Factorio is running). How they meet in `info.json`, what 2.1.x adds, handles, events, masks, `defines`, and what `api pull`/`diff`/`check` do when a new Factorio version lands: [`docs/factorio-api.md`](docs/factorio-api.md).
+There are two version axes worth keeping apart: the **API pin** (which `runtime-api.json` the bindings and the packaged tables come from; default 2.1.24, changed in one `fklua.toml` line) and the **engine** (whichever Factorio is running). How they meet in `info.json`, what pinning 2.0 takes, handles, events, masks, `defines`, and what `api pull`/`diff`/`check` do when a new Factorio version lands: [`docs/factorio-api.md`](docs/factorio-api.md).
 
 ---
 

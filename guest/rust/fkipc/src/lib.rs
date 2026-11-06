@@ -149,8 +149,8 @@
 //! THE FLOOR IS ABOUT THE ENGINE AND NOT ABOUT THE API PIN. The pin is a
 //! build-time choice of description; the engine is what `helpers.game_version`
 //! reports at run time. Every member this crate calls exists in the 2.0.77
-//! description, so a mod pinned to the general-availability release gets the
-//! whole library on a newer engine with no rebuild.
+//! description and in every 2.1.x one, so a mod pinned to any of them gets the
+//! whole library on an engine at or above the floor with no rebuild.
 //!
 //! # Four filters, and one of them is yours to configure
 //!

@@ -344,7 +344,7 @@ func TestAStructOfNothingButNilFieldsIsStillRefused(t *testing.T) {
 //
 // AGAINST shapeAPIVersion RATHER THAN THE PIN. `nil` occurs exactly once in
 // every published description that has it -- as the concept ColorLookupTable,
-// in every 2.1.x one -- and NEVER in 2.0.77, so at the GA pin the honest
+// in every 2.1.x one -- and NEVER in 2.0.77, so at the 2.0.77 pin the honest
 // answer is 0 and this test would be asserting that a mechanism it cannot
 // reach still works. It deliberately does not compare against a committed
 // census.json: it takes its own and reads the row out of it. See

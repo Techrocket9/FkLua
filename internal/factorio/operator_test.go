@@ -11,7 +11,7 @@ import (
 
 // Class operators: `obj[k]`, `#obj` and `obj(...)`.
 //
-// Eleven of them across seven classes at the 2.0.77 GA pin, nine across six at
+// Eleven of them across seven classes at the 2.0.77 pin, nine across six at
 // 2.1.x (which retired LuaFluidBox's pair in the fluid rework), and until
 // 2026-08-03 the generators did not read Class.Operators at all -- so they were
 // not bound, not DEFERRED, and not counted. That last word is what these tests
@@ -76,6 +76,14 @@ var operatorsByVersion = map[string]map[string][]string{
 		"LuaTransportLine":   {"index", "length"},
 	},
 	"2.1.20": {
+		"LuaChunkIterator":   {"call"},
+		"LuaCustomTable":     {"index", "length"},
+		"LuaGuiElement":      {"index"},
+		"LuaInventory":       {"index", "length"},
+		"LuaRandomGenerator": {"call"},
+		"LuaTransportLine":   {"index", "length"},
+	},
+	"2.1.24": {
 		"LuaChunkIterator":   {"call"},
 		"LuaCustomTable":     {"index", "length"},
 		"LuaGuiElement":      {"index"},

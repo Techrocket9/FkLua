@@ -79,7 +79,7 @@ with the key naming the artifact the second line wrote:
 
 ```toml
 [fklua]
-api = "2.0.77"
+api = "2.1.24"
 data_module = "my-mod-data.wasm"
 ```
 
@@ -96,7 +96,7 @@ with:
 
 ```toml
 [fklua]
-api = "2.0.77"
+api = "2.1.24"
 data_module = "guest/rust/target/wasm32-unknown-unknown/release/my_mod_data.wasm"
 ```
 

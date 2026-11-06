@@ -26,7 +26,7 @@ The one file that describes the project. `fklua mod` and `fklua compile` read it
 | Key | What it is |
 |---|---|
 | `name`, `version`, `title`, `author`, `description` | the mod's identity, in Factorio's terms |
-| `factorio_version` | the engine series the mod declares: two dot-separated numbers, such as `2.0`. Defaults to the API pin's `major.minor`; override it when the pin and the engine you target differ. A value naming a build rather than a series, `2.0.77` where `2.0` belongs, is refused at package time with the series to write instead, because Factorio refuses the mod itself at game start |
+| `factorio_version` | the engine series the mod declares: two dot-separated numbers, such as `2.1`. Defaults to the major.minor of FkLua's DEFAULT API pin (`2.1` today), not of this project's `api`; set it when the two differ, as a project pinned to `2.0.77` must. A value naming a build rather than a series, `2.0.77` where `2.0` belongs, is refused at package time with the series to write instead, because Factorio refuses the mod itself at game start |
 | `data` | a directory copied into the packaged mod: `data.lua`, `prototypes/`, `graphics/`, `locale/`. The default for `fklua mod --include` |
 | `dependencies` | passed to `info.json` verbatim, in Factorio's own syntax: `"base >= 2.0.0"` required, `"? other"` optional, `"! other"` conflicts. `fklua mod --dependency DEP` overrides it |
 
@@ -209,7 +209,7 @@ These are the rules `effective` applies, and they are the rules `fklua mod` appl
 |---|---|
 | `title` | the mod's `name` |
 | `author` | `"unknown"` |
-| `factorio_version` | the default API pin's `major.minor` series. It is the DEFAULT pin's series and not this project's: `api` never reaches this field, so a project pinned at a 2.1.x description with no `factorio_version` key still declares `2.0`. Set the key when the two axes come apart |
+| `factorio_version` | the default API pin's `major.minor` series. It is the DEFAULT pin's series and not this project's: `api` never reaches this field, so a project pinned at a 2.0.x description with no `factorio_version` key still declares `2.1`. Set the key when the two axes come apart |
 | `lang` | `["go"]` |
 | `gc` | `"leaking"` |
 | everything else | no default; the effective value is the raw one |

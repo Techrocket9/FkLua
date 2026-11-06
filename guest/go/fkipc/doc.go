@@ -143,9 +143,10 @@
 // THE FLOOR IS ABOUT THE ENGINE AND NOT ABOUT THE API PIN. Those are separate
 // axes: the pin is a build-time choice of runtime-api.json and defaults to the
 // general-availability release, while this reads helpers.game_version at RUN
-// TIME. Every member this package calls exists in the 2.0.77 description, so a
-// mod pinned to GA gets the whole library on a newer engine -- no rebuild, no
-// repin, no second build of the guest.
+// TIME. Every member this package calls exists in the 2.0.77 description and in
+// every 2.1.x one, so a mod pinned to any of them gets the whole library on an
+// engine at or above the floor -- no rebuild, no repin, no second build of the
+// guest.
 //
 // Everything else the probe found is baked into the constants rather than
 // argued here: the frame ceiling clears the inbound wall (4,000 B arrives,

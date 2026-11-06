@@ -251,6 +251,13 @@ func TestGeneratedTableLoadsAndDispatches(t *testing.T) {
 	if !ok {
 		t.Skip("this API has no LuaConstantCombinatorControlBehavior::remove_section")
 	}
+	// The argument's WIDTH is the description's and not this test's: 2.0.77
+	// declares the section index as uint32 and every 2.1.x description as the
+	// concept LogisticSectionIndex, which is uint8. Read here by following the
+	// alias to its builtin, never through the generator, so argsize is still
+	// checked against something the code under test did not compute.
+	argWidth := removeSectionArgWidth(t, a)
+	store := map[int]string{1: "st8", 4: "st32"}[argWidth]
 
 	got := runMarshalWithFile(t, "fk_api_gen.lua", src, fmt.Sprintf(`
 local API = require("fk_api_gen")
@@ -274,22 +281,52 @@ local behaviour = { valid = true,
   remove_section = function(i) seen = i return i == 3 end }
 local c = API.members[%d]
 print("call argsize " .. c.argsize .. " retsize " .. c.retsize)
-IO.st32(2048 + c.sig.args[1].at, 3)
+IO.%s(2048 + c.sig.args[1].at, 3)
 print("call status " .. H.call(H.transient(behaviour), %d, 2048, 4096))
 print("guest passed " .. tostring(seen) .. ", got " .. tostring(IO.ld8(4096) ~= 0))
-`, getID, getID, callID, callID))
+`, getID, getID, callID, store, callID))
 
 	want := fmt.Sprintf("version %s api %d\nmembers %d\n",
 		a.ApplicationVersion, a.APIVersion, len(r.Members)) +
 		"get retsize 1\n" +
 		"get status 0\n" +
 		"get value true\n" +
-		"call argsize 4 retsize 1\n" +
+		fmt.Sprintf("call argsize %d retsize 1\n", argWidth) +
 		"call status 0\n" +
 		"guest passed 3, got true"
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+// removeSectionArgWidth is the byte width of remove_section's one parameter,
+// resolved from the description alone: a builtin name, or a concept whose type
+// is one.
+func removeSectionArgWidth(t *testing.T, a *API) int {
+	t.Helper()
+	widths := map[string]int{"uint8": 1, "uint32": 4}
+	for _, cl := range a.Classes {
+		if cl.Name != "LuaConstantCombinatorControlBehavior" {
+			continue
+		}
+		for _, m := range cl.Methods {
+			if m.Name != "remove_section" || len(m.Parameters) != 1 {
+				continue
+			}
+			name := m.Parameters[0].Type.Name
+			for _, c := range a.Concepts {
+				if c.Name == name && c.Type.Name != "" {
+					name = c.Type.Name
+				}
+			}
+			if w, ok := widths[name]; ok {
+				return w
+			}
+			t.Fatalf("remove_section's parameter resolves to %q, which this test has no width for", name)
+		}
+	}
+	t.Fatal("no LuaConstantCombinatorControlBehavior::remove_section with one parameter")
+	return 0
 }
 
 // The generated source has to be parseable Lua before anything else is true of

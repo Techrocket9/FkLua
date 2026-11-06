@@ -233,7 +233,7 @@ func TestANestedArrayAndADictionaryOfArraysCross(t *testing.T) {
 // AGAINST shapeAPIVersion RATHER THAN THE PIN, because the whole story is a 2.1
 // one: the `nil` field that cost the attribute and the
 // dictionary-of-dictionaries that then deferred it are both shapes 2.0.77 does
-// not have. UtilityConstants binds at the GA pin too, and trivially -- it has
+// not have. UtilityConstants binds at the 2.0.77 pin too, and trivially -- it has
 // neither field there, so asserting it against 2.0.77 would assert nothing.
 // See shapeAPIVersion.
 func TestUtilityConstantsBindsAndReachesItsNestedLeaf(t *testing.T) {

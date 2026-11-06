@@ -24,7 +24,7 @@ Reading a map is fine. Writing to the world in the order you happened to read on
 
 ## An id reaching `fk.call` has to be a compile-time constant
 
-A mod ships the members it calls, not the API. `fklua mod` scans the compiled guest for the constant ids reaching `fk.call`, `fk.call_typed`, `fk.subscribe` and `fk.define`, and prunes the packaged tables to what it found. A one-member guest ships a 646-byte member table where the full one is about 840 KB.
+A mod ships the members it calls, not the API. `fklua mod` scans the compiled guest for the constant ids reaching `fk.call`, `fk.call_typed`, `fk.subscribe` and `fk.define`, and prunes the packaged tables to what it found. A one-member guest ships a 648-byte member table where the full one is about 1 MB.
 
 An id the scan cannot prove constant makes it ship the whole table instead: a bigger mod, never a broken one, and the build output says so in as many words. The usual way to lose it is subscribing in a loop over a slice of event ids, or computing one. Write the calls out.
 
@@ -57,6 +57,6 @@ The whole picture, the tuning knobs and the opt-out are in [memory.md](memory.md
 Not everything above can be checked, but some of it is:
 
 - **Determinism across two runs** is scriptable, and it is the cheapest real check there is: create a map, benchmark it twice, compare Factorio's own script checksums. The recipe is in [verifying.md](verifying.md).
-- **Pruning** is reported at package time. If the build says it is shipping all 219 event descriptors, an id was not constant.
+- **Pruning** is reported at package time. If the build says it is shipping all of the pin's event descriptors (229 at the default 2.1.24 pin), an id was not constant.
 - **A guest built against different bindings** than the tables packaged beside it is refused (the API pin) or named on stderr (the ABI signature). See [factorio-api.md](factorio-api.md).
 - **Lua's own limits** are checked when you package rather than left for your users. See [lua-limits.md](lua-limits.md).

@@ -288,9 +288,11 @@ func effectiveBlock(p factorio.Project, gc luagen.GCMode) metaProject {
 	// this comment. runMod initializes info.FactorioVersion to
 	// factorio.DefaultFactorioVersion and overrides it ONLY from the manifest's
 	// own `factorio_version` key or from --factorio-version; the project's `api`
-	// pin never reaches it. So a project pinning a 2.1.x description with no
-	// factorio_version key still declares "2.0", and its mod is refused by a 2.1
-	// engine at game start. That is a real trap, and this command reports ACTUAL
+	// pin never reaches it. So a project pinning a description from another
+	// series with no factorio_version key still declares the default's series --
+	// a 2.0.77 pin under a 2.1.x default declares "2.1" -- and its mod is refused
+	// by an engine of the series it was pinned for, at game start. That is a real
+	// trap, and this command reports ACTUAL
 	// BEHAVIOUR rather than the behaviour the two axes suggest -- a driver that
 	// wants to warn about the pairing needs the value the mod will really carry.
 	if m.FactorioVersion == "" {

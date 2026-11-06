@@ -451,7 +451,7 @@ type describedCollapse struct {
 	// the backends spell it. It is half the key, and the half whose absence
 	// made the tier-2 assertion answerable by a neighbour: ident, declared type
 	// and class together are shared by 129 of the 253 derived positions at the
-	// GA pin, so a note given the clause wrongly on a returns-only struct was
+	// 2.0.77 pin, so a note given the clause wrongly on a returns-only struct was
 	// answered by a genuine one on a variant-group method's argument struct.
 	// See noteKey.
 	owner string
@@ -816,7 +816,7 @@ func (n emittedNote) key() string {
 //
 // THE OWNER IS IN THE KEY BECAUSE THE CONTENT ALONE IS NOT A POSITION. A note's
 // identifier, declared type and class are shared very widely -- 129 of the 253
-// derived positions at the GA pin share all three with one of the three genuine
+// derived positions at the 2.0.77 pin share all three with one of the three genuine
 // tier-2 positions -- so a key without an owner turns a set of POSITIONS into a
 // set of TEXTS, and the tier-2 assertion's false-positive half becomes
 // unenforceable: a clause added wrongly to `ItemIDAndQualityIDPair.quality`, a

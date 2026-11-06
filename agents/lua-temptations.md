@@ -66,7 +66,7 @@ The hook dispatches with no arguments, so a guest cannot read `mod_changes` (whi
 
 The check's surface is members, events and the concepts reachable from their signatures. A guest's define reads (`fk.define`, one dense id per dotted path) are collected nowhere, so a guest reading a define that the target version removes gets a clean verdict; worse, `Complete` is computed from members and events alone, so a defines-only guest reports a complete scan having seen nothing. The diff underneath could not answer even if asked: it compares only top-level define group names, never values or subkeys, and measured between 2.0.77 and 2.1.16 it reports one breaking define (a group with no leaves that no guest can read) while twenty leaf paths were removed. The runtime failure is soft, one log line and a zero value forever, which is exactly the class of silent wrongness the check exists to catch. And because 1,108 of 1,117 surviving paths change id between those pins, the cross-reference must key on dotted paths resolved through the from-version's define report, never on ids.
 
-The wiring: a leaf-aware define diff sharing the same prefix walk the accessor generator uses (so the diff and the pruner agree by construction); `GuestSurface` gains the define paths and a third completeness term; the check gains a define match kind and the verdict document a define count in its pinned key set. A ride-along found in the same file: the surface's event loop never collects concept names from event payload fields, where the member loop does. No payload concept happens to move between the committed pins, but the omission is structural rather than latent: at the GA pin five concepts are reachable only through an event payload, with no callable member ever surfacing them, so a guest depending on one had no cross-reference at all. Cost S in total.
+The wiring: a leaf-aware define diff sharing the same prefix walk the accessor generator uses (so the diff and the pruner agree by construction); `GuestSurface` gains the define paths and a third completeness term; the check gains a define match kind and the verdict document a define count in its pinned key set. A ride-along found in the same file: the surface's event loop never collects concept names from event payload fields, where the member loop does. No payload concept happens to move between the committed pins, but the omission is structural rather than latent: at the 2.0.77 pin five concepts are reachable only through an event payload, with no callable member ever surfacing them, so a guest depending on one had no cross-reference at all. Cost S in total.
 
 ## The temptations, ranked
 
@@ -268,7 +268,7 @@ into their rounds:
   a data guest's `mod-data` prototype is accepted, lands in the dump, and is
   read back at runtime by a control guest in the same session.
 - **Round 4's bulk attribute read is SHIPPED** as `fk.bulk_get`, both languages,
-  1,533 bindings at the GA pin and one per eligible member. It is a NEW IMPORT
+  1,533 bindings at the 2.0.77 pin and one per eligible member. It is a NEW IMPORT
   rather than a member kind, which is the third answer in this file's own
   three-way frame -- widen when the information belongs to the same call, a
   second import when the two forms decode different blocks, a kind when the host

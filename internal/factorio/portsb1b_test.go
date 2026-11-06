@@ -18,11 +18,23 @@ func genBoth(t *testing.T) (*API, Report, GoBindings, RustBindings) {
 	return a, r, g, rb
 }
 
-// G1 -- a method returning more than one value. Thirteen at this pin, and one
-// of them is the ONLY way to arm on_object_destroyed, so nixie-tubes shipped a
+// G1 -- a method returning more than one value. Thirteen at 2.0.77 and fourteen
+// at 2.1.24 (LuaTransportLine::get_item_position), and one of them is the ONLY
+// way to arm on_object_destroyed, so nixie-tubes shipped a
 // hand-written binding into the generated package to have it at all.
 func TestMultipleReturnValuesAreEmittedInBothLanguages(t *testing.T) {
-	_, r, g, rb := genBoth(t)
+	a, r, g, rb := genBoth(t)
+	// The population is the DESCRIPTION's -- every method declaring two or more
+	// return values -- and not a number written here, which went stale the day
+	// the default pin moved.
+	declared := 0
+	for _, c := range a.Classes {
+		for _, m := range c.Methods {
+			if len(m.ReturnValues) >= 2 {
+				declared++
+			}
+		}
+	}
 	multi := 0
 	for _, m := range r.Members {
 		if len(m.Rets) < 2 {
@@ -37,8 +49,9 @@ func TestMultipleReturnValuesAreEmittedInBothLanguages(t *testing.T) {
 			t.Errorf("Rust still defers %s::%s", m.Class, m.Name)
 		}
 	}
-	if multi != 13 {
-		t.Errorf("%d multi-return members at this pin, expected 13", multi)
+	if multi != declared || declared == 0 {
+		t.Errorf("%d multi-return members at this pin, and the description declares %d",
+			multi, declared)
 	}
 	for _, why := range []map[string]int{g.DeferredBy, rb.DeferredBy} {
 		if n := why["multiple return values"]; n != 0 {

@@ -19,7 +19,7 @@ Two version axes, and only one of them moves:
 
 Two consequences, and both have already cost something:
 
-- **The default pin is the general-availability release** (2.0.77), not the newest description committed. A default is what an author who pinned nothing ships to players. This machine's in-game gates run on a 2.1.20 install and package with `--factorio-version 2.1` for that reason — see `scripts/lib-engine.sh`, which is the one place that derivation lives.
+- **The default pin is the general-availability release** (2.1.24 since 2026-11-05, when stable moved to the 2.1 series; 2.0.77 before that), not the newest description committed. A default is what an author who pinned nothing ships to players. This machine's in-game gates package with the INSTALLED engine's series whatever the pin is — see `scripts/lib-engine.sh`, which is the one place that derivation lives — and they ran on the 2.1.24 install the day the pin moved.
 - **A run-time floor is not a pin floor.** fkipc requires an engine of 2.1.14 or newer and gates on `helpers.game_version`, so a GA-pinned mod gets the whole library on a newer engine with no rebuild and no repin. Every member it calls is in the 2.0.77 description.
 
 **And moving the pin is a BUILD-IDENTITY change, not only a bindings change.** `fklua mod` folds the resolved `--api` version into the build stamp a save records (`cmd/fklua`'s `buildID`; the construction is in [`agents/guests.md`](agents/guests.md), "Recompiling, and `fk_migrate`"), so repackaging the same wasm against a new pin fails `same_build()` and the load takes the rebuilt-guest path. That is the point rather than a cost: member, event and define ids are dense sorted indices over one version's set, so a pin bump shifts them wholesale, and the packaged tables reach into the guest heap — a cached buffer's size comes out of the packaged event table, a cached define id is a per-build number. Before 2026-08-07 the stamp hashed the wasm alone and those two packages shared one identity. **So a pin bump costs a guest its heap, exactly as a recompile does** — which is what `api diff`'s classification is for, and one more reason to bump deliberately rather than incidentally.
@@ -406,11 +406,13 @@ make test                                    # sdk/go and cargo legs included
 
 **Expect host-side tests to fail for a reason that is not a defect.** A handful assert properties of a SHAPE that exists in one description — the `nil`-typed concept, a three-level nested container, the class-operator table. They pass at whichever pin happens to have the shape and fail at the other, which is a coupling rather than a property. The fix is for a shape test to name its own description: `internal/factorio`'s `loadShapeAPI` and `shapeAPIVersion` exist for that, and `operatorsByVersion` is the per-pin table for the one set that really did move between descriptions.
 
-**7. And when GA itself moves to 2.1.x**, this whole recipe applies and **fkipc needs nothing**. Its floor is on the ENGINE and is read from `helpers.game_version` at run time; it has never been a statement about the pin, and `MinEngineVersion` does not move because a description did.
+**The 2.0.77 → 2.1.24 move found five such couplings, and each was a NUMBER written into a test rather than a shape.** A dispatch test hard-coded a 4-byte argument for `remove_section` (2.1 types the index as `LogisticSectionIndex`, a `uint8`); the index-verdict gate called `LuaFluidBox`'s row stale because 2.1 retired its operator, though a project pinned to 2.0.77 still reads it; the index-assign test needed that same operator; the multi-return test expected 13 (2.1.24 has 14); the docs test expected `add`'s 21 variant groups (22). Each now DERIVES its number from the description, or, where the shape exists in one description only, names that description, which is the cure step 6 already prescribes. And `internal/guest`'s `api check` fixture needed a member the new default has and 2.1.12 lacks, which its own failure message said in as many words.
+
+**7. And when GA itself moves to 2.1.x**, this whole recipe applies and **fkipc needs nothing**. It did on 2026-11-05, when 2.1.24 became the stable release, and the pin followed it. Its floor is on the ENGINE and is read from `helpers.game_version` at run time; it has never been a statement about the pin, and `MinEngineVersion` does not move because a description did.
 
 ## Moving the current 2.1.x, which is NOT moving the default pin
 
-**A much smaller migration than the one above, and the one this repo actually performs often**: the default stays at GA and a newer 2.1.x becomes the description the project OFFERS as "2.1.x" and the one a shape test names. Distilled from 2.1.14 → 2.1.16 on 2026-08-24.
+**A much smaller migration than the one above, and the one this repo actually performs often**: the default stays at GA and a newer 2.1.x becomes the description the project OFFERS as "2.1.x" and the one a shape test names. Distilled from 2.1.14 → 2.1.16 on 2026-08-24. **Since GA moved to the 2.1 series on 2026-11-05, a newer STABLE 2.1.x is a default-pin move (step 7 above) rather than this**; this section is what a newer BETA is, a release published ahead of stable, until stable reaches it. The role it moves (the offered version and `shapeAPIVersion`) is the newest description committed, whichever release that is.
 
 Almost nothing that makes a pin move expensive applies. `DefaultAPIVersion` does not change, no committed binding is regenerated, no guest loses its heap, no `info.json` series moves, and no downstream project is affected unless it chose to pin. What moves is a **role**: which committed description a reader is pointed at, and which one the tests that are about a 2.1 SHAPE load.
 
@@ -467,7 +469,7 @@ Two things about the PRs it opens are worth knowing before reviewing one. **ci.y
 ## `fklua docs` — **built**
 
 ```sh
-fklua docs --lang go   -o docs/     # 4257 members, ~770 KB of markdown at the 2.0.77 pin
+fklua docs --lang go   -o docs/     # 4915 members, ~1.1 MB of markdown at the 2.1.24 pin
 fklua docs --lang rust -o docs/
 ```
 

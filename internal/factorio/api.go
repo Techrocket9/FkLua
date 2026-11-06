@@ -81,7 +81,7 @@ type Operator struct {
 func (o Operator) IsAttribute() bool { return o.ReadType != nil }
 
 // Members is every callable and readable thing on a class. It is the number the
-// project quotes -- 3790 across 157 classes at the 2.1.20 pin -- and operators
+// project quotes -- 3816 across 157 classes at the 2.1.24 pin -- and operators
 // are deliberately excluded from it, matching how Factorio's own documentation
 // counts.
 func (c Class) Members() int { return len(c.Methods) + len(c.Attributes) }
@@ -415,8 +415,9 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 // IT IS THE GENERAL-AVAILABILITY RELEASE, NOT THE NEWEST DESCRIPTION IN api/
 // AND NOT WHAT IS INSTALLED ON THE MACHINE THAT BUILT THIS. A default is what
 // a mod author who has pinned nothing ships to players, and players are on
-// stable. 2.1.x is available to anyone who wants it -- `api = "2.1.20"` in
-// fklua.toml, or `--api=2.1.20` -- and every description under api/ is
+// stable. Stable moved to the 2.1 series with 2.1.24, which is why this is no
+// longer 2.0.77; a mod for players still on 2.0 pins it -- `api = "2.0.77"` in
+// fklua.toml, or `--api=2.0.77` -- and every description under api/ is
 // committed precisely so that choice needs neither the game nor the network.
 //
 // THIS IS A BUILD-TIME AXIS AND IT IS NOT THE ENGINE A MOD RUNS ON. The two
@@ -426,8 +427,8 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 //     table come from. It is fixed when the mod is built.
 //   - The ENGINE is whatever Factorio the player launches. A guest that wants
 //     to know reads it at RUN TIME (helpers.game_version), which is what
-//     fkipc's version gate does -- so a GA-pinned mod gets the full IPC
-//     library on a 2.1.20 engine with no rebuild and no repin.
+//     fkipc's version gate does -- so a mod pinned to 2.0.77 gets the full
+//     IPC library on a 2.1.14+ engine with no rebuild and no repin.
 //
 // The one place the two axes MEET is info.json's factorio_version, which is a
 // statement about the ENGINE and defaults to this constant's series only
@@ -435,7 +436,7 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 // overridable -- `[mod] factorio_version` and `--factorio-version` -- and every
 // in-game gate in scripts/ overrides it with the INSTALLED engine's series, for
 // the reason DefaultFactorioVersion's own comment gives.
-const DefaultAPIVersion = "2.0.77"
+const DefaultAPIVersion = "2.1.24"
 
 // ParseAPI decodes a runtime-api.json.
 //

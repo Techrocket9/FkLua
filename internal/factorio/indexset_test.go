@@ -36,29 +36,36 @@ import (
 // is the whole question -- "no entry" cannot mean "not writable", because that
 // is indistinguishable from "nobody looked", which is exactly how eleven class
 // operators stayed invisible for five milestones.
+//
+// OVER EVERY COMMITTED DESCRIPTION, not only the default pin, because the table
+// serves every description a project can pin: LuaFluidBox's row is a verdict on
+// 2.0.77, where the class has an index operator, and 2.1 took the operator
+// away. A row is stale only when NO committed description declares one.
 func TestEveryIndexOperatorHasAWriteVerdict(t *testing.T) {
-	a := loadTestAPI(t)
 	seen := map[string]bool{}
-	for _, c := range a.Classes {
-		for _, o := range c.Operators {
-			if o.Name != "index" {
-				continue
-			}
-			seen[c.Name] = true
-			if _, ok := indexWriteHalf[c.Name]; !ok {
-				t.Errorf("%s declares an index operator and indexWriteHalf has no "+
-					"row for it. Decide whether `%s[k] = v` is legal -- the "+
-					"description says so in PROSE if at all, on the operator or on "+
-					"the members that yield the class -- and write the row down "+
-					"with the sentence you read.", c.Name, lowerFirstWord(c.Name))
+	for _, v := range committedVersions(t) {
+		a := loadShapeAPI(t, v)
+		for _, c := range a.Classes {
+			for _, o := range c.Operators {
+				if o.Name != "index" {
+					continue
+				}
+				seen[c.Name] = true
+				if _, ok := indexWriteHalf[c.Name]; !ok {
+					t.Errorf("%s: %s declares an index operator and indexWriteHalf has "+
+						"no row for it. Decide whether `%s[k] = v` is legal -- the "+
+						"description says so in PROSE if at all, on the operator or on "+
+						"the members that yield the class -- and write the row down "+
+						"with the sentence you read.", v, c.Name, lowerFirstWord(c.Name))
+				}
 			}
 		}
 	}
 	for cls := range indexWriteHalf {
 		if !seen[cls] {
-			t.Errorf("indexWriteHalf has a row for %s and the %s pin declares no "+
-				"index operator on it: a stale row is a claim about a class that "+
-				"is not there", cls, DefaultAPIVersion)
+			t.Errorf("indexWriteHalf has a row for %s and no committed description "+
+				"declares an index operator on it: a stale row is a claim about a "+
+				"class that is not there", cls)
 		}
 	}
 }
@@ -195,8 +202,14 @@ func TestTheIndexSetKindMatchesTheABI(t *testing.T) {
 //   - an ABSENT value reaching the metamethod as nil, which is LuaFluidBox's
 //     documented clear and needs no code of its own: M.call trims to the last
 //     argument present and `local k, v = ...` does the rest.
+//
+// IT NAMES 2.0.77 RATHER THAN THE DEFAULT PIN, because the last leg needs a
+// setter whose VALUE is optional and LuaFluidBox's is the only one: its index
+// operator exists at 2.0.77 and 2.1 retired it. The leg is a property of the
+// ABI and not of the class, so the shape is loaded from the description that
+// has it -- loadShapeAPI's reason, pointed at the older series.
 func TestAnIndexAssignDispatches(t *testing.T) {
-	a := loadTestAPI(t)
+	a := loadShapeAPI(t, "2.0.77")
 	r := GenerateMembers(a)
 	src, err := r.LuaSource(a)
 	if err != nil {

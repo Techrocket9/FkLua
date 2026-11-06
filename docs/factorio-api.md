@@ -4,7 +4,7 @@ How the generated bindings reach Factorio's runtime API, what a mod actually shi
 
 ## Coverage
 
-The whole runtime API is bound in both languages, member id for member id. Against the default **2.0.77** API pin: 4,257 of 4,262 members, 219 event payload structs (every event the description declares), 1,331 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,137 `defines` accessors, 11 class operators plus the write half of the two that have one, the three global functions, and 240 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Five members are deferred, all of them taking a Lua function as an argument, which a compiled guest has no way to supply. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
+The whole runtime API is bound in both languages, member id for member id. Against the default **2.1.24** API pin: 4,915 of 4,920 members, 229 event payload structs (every event the description declares), 1,533 inherited forwarders (so `LuaEntity` has `LuaControl`'s `position` and `get_inventory`), 1,187 `defines` accessors, 9 class operators plus the write half of the one that has one, the three global functions, and 282 `<Name>Into(dst, ...)` variants that let an array return land in a buffer you already own. Five members are deferred, all of them taking a Lua function as an argument, which a compiled guest has no way to supply. The counts are committed data in `api/<version>/census.json`, regenerated with the bindings and gated by `gen-bindings --check`; read them from there rather than from this page.
 
 ## One import, not thousands
 
@@ -14,7 +14,7 @@ A host call costs about 12.5 µs, cross-confirmed over 2,487 real calls in game.
 
 ## What a mod ships
 
-A mod ships the members it calls, not the API. `fklua mod` scans the compiled guest for the constant ids reaching `fk.call` and `fk.subscribe` and prunes the packaged member and event tables: a one-member guest ships a 646-byte member table where the full one is about 840 KB. An id the scan cannot prove constant ships the whole table instead (a bigger mod, never a broken one), and the build output says so. Subscribing in a loop, or computing an event id, is the usual way to lose the pruning.
+A mod ships the members it calls, not the API. `fklua mod` scans the compiled guest for the constant ids reaching `fk.call` and `fk.subscribe` and prunes the packaged member and event tables: a one-member guest ships a 648-byte member table where the full one is about 1 MB. An id the scan cannot prove constant ships the whole table instead (a bigger mod, never a broken one), and the build output says so. Subscribing in a loop, or computing an event id, is the usual way to lose the pruning.
 
 ## Handles
 
@@ -448,9 +448,9 @@ The payload arrives at `fk_on_call` as the single element of `argp`'s array, exa
 
 The **API pin** is the `runtime-api.json` version the bindings and the packaged member table come from; the **engine** is the Factorio actually running, which a guest can ask about with `helpers.game_version`. They meet in exactly one place: the packaged `info.json`'s `factorio_version`, which defaults to the pin's `major.minor` (a 2.0 engine does not load a mod declaring 2.1, and a 2.1 engine does not load one declaring 2.0) and can be overridden with `[mod] factorio_version` in `fklua.toml` or `--factorio-version`. Either override takes a series and not a build: `2.0.77` there is refused at package time, naming `2.0` as the value to write, because the game refuses a mod declaring a patch release at game start.
 
-The default pin is the general-availability release, **2.0.77**, because a default is what a mod author who has pinned nothing ships to players, and players are on stable. Everything in the FkLua repository builds and runs against a stock 2.0.x install; the in-game test scripts read the installed engine's version and package for it. Two capabilities need more:
+The default pin is the general-availability release, **2.1.24**, because a default is what a mod author who has pinned nothing ships to players, and players are on stable. Everything in the FkLua repository builds and runs against a stock install of the stable release; the in-game test scripts read the installed engine's version and package for it, through `FACTORIO_BIN` or the default Steam path. Two cases need more:
 
-- **2.1.x API surface** is one line away: `api = "2.1.20"` in `fklua.toml` (or `--api=2.1.20`), then `fklua gen-bindings && fklua lock`. Every supported description is committed, so changing the pin needs neither the game nor the network; at 2.1.20 the bindings cover 4,874 of 4,879 members with 226 events. On Steam, 2.1.x is the `2.1.20` entry under the game's Betas tab; the in-game test scripts pick the engine up through `FACTORIO_BIN` or the default Steam path.
+- **A mod for players still on 2.0** pins the 2.0 description and declares the 2.0 series: `api = "2.0.77"` and `factorio_version = "2.0"` in `fklua.toml` (or `--api=2.0.77 --factorio-version 2.0`), then `fklua gen-bindings && fklua lock`. Both keys are needed, because the series defaults to the default pin's and not to the project's. Every supported description is committed, so changing the pin needs neither the game nor the network; at 2.0.77 the bindings cover 4,268 of 4,273 members with 219 events.
 - **FkIPC** requires a 2.1.14 or newer engine and is inert below it; see [its README](../guest/go/fkipc/README.md).
 
 ## A new Factorio version

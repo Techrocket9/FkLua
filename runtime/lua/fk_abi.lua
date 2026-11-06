@@ -1532,7 +1532,7 @@ end
 -- ordinary i32 constant at the call site, so UsedMembers keeps working -- and
 -- the first half of that argument holds here while the second decides the shape:
 -- as a kind this would need its own member id per eligible attribute, +1,533 at
--- the GA pin, a third of the member table again. As an import the member id is
+-- the 2.0.77 pin, a third of the member table again. As an import the member id is
 -- the ORDINARY getter's, it is operand 0 of a call to an import, and
 -- internal/factorio/used.go's scan is the same scan with one more name in it.
 -- Passing the id inside the ARGUMENT BLOCK was the third option and it silently

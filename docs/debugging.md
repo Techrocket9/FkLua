@@ -106,7 +106,7 @@ Read `factorio-current.log` in your Factorio user directory. Three failures acco
 
 - **A pin mismatch.** A guest built against one `runtime-api.json` packaged with tables from another is refused at package time, naming both versions. Regenerate the bindings, or set the pin in `fklua.toml`.
 - **A stale wasm.** The guest was built before the last `gen-bindings` at the same pin. The packager names it on stderr with both digests and the repair; the bindings and the wasm are one pair.
-- **An engine mismatch.** `info.json`'s `factorio_version` is a claim about the ENGINE, and a 2.1 engine refuses a mod declaring 2.0 outright at game start. It defaults from the API pin, and `--factorio-version` overrides it.
+- **An engine mismatch.** `info.json`'s `factorio_version` is a claim about the ENGINE, and a 2.1 engine refuses a mod declaring 2.0 outright at game start. It defaults to the series of FkLua's default API pin rather than your project's, so a project pinned to 2.0.77 sets `factorio_version = "2.0"` itself; `--factorio-version` overrides it.
 
 ## What is out of scope, and why
 

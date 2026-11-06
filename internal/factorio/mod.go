@@ -48,7 +48,7 @@ type Info struct {
 // that is this repo's own named failure shape being avoided rather than a
 // tidy-up: two constants that must agree about one manifest key is exactly what
 // `gc` was, and then `api`, and both times the two disagreed for milestones
-// with nothing to say so. A mod whose bindings come from a 2.1.20 description
+// with nothing to say so. A mod whose bindings come from a 2.1.24 description
 // and whose info.json declares "2.0" is refused by the loader at game start —
 // the worst place to learn it — and the reverse pairing loads and then calls
 // members by ids the running engine numbers differently. One source, so the
@@ -59,20 +59,22 @@ type Info struct {
 // will run on, and the pin is a statement about the DESCRIPTION it was built
 // from; they are separate axes, and the series is the default only because a
 // mod built against a description usually runs on that description's series.
-// They come apart in exactly the case this repo is in: the committed default is
-// GA (2.0.x) and the machine that runs the in-game gates has 2.1.20 installed,
-// which REFUSES a mod declaring "2.0" -- "Incompatible Factorio version
-// (current: 2.1, required: 2.0)", at game start, which is where every one of
-// those gates would have died. So the key is overridable, by `[mod]
+// They came apart in exactly the case this repo was in for months: the
+// committed default was GA (2.0.x) and the machine that runs the in-game gates
+// had a 2.1 beta installed, which REFUSES a mod declaring "2.0" --
+// "Incompatible Factorio version (current: 2.1, required: 2.0)", at game
+// start, which is where every one of those gates would have died. GA moved to
+// 2.1 with 2.1.24 and the two agree again, until the next beta or a project
+// pinning 2.0.77 for players still on it. So the key is overridable, by `[mod]
 // factorio_version` and by `--factorio-version`, and every script under
 // scripts/ passes the INSTALLED engine's series rather than inheriting this.
 //
 // A mod author who ships to players wants this default and should not think
-// about it. A 2.1 engine loads a mod declaring 2.1 only, so a 2.0-declared mod
-// with a 2.0 pin is the GA shipping shape and is what `fklua init` writes.
+// about it. A 2.1 engine loads a mod declaring 2.1 only, so a 2.1-declared mod
+// with a 2.1.x pin is the GA shipping shape and is what `fklua init` writes.
 var DefaultFactorioVersion = majorMinor(DefaultAPIVersion)
 
-// majorMinor takes the "2.1" series out of a "2.1.20" build id. A string with
+// majorMinor takes the "2.1" series out of a "2.1.24" build id. A string with
 // fewer than two dotted components is returned unchanged: there is no series to
 // recover, and inventing one would be a guess.
 //

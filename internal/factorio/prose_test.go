@@ -1,6 +1,7 @@
 package factorio
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,7 @@ func TestTheDescriptionsProseReachesBothBindings(t *testing.T) {
 					withDoc++
 				}
 			}
-			// 3,566 of 4,262 at the GA pin. The floor is well under that and is
+			// 3,566 of 4,262 at the 2.0.77 pin. The floor is well under that and is
 			// there to catch a switch that stopped matching, not to pin a
 			// number the description owns: a pin is free to document fewer
 			// members and the count moves in the census, not here.
@@ -139,13 +140,27 @@ func TestDocsRenderParametersAndVariantGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := Docs(a, r, ev, DocOptions{Lang: "go", Names: g.Names})
+	// The group COUNT is the description's (21 at 2.0.77, 22 at 2.1.24), read
+	// from it rather than written here, so the line still checks the renderer
+	// at whatever the pin is.
+	groups := 0
+	for _, c := range a.Classes {
+		for _, m := range c.Methods {
+			if c.Name == "LuaGuiElement" && m.Name == "add" {
+				groups = len(m.VariantGroups)
+			}
+		}
+	}
+	if groups == 0 {
+		t.Fatal("LuaGuiElement::add declares no variant groups at this pin")
+	}
 	for _, want := range []string{
 		// A plain parameter table, with the DESCRIPTION's own type spelling.
 		"| `type` | `GuiElementType` | required |",
 		"| `style` | `string` | optional |",
 		// The shared/variant split, named the way the bindings name it.
 		"Shared parameters:",
-		"Variant groups (21), selected by the table's discriminant.",
+		fmt.Sprintf("Variant groups (%d), selected by the table's discriminant.", groups),
 		// A field that exists in no generated struct in either language.
 		"| `mouse_button_filter` | `MouseButtonFlags` | optional |",
 	} {
